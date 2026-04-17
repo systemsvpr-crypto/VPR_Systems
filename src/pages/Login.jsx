@@ -75,21 +75,12 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex bg-white">
-      {/* Left Side - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 bg-slate-50 items-center justify-center relative overflow-hidden p-12">
-        <div className="absolute inset-0 z-0 opacity-[0.03]"
-          style={{ backgroundImage: 'radial-gradient(var(--primary) 1px, transparent 1px)', backgroundSize: '32px 32px' }}
-        />
-        <div className="relative z-10 w-full max-w-lg aspect-square" />
-      </div>
-
-      {/* Right Side - Form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-white">
-        <div className="max-w-[420px] w-full space-y-8">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+      <div className="max-w-[420px] w-full bg-white p-8 rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-100">
+        <div className="space-y-8">
           <div className="text-center">
-            <div className="h-20 w-full mb-6" />
-            <h2 className="text-3xl font-bold text-slate-900 tracking-tight">Welcome back</h2>
+            <h1 className="text-4xl font-extrabold text-primary mb-2 tracking-tight">VPR Systems</h1>
+            <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Welcome back</h2>
             <p className="text-sm text-slate-500 mt-2">Please enter your details to sign in.</p>
           </div>
 
