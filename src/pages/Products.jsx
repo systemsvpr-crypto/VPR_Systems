@@ -31,7 +31,7 @@ const DEFAULT_FORM_DATA = {
 const CATEGORIES = ['Electronics', 'Furniture', 'Clothing', 'Food', 'Tools', 'Raw Materials', 'Other'];
 const UNITS = ['pcs', 'kg', 'liters', 'boxes', 'pairs', 'sets', 'meters', 'feet'];
 
-const Products = () => {
+const Products = ({ isTab = false }) => {
     const [products, setProducts] = useState([]);
     const [godowns, setGodowns] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -210,10 +210,12 @@ const Products = () => {
 
     return (
         <div className="flex flex-col gap-4 pb-6">
-            <div>
-                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Products</h1>
-                <p className="text-slate-500 mt-1 text-sm">Manage product inventory and details.</p>
-            </div>
+            {!isTab && (
+                <div>
+                    <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Products</h1>
+                    <p className="text-slate-500 mt-1 text-sm">Manage product inventory and details.</p>
+                </div>
+            )}
 
             <div className="flex flex-col gap-4">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 shrink-0">

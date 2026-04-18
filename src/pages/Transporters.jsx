@@ -25,7 +25,7 @@ const DEFAULT_FORM_DATA = {
     is_active: true,
 };
 
-const Transporters = () => {
+const Transporters = ({ isTab = false }) => {
     const [transporters, setTransporters] = useState([]);
     const [godowns, setGodowns] = useState([]);
     const [products, setProducts] = useState([]);
@@ -228,10 +228,12 @@ const Transporters = () => {
 
     return (
         <div className="flex flex-col gap-4 pb-6">
-            <div>
-                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Transporters</h1>
-                <p className="text-slate-500 mt-1 text-sm">Manage transporter details and freight history.</p>
-            </div>
+            {!isTab && (
+                <div>
+                    <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Transporters</h1>
+                    <p className="text-slate-500 mt-1 text-sm">Manage transporter details and freight history.</p>
+                </div>
+            )}
 
             {/* Tabs */}
             <div className="flex items-center gap-6 border-b border-slate-200">

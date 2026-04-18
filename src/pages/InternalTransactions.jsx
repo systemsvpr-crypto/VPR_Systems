@@ -18,7 +18,7 @@ const DEFAULT_FORM_DATA = {
     notes: '',
 };
 
-const InternalTransactions = () => {
+const InternalTransactions = ({ isTab = false }) => {
     const [transactions, setTransactions] = useState([]);
     const [godowns, setGodowns] = useState([]);
     const [products, setProducts] = useState([]);
@@ -239,10 +239,12 @@ const InternalTransactions = () => {
 
     return (
         <div className="flex flex-col gap-4 pb-6">
-            <div>
-                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Internal Transactions</h1>
-                <p className="text-slate-500 mt-1 text-sm">Transfer products between godowns.</p>
-            </div>
+            {!isTab && (
+                <div>
+                    <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Internal Transactions</h1>
+                    <p className="text-slate-500 mt-1 text-sm">Transfer products between godowns.</p>
+                </div>
+            )}
 
             <div className="flex flex-col gap-4">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0 mb-2">

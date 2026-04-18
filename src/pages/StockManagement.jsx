@@ -7,6 +7,15 @@ import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
 import SearchableSelect from '@/components/ui/SearchableSelect';
 import { cn } from '@/lib/utils';
+import Products from './Products';
+import Godowns from './Godowns';
+import Transporters from './Transporters';
+import InternalTransactions from './InternalTransactions';
+import {
+    MapPin,
+    ArrowRightLeft,
+    LayoutGrid
+} from 'lucide-react';
 import {
     Select,
     SelectContent,
@@ -48,6 +57,8 @@ const StockManagement = () => {
     const [errors, setErrors] = useState({});
     const [selectedProduct, setSelectedProduct] = useState('');
     const [selectedQty, setSelectedQty] = useState(1);
+
+    const [activeTab, setActiveTab] = useState('stocks');
 
     useEffect(() => {
         fetchData();
@@ -371,14 +382,54 @@ const StockManagement = () => {
         <div className="flex flex-col gap-4 pb-6">
             <div>
                 <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Stock Management</h1>
-                <p className="text-slate-500 mt-1 text-sm">Manage in/out stock entries.</p>
+                <p className="text-slate-500 mt-1 text-sm">Centralized stock and inventory administration.</p>
             </div>
 
-            <div className="flex flex-col gap-4">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 shrink-0">
-                    <div className="hidden xl:flex items-center gap-6">
-                        <StatItem label="Total Entries" value={entries.length} />
-                    </div>
+            {/* Tabs */}
+            <div className="flex items-center gap-6 border-b border-slate-200 overflow-x-auto scrollbar-hide">
+                <button
+                    onClick={() => setActiveTab('stocks')}
+                    className={`pb-3 text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'stocks' ? 'text-primary border-b-2 border-primary translate-y-[1px]' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                    <Package size={16} />
+                    Stocks
+                </button>
+                <button
+                    onClick={() => setActiveTab('products')}
+                    className={`pb-3 text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'products' ? 'text-primary border-b-2 border-primary translate-y-[1px]' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                    <LayoutGrid size={16} />
+                    Products
+                </button>
+                <button
+                    onClick={() => setActiveTab('godowns')}
+                    className={`pb-3 text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'godowns' ? 'text-primary border-b-2 border-primary translate-y-[1px]' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                    <MapPin size={16} />
+                    Godowns
+                </button>
+                <button
+                    onClick={() => setActiveTab('transporters')}
+                    className={`pb-3 text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'transporters' ? 'text-primary border-b-2 border-primary translate-y-[1px]' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                    <Truck size={16} />
+                    Transporters
+                </button>
+                <button
+                    onClick={() => setActiveTab('internal-transactions')}
+                    className={`pb-3 text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'internal-transactions' ? 'text-primary border-b-2 border-primary translate-y-[1px]' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                    <ArrowRightLeft size={16} />
+                    Internal Transactions
+                </button>
+            </div>
+
+            {activeTab === 'stocks' && (
+                <div className="flex flex-col gap-4">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 shrink-0">
+                        <div className="hidden xl:flex items-center gap-6">
+                            <StatItem label="Total Entries" value={entries.length} />
+                        </div>
 
                     <div className="flex items-center gap-3">
                         <div className="relative w-full sm:w-64">
@@ -517,7 +568,6 @@ const StockManagement = () => {
                         />
                     </div>
                 )}
-            </div>
 
             {/* Modal */}
             {isModalOpen && (
@@ -763,7 +813,6 @@ const StockManagement = () => {
                                         </div>
                                     )}
                                 </div>
-
                                 </form>
                         </div>
 
@@ -776,6 +825,14 @@ const StockManagement = () => {
                     </div>
                 </div>
             )}
+        </div>
+    )}
+
+        {activeTab === 'products' && <Products isTab={true} />}
+        {activeTab === 'godowns' && <Godowns isTab={true} />}
+        {activeTab === 'transporters' && <Transporters isTab={true} />}
+        {activeTab === 'internal-transactions' && <InternalTransactions isTab={true} />}
+
         </div>
     );
 };

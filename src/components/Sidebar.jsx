@@ -94,10 +94,6 @@ const Sidebar = ({ onClose }) => {
   const MASTER_MENU_ITEMS = [
     { path: '/live-stock-dashboard', icon: LayoutDashboard, label: 'Live Stock', id: 'live-stock-dashboard' },
     { path: '/stock-management', icon: TrendingUp, label: 'Stock Management', id: 'stock-management' },
-    { path: '/products', icon: Package, label: 'Products', id: 'products' },
-    { path: '/godowns', icon: MapPin, label: 'Godowns', id: 'godowns' },
-    { path: '/transporters', icon: Truck, label: 'Transporters', id: 'transporters' },
-    { path: '/internal-transactions', icon: ArrowRightLeft, label: 'Internal Transfers', id: 'internal-transactions' },
     { path: '/stock-notifications', icon: Bell, label: 'Notifications', id: 'stock-notifications' },
     { type: 'separator', label: 'SETTINGS' },
     { path: '/settings', icon: Settings, label: 'Settings', id: 'settings' },

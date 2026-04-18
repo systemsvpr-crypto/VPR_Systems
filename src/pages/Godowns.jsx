@@ -23,7 +23,7 @@ const DEFAULT_FORM_DATA = {
     is_active: true,
 };
 
-const Godowns = () => {
+const Godowns = ({ isTab = false }) => {
     const [godowns, setGodowns] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -173,10 +173,12 @@ const Godowns = () => {
 
     return (
         <div className="flex flex-col gap-4 pb-6">
-            <div>
-                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Godowns</h1>
-                <p className="text-slate-500 mt-1 text-sm">Manage godown locations and their details.</p>
-            </div>
+            {!isTab && (
+                <div>
+                    <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Godowns</h1>
+                    <p className="text-slate-500 mt-1 text-sm">Manage godown locations and their details.</p>
+                </div>
+            )}
 
             <div className="flex flex-col gap-4">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0 mb-2">
