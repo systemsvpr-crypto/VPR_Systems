@@ -17,7 +17,7 @@ import {
     SelectValue,
 } from '@/components/ui/Select';
 
-const ITEMS_PER_PAGE = 6;
+const ITEMS_PER_PAGE = 10;
 
 const DEFAULT_FORM_DATA = {
     entry_id: '',
@@ -175,7 +175,6 @@ const StockManagement = () => {
         }
         if (data.transaction_type === 'in') {
             if (!data.transporter_id) newErrors.transporter_id = 'Transporter is required';
-            if (!data.lr_number) newErrors.lr_number = 'LR Number is required';
             if (!data.from_location) newErrors.from_location = 'From Location is required';
         }
         return newErrors;
@@ -214,8 +213,9 @@ const StockManagement = () => {
                     newStock = currentStock - qty;
                 }
 
+                const { productItems, ...formDataWithoutItems } = formData;
                 const entryData = {
-                    ...formData,
+                    ...formDataWithoutItems,
                     product_id: singleItem.product_id,
                     quantity: qty,
                     opening_stock: currentStock,
@@ -726,7 +726,6 @@ const StockManagement = () => {
                                                                         type="button"
                                                                         onClick={() => updateProductQty(item.product_id, Math.max(1, (parseInt(item.quantity) || 1) - 1))}
                                                                         className="w-7 h-7 rounded-md bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors"
-                                                                        disabled={editingEntry}
                                                                     >
                                                                         <span className="text-sm font-medium">−</span>
                                                                     </button>
@@ -736,13 +735,11 @@ const StockManagement = () => {
                                                                         value={item.quantity}
                                                                         onChange={(e) => updateProductQty(item.product_id, e.target.value)}
                                                                         className="w-16 h-8 text-center font-medium text-sm"
-                                                                        disabled={editingEntry}
                                                                     />
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => updateProductQty(item.product_id, (parseInt(item.quantity) || 1) + 1)}
                                                                         className="w-7 h-7 rounded-md bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors"
-                                                                        disabled={editingEntry}
                                                                     >
                                                                         <span className="text-sm font-medium">+</span>
                                                                     </button>

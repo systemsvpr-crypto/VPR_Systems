@@ -15,7 +15,7 @@ import {
     SelectValue,
 } from '@/components/ui/Select';
 
-const ITEMS_PER_PAGE = 6;
+const ITEMS_PER_PAGE = 10;
 
 const DEFAULT_FORM_DATA = {
     product_id: '',
@@ -43,6 +43,7 @@ const Products = () => {
     const [currentPage, setCurrentPage] = useState(1);
     const [formData, setFormData] = useState(DEFAULT_FORM_DATA);
     const [errors, setErrors] = useState({});
+    const [confirmDisable, setConfirmDisable] = useState(null);
 
     useEffect(() => {
         fetchData();
@@ -168,7 +169,9 @@ const Products = () => {
         }
     };
 
-    const handleToggleActive = async (product) => {
+    const handleToggleActive = async () => {
+        if (!confirmDisable) return;
+        const product = confirmDisable;
         try {
             const { error } = await supabase
                 .from('products')
@@ -177,6 +180,7 @@ const Products = () => {
             if (error) throw error;
             toast.success(`Product ${!product.is_active ? 'enabled' : 'disabled'} successfully`);
             fetchData();
+            setConfirmDisable(null);
         } catch (error) {
             console.error('Error toggling product:', error);
             toast.error(`Error: ${error.message}`);
@@ -285,7 +289,7 @@ const Products = () => {
                                 product={product}
                                 onEdit={() => handleOpenModal(product)}
                                 onDelete={() => handleDelete(product)}
-                                onToggle={() => handleToggleActive(product)}
+                                onToggle={() => setConfirmDisable(product)}
                             />
                         ))
                     )}
@@ -317,7 +321,7 @@ const Products = () => {
                                             product={product}
                                             onEdit={() => handleOpenModal(product)}
                                             onDelete={() => handleDelete(product)}
-                                            onToggle={() => handleToggleActive(product)}
+                                            onToggle={() => setConfirmDisable(product)}
                                         />
                                     ))
                                 )}
@@ -445,6 +449,35 @@ const Products = () => {
                             <Button onClick={handleSubmit} className="w-full sm:w-auto px-5 py-2.5 sm:py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 font-medium transition-colors shadow-sm text-sm sm:text-base">
                                 {editingProduct ? 'Save Changes' : 'Create Product'}
                             </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Confirm Disable Modal */}
+            {confirmDisable && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setConfirmDisable(null)}></div>
+                    <div className="relative bg-white rounded-2xl shadow-xl w-full sm:max-w-sm p-6 animate-in zoom-in-95 duration-200">
+                        <div className="text-center">
+                            <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                                <ToggleRight size={24} className="text-red-600" />
+                            </div>
+                            <h3 className="text-lg font-semibold text-slate-900 mb-2">
+                                {confirmDisable.is_active ? 'Disable Product' : 'Enable Product'}
+                            </h3>
+                            <p className="text-sm text-slate-500 mb-6">
+                                Are you sure you want to {confirmDisable.is_active ? 'disable' : 'enable'} "{confirmDisable.name}"?
+                                {confirmDisable.is_active && ' This product will no longer appear in stock entries.'}
+                            </p>
+                            <div className="flex gap-3">
+                                <Button variant="outline" onClick={() => setConfirmDisable(null)} className="flex-1">
+                                    Cancel
+                                </Button>
+                                <Button onClick={handleToggleActive} className="flex-1 bg-red-600 hover:bg-red-700">
+                                    {confirmDisable.is_active ? 'Disable' : 'Enable'}
+                                </Button>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -12,9 +12,11 @@ const SearchableSelect = ({
     className = '',
     error = null,
     renderOption = null,
+    popperPlacement = 'auto',
 }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [search, setSearch] = useState('');
+    const [placement, setPlacement] = useState('bottom');
     const containerRef = useRef(null);
     const inputRef = useRef(null);
 
@@ -41,6 +43,22 @@ const SearchableSelect = ({
             inputRef.current.focus();
         }
     }, [isOpen]);
+
+    useEffect(() => {
+        if (isOpen && containerRef.current && popperPlacement === 'auto') {
+            const rect = containerRef.current.getBoundingClientRect();
+            const viewportHeight = window.innerHeight;
+            const dropdownHeight = 280;
+            const spaceBelow = viewportHeight - rect.bottom;
+            const spaceAbove = rect.top;
+
+            if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
+                setPlacement('top');
+            } else {
+                setPlacement('bottom');
+            }
+        }
+    }, [isOpen, popperPlacement]);
 
     const handleSelect = (option) => {
         onChange(option.value);
@@ -89,7 +107,11 @@ const SearchableSelect = ({
             </button>
 
             {isOpen && (
-                <div className="absolute z-50 w-full mt-1 bg-white rounded-lg border border-slate-200 shadow-lg overflow-hidden animate-in fade-in-0 zoom-in-95 duration-100">
+                <div className={cn(
+                    'absolute z-50 w-full bg-white rounded-lg border border-slate-200 shadow-lg overflow-hidden animate-in fade-in-0 zoom-in-95 duration-100',
+                    placement === 'bottom' ? 'mt-1' : 'mb-1',
+                    placement === 'top' && 'bottom-full origin-bottom'
+                )}>
                     <div className="p-2 border-b border-slate-100">
                         <div className="relative">
                             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
