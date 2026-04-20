@@ -1,6 +1,18 @@
 -- WARNING: This schema is for context only and is not meant to be run.
 -- Table order and constraints may not be valid for execution.
 
+CREATE TABLE public.daily_stock_summary (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  date date NOT NULL DEFAULT CURRENT_DATE,
+  godown_id text NOT NULL,
+  product_id text NOT NULL,
+  opening_stock numeric DEFAULT 0,
+  in_stock numeric DEFAULT 0,
+  out_stock numeric DEFAULT 0,
+  closing_stock numeric DEFAULT 0,
+  created_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT daily_stock_summary_pkey PRIMARY KEY (id)
+);
 CREATE TABLE public.godowns (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   godown_id text NOT NULL UNIQUE,
@@ -18,35 +30,10 @@ CREATE TABLE public.godowns (
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT godowns_pkey PRIMARY KEY (id)
 );
-CREATE TABLE public.internal_transactions (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  transaction_id text NOT NULL UNIQUE,
-  from_godown_id text NOT NULL,
-  to_godown_id text NOT NULL,
-  product_id text NOT NULL,
-  quantity numeric NOT NULL,
-  transfer_date date NOT NULL DEFAULT CURRENT_DATE,
-  notes text,
-  status text DEFAULT 'completed'::text,
-  created_by text,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT internal_transactions_pkey PRIMARY KEY (id)
-);
-CREATE TABLE public.product_godown_stock (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  product_id text NOT NULL,
-  godown_id text NOT NULL,
-  current_stock numeric DEFAULT 0,
-  created_at timestamp with time zone DEFAULT now(),
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT product_godown_stock_pkey PRIMARY KEY (id)
-);
 CREATE TABLE public.products (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   product_id text NOT NULL UNIQUE,
   name text NOT NULL,
-  sku text,
   category text,
   description text,
   unit text,
@@ -54,7 +41,13 @@ CREATE TABLE public.products (
   is_active boolean DEFAULT true,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT products_pkey PRIMARY KEY (id)
+  opening_quantity numeric DEFAULT 0,
+  closing_quantity numeric DEFAULT 0,
+  mux text,
+  godown_id text,
+  quantity numeric DEFAULT 0,
+  CONSTRAINT products_pkey PRIMARY KEY (id),
+  CONSTRAINT products_godown_id_fkey FOREIGN KEY (godown_id) REFERENCES public.godowns(godown_id)
 );
 CREATE TABLE public.stock_management (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -71,11 +64,17 @@ CREATE TABLE public.stock_management (
   created_by text,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT stock_management_pkey PRIMARY KEY (id)
+  transporter_id uuid,
+  lr_number character varying,
+  from_location text,
+  freight_amount numeric,
+  CONSTRAINT stock_management_pkey PRIMARY KEY (id),
+  CONSTRAINT stock_management_transporter_id_fkey FOREIGN KEY (transporter_id) REFERENCES public.transporters(transporter_id),
+  CONSTRAINT stock_management_from_location_fkey FOREIGN KEY (from_location) REFERENCES public.godowns(godown_id)
 );
 CREATE TABLE public.stock_notifications (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
-  notification_type text NOT NULL CHECK (notification_type = ANY (ARRAY['transfer'::text, 'stock_in'::text, 'stock_out'::text, 'low_stock'::text])),
+  notification_type text NOT NULL CHECK (notification_type = ANY (ARRAY['stock_in'::text, 'stock_out'::text, 'low_stock'::text])),
   title text NOT NULL,
   message text NOT NULL,
   product_id text,
@@ -84,6 +83,16 @@ CREATE TABLE public.stock_notifications (
   is_read boolean DEFAULT false,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT stock_notifications_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.transporters (
+  transporter_id uuid NOT NULL DEFAULT gen_random_uuid(),
+  name character varying NOT NULL,
+  vehicle_number character varying NOT NULL,
+  driver_phone character varying,
+  is_active boolean DEFAULT true,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT transporters_pkey PRIMARY KEY (transporter_id)
 );
 CREATE TABLE public.users (
   user_id uuid NOT NULL DEFAULT gen_random_uuid(),

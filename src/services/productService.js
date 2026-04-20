@@ -74,13 +74,7 @@ export const productService = {
     async getActiveWithStock() {
         const { data, error } = await supabase
             .from('products')
-            .select(`
-                *,
-                product_godown_stock (
-                    godown_id,
-                    current_stock
-                )
-            `)
+            .select('*')
             .eq('is_active', true)
             .order('name', { ascending: true });
         if (error) throw error;

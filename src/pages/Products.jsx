@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Edit2, X, Package, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Search, Plus, Edit2, X, Package, Trash2, ToggleLeft, ToggleRight, Layers, Tag, Weight, FileText, CheckCircle2, Info } from 'lucide-react';
 import { supabase } from '../supabase';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
@@ -20,16 +20,20 @@ const ITEMS_PER_PAGE = 10;
 const DEFAULT_FORM_DATA = {
     product_id: '',
     name: '',
-    sku: '',
     category: '',
     description: '',
-    unit: '',
+    unit: 'KG',
     hsn_code: '',
+    mux: '',
+    godown_id: '',
+    quantity: 0,
+    opening_quantity: 0,
+    closing_quantity: 0,
     is_active: true,
 };
 
 const CATEGORIES = ['Electronics', 'Furniture', 'Clothing', 'Food', 'Tools', 'Raw Materials', 'Other'];
-const UNITS = ['pcs', 'kg', 'liters', 'boxes', 'pairs', 'sets', 'meters', 'feet'];
+const UNITS = ['KG'];
 
 const Products = ({ isTab = false }) => {
     const [products, setProducts] = useState([]);
@@ -114,6 +118,16 @@ const Products = ({ isTab = false }) => {
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
+    useEffect(() => {
+        const mux = parseFloat(formData.mux) || 0;
+        const closing = parseFloat(formData.closing_quantity) || 0;
+        const calculatedQty = (mux * closing).toFixed(3);
+        
+        if (formData.quantity !== parseFloat(calculatedQty)) {
+            setFormData(prev => ({ ...prev, quantity: parseFloat(calculatedQty) }));
+        }
+    }, [formData.mux, formData.closing_quantity]);
+
     const validateForm = (data) => {
         const newErrors = {};
         if (!data.name) newErrors.name = 'Product name is required';
@@ -191,8 +205,7 @@ const Products = ({ isTab = false }) => {
         return products.filter(product => {
             const matchesSearch = (
                 product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                product.product_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                product.sku?.toLowerCase().includes(searchTerm.toLowerCase())
+                product.product_id?.toLowerCase().includes(searchTerm.toLowerCase())
             );
             const matchesCategory = filterCategory === 'all' || product.category === filterCategory;
             const matchesStatus = filterStatus === 'all' || 
@@ -289,6 +302,7 @@ const Products = ({ isTab = false }) => {
                             <MobileProductCard
                                 key={product.product_id}
                                 product={product}
+                                godowns={godowns}
                                 onEdit={() => handleOpenModal(product)}
                                 onDelete={() => handleDelete(product)}
                                 onToggle={() => setConfirmDisable(product)}
@@ -304,9 +318,14 @@ const Products = ({ isTab = false }) => {
                             <thead>
                                 <tr className="bg-slate-50/50 border-b border-slate-100 sticky top-0 z-10 backdrop-blur-md">
                                     <HeaderCell>Product Details</HeaderCell>
-                                    <HeaderCell>SKU / HSN</HeaderCell>
+                                    <HeaderCell>HSN Code</HeaderCell>
+                                    <HeaderCell>MUX</HeaderCell>
                                     <HeaderCell>Category</HeaderCell>
+                                    <HeaderCell>Godown</HeaderCell>
                                     <HeaderCell>Unit</HeaderCell>
+                                    <HeaderCell>Qty</HeaderCell>
+                                    <HeaderCell>Opening Qty</HeaderCell>
+                                    <HeaderCell>Closing Qty</HeaderCell>
                                     <HeaderCell>Status</HeaderCell>
                                     <HeaderCell align="right">Actions</HeaderCell>
                                 </tr>
@@ -321,6 +340,7 @@ const Products = ({ isTab = false }) => {
                                         <ProductRow
                                             key={product.product_id}
                                             product={product}
+                                            godowns={godowns}
                                             onEdit={() => handleOpenModal(product)}
                                             onDelete={() => handleDelete(product)}
                                             onToggle={() => setConfirmDisable(product)}
@@ -328,7 +348,7 @@ const Products = ({ isTab = false }) => {
                                     ))
                                 )}
                                 {Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
-                                    <tr key={`empty-${i}`}><td colSpan="6" className="h-16"></td></tr>
+                                    <tr key={`empty-${i}`}><td colSpan="11" className="h-16"></td></tr>
                                 ))}
                             </tbody>
                         </table>
@@ -367,81 +387,147 @@ const Products = ({ isTab = false }) => {
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
                     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={handleCloseModal}></div>
-                    <div className="relative bg-white rounded-2xl shadow-xl w-full sm:max-w-2xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
-                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
-                            <h2 className="text-xl font-bold text-slate-800">
-                                {editingProduct ? 'Edit Product' : 'Add New Product'}
-                            </h2>
-                            <Button variant="ghost" size="icon" type="button" onClick={handleCloseModal} className="rounded-full text-slate-400 hover:text-slate-600">
+                    <div className="relative bg-white rounded-2xl shadow-xl w-full sm:max-w-4xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0 bg-slate-50/50 rounded-t-2xl">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+                                    <Package size={22} />
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-bold text-slate-800">
+                                        {editingProduct ? 'Edit Product' : 'Add New Product'}
+                                    </h2>
+                                    <p className="text-xs text-slate-500">Configure product specifications and inventory settings.</p>
+                                </div>
+                            </div>
+                            <Button variant="ghost" size="icon" type="button" onClick={handleCloseModal} className="rounded-full text-slate-400 hover:text-slate-600 transition-colors">
                                 <X size={20} />
                             </Button>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
-                            <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                <FormField
-                                    label="Product ID" name="product_id" value={formData.product_id}
-                                    onChange={handleInputChange} required error={errors.product_id}
-                                    icon={Package} placeholder="Auto-generated"
-                                    disabled={!!editingProduct}
-                                />
+                        <div className="flex-1 overflow-y-auto p-0 custom-scrollbar">
+                            <form onSubmit={handleSubmit} className="flex flex-col md:flex-row divide-y md:divide-y-0 md:divide-x divide-slate-100">
+                                {/* Left Side: Static Details */}
+                                <div className="flex-1 p-6 sm:p-8 space-y-6 bg-slate-50/30">
+                                    <div className="flex items-center gap-2 pb-2 border-b border-slate-200">
+                                        <Info className="text-slate-500" size={18} />
+                                        <h3 className="text-sm font-bold text-slate-600 uppercase tracking-widest">Product Information</h3>
+                                    </div>
+                                    
+                                    <div className="space-y-5">
+                                        <FormField
+                                            label="Product Name" name="name" value={formData.name}
+                                            onChange={handleInputChange} required error={errors.name}
+                                            icon={Package} placeholder="e.g. Copper Wire 2.5mm"
+                                        />
+                                        
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <FormField
+                                                label="Product ID" name="product_id" value={formData.product_id}
+                                                onChange={handleInputChange} required error={errors.product_id}
+                                                icon={Tag} placeholder="Auto-gen"
+                                                disabled={!!editingProduct}
+                                            />
+                                            <FormSelect
+                                                label="Category" name="category" value={formData.category}
+                                                onChange={handleInputChange} options={CATEGORIES}
+                                                icon={Layers}
+                                            />
+                                        </div>
 
-                                <FormField
-                                    label="Product Name" name="name" value={formData.name}
-                                    onChange={handleInputChange} required error={errors.name}
-                                    icon={Package} placeholder="Product name"
-                                />
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <FormField
+                                                label="HSN Code" name="hsn_code" value={formData.hsn_code}
+                                                onChange={handleInputChange} placeholder="8-digit code"
+                                                icon={FileText}
+                                            />
+                                            <FormSelect
+                                                label="Base Unit" name="unit" value={formData.unit}
+                                                onChange={handleInputChange} options={UNITS}
+                                                icon={Weight}
+                                            />
+                                        </div>
 
-                                <FormField
-                                    label="SKU" name="sku" value={formData.sku}
-                                    onChange={handleInputChange} placeholder="SKU Number"
-                                />
-
-                                <FormField
-                                    label="HSN Code" name="hsn_code" value={formData.hsn_code}
-                                    onChange={handleInputChange} placeholder="HSN Code"
-                                />
-
-                                <select
-                                    name="category" value={formData.category} onChange={handleInputChange}
-                                    className="px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-primary focus:outline-none h-10"
-                                >
-                                    <option value="">Select Category</option>
-                                    {CATEGORIES.map(cat => (
-                                        <option key={cat} value={cat}>{cat}</option>
-                                    ))}
-                                </select>
-
-                                <select
-                                    name="unit" value={formData.unit} onChange={handleInputChange}
-                                    className="px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-primary focus:outline-none h-10"
-                                >
-                                    <option value="">Select Unit</option>
-                                    {UNITS.map(unit => (
-                                        <option key={unit} value={unit}>{unit}</option>
-                                    ))}
-                                </select>
-
-                                <div className="md:col-span-2">
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-                                    <textarea
-                                        name="description" value={formData.description} onChange={handleInputChange}
-                                        rows="3" className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-                                        placeholder="Product description"
-                                    ></textarea>
+                                        <div className="space-y-1.5">
+                                            <label className="block text-sm font-medium text-slate-700">Detailed Description</label>
+                                            <textarea
+                                                name="description" value={formData.description} onChange={handleInputChange}
+                                                rows="4" className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white focus:ring-2 focus:ring-primary/20 outline-none transition-all duration-200 text-sm resize-none"
+                                                placeholder="Enter technical specifications or product notes..."
+                                            ></textarea>
+                                        </div>
+                                    </div>
                                 </div>
 
-                                <div className="md:col-span-2 mt-2">
-                                    <label className="flex items-center gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200 cursor-pointer">
-                                        <div className="relative inline-flex items-center cursor-pointer">
-                                            <input type="checkbox" name="is_active" checked={formData.is_active} onChange={(e) => setFormData(prev => ({ ...prev, is_active: e.target.checked }))} className="sr-only peer" />
-                                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/30 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                                {/* Right Side: Semi-Dynamic Details */}
+                                <div className="flex-1 p-6 sm:p-8 space-y-6">
+                                    <div className="flex items-center gap-2 pb-2 border-b border-slate-200">
+                                        <Weight className="text-primary" size={18} />
+                                        <h3 className="text-sm font-bold text-primary uppercase tracking-widest">Stock & Configuration</h3>
+                                    </div>
+
+                                    <div className="space-y-6">
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <FormField
+                                                label="MUX Value" name="mux" value={formData.mux}
+                                                onChange={handleInputChange} placeholder="Value"
+                                                icon={Layers}
+                                            />
+                                            <FormSelect
+                                                label="Default Godown" name="godown_id" value={formData.godown_id}
+                                                onChange={handleInputChange} 
+                                                options={godowns.map(g => ({ label: g.name, value: g.godown_id }))}
+                                                icon={Package}
+                                            />
                                         </div>
-                                        <div>
-                                            <span className="block text-sm font-medium text-slate-900">Active Product</span>
-                                            <span className="block text-xs text-slate-500">Show in live stock</span>
+
+                                        <div className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100 space-y-4">
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <FormField
+                                                    label="Opening Quantity" name="opening_quantity" type="number" value={formData.opening_quantity}
+                                                    onChange={handleInputChange}
+                                                    placeholder="0"
+                                                    icon={Package}
+                                                    className="bg-white w-full"
+                                                />
+                                                <FormField
+                                                    label="Closing Quantity" name="closing_quantity" type="number" value={formData.closing_quantity}
+                                                    onChange={handleInputChange}
+                                                    placeholder="0"
+                                                    icon={Package}
+                                                    className="bg-white w-full"
+                                                />
+                                            </div>
+                                            <FormField
+                                                label="Current Quantity (KG)" name="quantity" type="number" value={formData.quantity}
+                                                onChange={handleInputChange} placeholder="0"
+                                                icon={Weight}
+                                                className="bg-white font-bold text-primary"
+                                                readOnly
+                                            />
                                         </div>
-                                    </label>
+
+                                        <div className="space-y-4 pt-2">
+                                            <label className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-100/50 transition-colors group">
+                                                <div className="flex items-center gap-3">
+                                                    <div className={cn(
+                                                        "w-10 h-10 rounded-full flex items-center justify-center transition-colors shadow-sm",
+                                                        formData.is_active ? "bg-green-500 text-white" : "bg-slate-200 text-slate-400"
+                                                    )}>
+                                                        <CheckCircle2 size={18} />
+                                                    </div>
+                                                    <div>
+                                                        <span className="block text-sm font-bold text-slate-900">Active Status</span>
+                                                        <span className="block text-[11px] text-slate-500">Visible in dashboards</span>
+                                                    </div>
+                                                </div>
+                                                <div className="relative inline-flex items-center cursor-pointer">
+                                                    <input type="checkbox" name="is_active" checked={formData.is_active} onChange={(e) => setFormData(prev => ({ ...prev, is_active: e.target.checked }))} className="sr-only peer" />
+                                                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+                                                </div>
+                                            </label>
+                                        </div>
+                                    </div>
                                 </div>
                             </form>
                         </div>
@@ -498,17 +584,86 @@ const StatItem = ({ label, value }) => (
     </div>
 );
 
+const FormSection = ({ title, children, icon: Icon }) => (
+    <div className="space-y-4">
+        <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+            {Icon && <Icon className="text-primary" size={18} />}
+            <h3 className="text-sm font-semibold text-slate-800 uppercase tracking-wider">{title}</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {children}
+        </div>
+    </div>
+);
+
 const FormField = ({ label, icon: Icon, className = "", ...props }) => (
     <div className="space-y-1.5">
-        <label className="block text-sm font-medium text-slate-700">{label} {props.required && <span className="text-red-500">*</span>}</label>
-        <div className="relative">
-            {Icon && <Icon className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />}
+        <label className="block text-sm font-medium text-slate-700">
+            {label} {props.required && <span className="text-red-500">*</span>}
+        </label>
+        <div className="relative group">
+            {Icon && (
+                <Icon 
+                    className={cn(
+                        "absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 transition-colors group-focus-within:text-primary",
+                        props.error && "text-red-400"
+                    )} 
+                    size={18} 
+                />
+            )}
             <Input
-                className={cn(`${Icon ? 'pl-10' : 'pl-4'} pr-4 h-10 w-full`, className)}
+                className={cn(
+                    "transition-all duration-200",
+                    Icon ? 'pl-10' : 'pl-4', 
+                    "pr-4 h-10 w-full bg-slate-50 border-slate-200 focus:bg-white focus:ring-2 focus:ring-primary/20",
+                    props.error && "border-red-300 focus:ring-red-100 bg-red-50/30",
+                    className
+                )}
                 {...props}
             />
         </div>
-        {props.error && <p className="text-red-500 text-xs mt-1 animate-in slide-in-from-top-1">{props.error}</p>}
+        {props.error && <p className="text-red-500 text-[11px] mt-1 flex items-center gap-1 animate-in slide-in-from-top-1"><Info size={12} /> {props.error}</p>}
+    </div>
+);
+
+const FormSelect = ({ label, icon: Icon, options, ...props }) => (
+    <div className="space-y-1.5">
+        <label className="block text-sm font-medium text-slate-700">
+            {label} {props.required && <span className="text-red-500">*</span>}
+        </label>
+        <div className="relative group">
+            {Icon && (
+                <Icon 
+                    className={cn(
+                        "absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10 transition-colors group-focus-within:text-primary",
+                        props.error && "text-red-400"
+                    )} 
+                    size={18} 
+                />
+            )}
+            <select
+                className={cn(
+                    "w-full h-10 rounded-lg border border-slate-200 bg-slate-50 text-sm outline-none transition-all duration-200 focus:bg-white focus:ring-2 focus:ring-primary/20 appearance-none cursor-pointer",
+                    Icon ? 'pl-10' : 'pl-4',
+                    "pr-10",
+                    props.error && "border-red-300 focus:ring-red-100 bg-red-50/30",
+                )}
+                {...props}
+            >
+                <option value="">Select {label}</option>
+                {options.map(opt => (
+                    <option key={typeof opt === 'string' ? opt : opt.value} value={typeof opt === 'string' ? opt : opt.value}>
+                        {typeof opt === 'string' ? opt : opt.label}
+                    </option>
+                ))}
+            </select>
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                </svg>
+            </div>
+        </div>
+        {props.error && <p className="text-red-500 text-[11px] mt-1 flex items-center gap-1 animate-in slide-in-from-top-1"><Info size={12} /> {props.error}</p>}
     </div>
 );
 
@@ -520,13 +675,13 @@ const HeaderCell = ({ children, align = "left" }) => (
 
 const EmptyRow = ({ message }) => (
     <tr>
-        <td colSpan="6" className="px-4 py-8 text-center text-slate-500 text-sm">
+        <td colSpan="11" className="px-4 py-8 text-center text-slate-500 text-sm">
             {message}
         </td>
     </tr>
 );
 
-const ProductRow = ({ product, onEdit, onDelete, onToggle }) => (
+const ProductRow = ({ product, godowns, onEdit, onDelete, onToggle }) => (
     <tr className="hover:bg-slate-50/80 transition-colors group">
         <td className="px-4 py-3">
             <div className="flex items-center gap-3">
@@ -540,14 +695,30 @@ const ProductRow = ({ product, onEdit, onDelete, onToggle }) => (
             </div>
         </td>
         <td className="px-4 py-3">
-            <div className="text-sm text-slate-900">{product.sku || '-'}</div>
-            <div className="text-xs text-slate-500">{product.hsn_code || '-'}</div>
+            <div className="text-sm text-slate-900">{product.hsn_code || '-'}</div>
+        </td>
+        <td className="px-4 py-3">
+            <div className="text-sm text-slate-900">{product.mux || '-'}</div>
         </td>
         <td className="px-4 py-3">
             <span className="text-sm text-slate-900">{product.category || '-'}</span>
         </td>
         <td className="px-4 py-3">
+            <span className="text-sm text-slate-900">
+                {godowns.find(g => g.godown_id === product.godown_id)?.name || product.godown_id || '-'}
+            </span>
+        </td>
+        <td className="px-4 py-3">
             <span className="text-sm text-slate-900">{product.unit || '-'}</span>
+        </td>
+        <td className="px-4 py-3">
+            <span className="text-sm font-medium text-slate-900">{product.quantity || 0}</span>
+        </td>
+        <td className="px-4 py-3">
+            <span className="text-sm font-medium text-slate-900">{product.opening_quantity || 0}</span>
+        </td>
+        <td className="px-4 py-3">
+            <span className="text-sm font-bold text-slate-900">{product.closing_quantity || 0}</span>
         </td>
         <td className="px-4 py-3">
             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${product.is_active ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
@@ -571,22 +742,42 @@ const ProductRow = ({ product, onEdit, onDelete, onToggle }) => (
     </tr>
 );
 
-const MobileProductCard = ({ product, onEdit, onDelete, onToggle }) => (
-    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-start justify-between">
+const MobileProductCard = ({ product, godowns, onEdit, onDelete, onToggle }) => (
+    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-start justify-between gap-4">
         <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
                 <Package size={18} />
             </div>
             <div>
                 <h3 className="font-semibold text-slate-900 text-sm">{product.name}</h3>
-                <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-xs text-slate-500">{product.category || 'No category'}</span>
-                    <span className="text-xs text-slate-400">|</span>
-                    <span className={`text-xs ${product.is_active ? 'text-green-600' : 'text-red-600'}`}>{product.is_active ? 'Active' : 'Disabled'}</span>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                    <span className="text-[11px] px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{product.mux || 'No MUX'}</span>
+                    <span className="text-[11px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">
+                        {godowns.find(g => g.godown_id === product.godown_id)?.name || 'No Godown'}
+                    </span>
+                    <span className={`text-[11px] font-medium ${product.is_active ? 'text-green-600' : 'text-red-600'}`}>
+                        {product.is_active ? 'Active' : 'Disabled'}
+                    </span>
+                </div>
+                <div className="flex items-center gap-3 mt-2">
+                    <div className="flex flex-col">
+                        <span className="text-[10px] text-slate-400 uppercase">Qty</span>
+                        <span className="text-xs font-semibold text-slate-700">{product.quantity || 0} KG</span>
+                    </div>
+                    <div className="w-px h-4 bg-slate-200"></div>
+                    <div className="flex flex-col">
+                        <span className="text-[10px] text-slate-400 uppercase">Opening</span>
+                        <span className="text-xs font-medium text-slate-600">{product.opening_quantity || 0}</span>
+                    </div>
+                    <div className="w-px h-4 bg-slate-200"></div>
+                    <div className="flex flex-col">
+                        <span className="text-[10px] text-slate-400 uppercase">Closing</span>
+                        <span className="text-xs font-bold text-slate-700">{product.closing_quantity || 0}</span>
+                    </div>
                 </div>
             </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
             <Button variant="ghost" size="icon" onClick={onEdit} className="text-slate-400 hover:text-primary hover:bg-primary/5 rounded-full transition-colors">
                 <Edit2 size={18} />
             </Button>

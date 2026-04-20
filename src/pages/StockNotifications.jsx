@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Bell, Check, Trash2, Eye, ArrowRightLeft, Package, ArrowDown, ArrowUp, X } from 'lucide-react';
+import { Search, Bell, Check, Trash2, Eye, Package, ArrowDown, ArrowUp, X } from 'lucide-react';
 import { supabase } from '../supabase';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
@@ -104,7 +104,6 @@ const StockNotifications = () => {
 
     const getTypeIcon = (type) => {
         switch (type) {
-            case 'transfer': return <ArrowRightLeft size={16} className="text-blue-500" />;
             case 'stock_in': return <ArrowDown size={16} className="text-green-500" />;
             case 'stock_out': return <ArrowUp size={16} className="text-red-500" />;
             case 'low_stock': return <Package size={16} className="text-orange-500" />;
@@ -114,7 +113,6 @@ const StockNotifications = () => {
 
     const getTypeLabel = (type) => {
         switch (type) {
-            case 'transfer': return 'Transfer';
             case 'stock_in': return 'Stock In';
             case 'stock_out': return 'Stock Out';
             case 'low_stock': return 'Low Stock';
@@ -174,7 +172,6 @@ const StockNotifications = () => {
                                 <SelectGroup>
                                     <SelectLabel>Notification Type</SelectLabel>
                                     <SelectItem value="all">All Types</SelectItem>
-                                    <SelectItem value="transfer">Transfer</SelectItem>
                                     <SelectItem value="stock_in">Stock In</SelectItem>
                                     <SelectItem value="stock_out">Stock Out</SelectItem>
                                     <SelectItem value="low_stock">Low Stock</SelectItem>
@@ -322,8 +319,7 @@ const NotificationRow = ({ notification, getTypeIcon, getTypeLabel, getProductNa
         </td>
         <td className="px-4 py-3">
             <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
-                ${notification.notification_type === 'transfer' ? 'bg-blue-50 text-blue-700' :
-                  notification.notification_type === 'stock_in' ? 'bg-green-50 text-green-700' :
+                ${notification.notification_type === 'stock_in' ? 'bg-green-50 text-green-700' :
                   notification.notification_type === 'stock_out' ? 'bg-red-50 text-red-700' :
                   'bg-orange-50 text-orange-700'}`}>
                 {getTypeLabel(notification.notification_type)}

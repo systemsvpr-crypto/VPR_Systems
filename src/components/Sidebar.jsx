@@ -92,8 +92,8 @@ const Sidebar = ({ onClose }) => {
 
   /* Combined Master Menu List for Permission Checking */
   const MASTER_MENU_ITEMS = [
-    { path: '/live-stock-dashboard', icon: LayoutDashboard, label: 'Live Stock', id: 'live-stock-dashboard' },
-    { path: '/stock-management', icon: TrendingUp, label: 'Stock Management', id: 'stock-management' },
+    { path: '/live-stock-dashboard', icon: LayoutDashboard, label: 'Live Stock Dashboard', id: 'live-stock-dashboard' },
+    { path: '/stock-management', icon: TrendingUp, label: 'Stocks', id: 'stock-management' },
     { path: '/stock-notifications', icon: Bell, label: 'Notifications', id: 'stock-notifications' },
     { type: 'separator', label: 'SETTINGS' },
     { path: '/settings', icon: Settings, label: 'Settings', id: 'settings' },
@@ -130,6 +130,13 @@ const Sidebar = ({ onClose }) => {
       // Normal Item
       if (hasAccess(item.id)) {
         acc.push(item);
+      } else if (item.id === 'stock-management') {
+        // Special check for Stocks: show if user has access to any of its tabs
+        const STOCKS_TABS = ['products', 'godowns', 'transporters'];
+        const hasAnyTabAccess = STOCKS_TABS.some(tabId => hasAccess(tabId));
+        if (hasAnyTabAccess) {
+          acc.push(item);
+        }
       }
     }
     return acc;

@@ -1,5 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, X, Package, ArrowDown, ArrowUp, Edit2, Trash2, Truck } from 'lucide-react';
+import {
+    MapPin,
+    LayoutGrid,
+    Truck,
+    Package,
+    ArrowDown,
+    ArrowUp,
+    Search,
+    Plus,
+    X,
+    Edit2,
+    Trash2,
+    Shield
+} from 'lucide-react';
 import { supabase } from '../supabase';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
@@ -10,12 +23,7 @@ import { cn } from '@/lib/utils';
 import Products from './Products';
 import Godowns from './Godowns';
 import Transporters from './Transporters';
-import InternalTransactions from './InternalTransactions';
-import {
-    MapPin,
-    ArrowRightLeft,
-    LayoutGrid
-} from 'lucide-react';
+import useAuthStore from '../store/authStore';
 import {
     Select,
     SelectContent,
@@ -57,8 +65,50 @@ const StockManagement = () => {
     const [errors, setErrors] = useState({});
     const [selectedProduct, setSelectedProduct] = useState('');
     const [selectedQty, setSelectedQty] = useState(1);
-
+    const { user } = useAuthStore();
     const [activeTab, setActiveTab] = useState('stocks');
+
+    // Filter tabs based on user access
+    const allowedTabs = useMemo(() => {
+        const tabs = [];
+        const pageAccess = user?.page_access || [];
+        const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.Admin === 'Yes';
+
+        if (isAdmin || pageAccess.includes('stock-management')) {
+            tabs.push({ id: 'stocks', label: 'Stocks', icon: Package });
+        }
+        if (isAdmin || pageAccess.includes('products')) {
+            tabs.push({ id: 'products', label: 'Products', icon: LayoutGrid });
+        }
+        if (isAdmin || pageAccess.includes('godowns')) {
+            tabs.push({ id: 'godowns', label: 'Godowns', icon: MapPin });
+        }
+        if (isAdmin || pageAccess.includes('transporters')) {
+            tabs.push({ id: 'transporters', label: 'Transporters', icon: Truck });
+        }
+        return tabs;
+    }, [user]);
+
+    // Set initial active tab if default is not allowed
+    useEffect(() => {
+        if (allowedTabs.length > 0 && (!activeTab || !allowedTabs.find(t => t.id === activeTab))) {
+            setActiveTab(allowedTabs[0].id);
+        }
+    }, [allowedTabs, activeTab]);
+
+    if (allowedTabs.length === 0 && !loading) {
+        return (
+            <div className="flex flex-col items-center justify-center p-12 bg-white rounded-2xl border border-slate-200 shadow-sm mt-8">
+                <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                    <Shield className="text-slate-300 w-8 h-8" />
+                </div>
+                <h2 className="text-xl font-bold text-slate-800">Access Denied</h2>
+                <p className="text-slate-500 mt-2 text-center max-w-xs">
+                    You don't have permission to access any modules in this section.
+                </p>
+            </div>
+        );
+    }
 
     useEffect(() => {
         fetchData();
@@ -203,14 +253,14 @@ const StockManagement = () => {
         try {
             if (editingEntry) {
                 const singleItem = formData.productItems[0];
-                const { data: stockData } = await supabase
-                    .from('product_godown_stock')
-                    .select('current_stock')
+                const { data: productData } = await supabase
+                    .from('products')
+                    .select('closing_quantity, mux')
                     .eq('product_id', singleItem.product_id)
-                    .eq('godown_id', formData.godown_id)
                     .single();
 
-                const currentStock = parseFloat(stockData?.current_stock) || 0;
+                const currentStock = parseFloat(productData?.closing_quantity) || 0;
+                const mux = parseFloat(productData?.mux) || 0;
                 const qty = singleItem.quantity;
                 let newStock;
 
@@ -242,11 +292,15 @@ const StockManagement = () => {
                     .eq('entry_id', editingEntry.entry_id);
                 if (error) throw error;
 
+                // Update products table directly
                 await supabase
-                    .from('product_godown_stock')
-                    .update({ current_stock: newStock, updated_at: new Date().toISOString() })
-                    .eq('product_id', singleItem.product_id)
-                    .eq('godown_id', formData.godown_id);
+                    .from('products')
+                    .update({ 
+                        closing_quantity: newStock, 
+                        quantity: (newStock * mux).toFixed(3),
+                        updated_at: new Date().toISOString() 
+                    })
+                    .eq('product_id', singleItem.product_id);
 
                 toast.success('Entry updated successfully');
             } else {
@@ -257,14 +311,14 @@ const StockManagement = () => {
                     const entryIdSuffix = formData.productItems.length > 1 ? `-${i + 1}` : '';
                     const entryId = baseEntryId + entryIdSuffix;
 
-                    const { data: stockData } = await supabase
-                        .from('product_godown_stock')
-                        .select('current_stock')
+                    const { data: productData } = await supabase
+                        .from('products')
+                        .select('closing_quantity, mux')
                         .eq('product_id', item.product_id)
-                        .eq('godown_id', formData.godown_id)
                         .single();
 
-                    const currentStock = parseFloat(stockData?.current_stock) || 0;
+                    const currentStock = parseFloat(productData?.closing_quantity) || 0;
+                    const mux = parseFloat(productData?.mux) || 0;
                     const qty = item.quantity;
                     let newStock, openingStock, closingStock;
 
@@ -304,21 +358,15 @@ const StockManagement = () => {
                         .insert([entryData]);
                     if (error) throw error;
 
-                    if (stockData) {
-                        await supabase
-                            .from('product_godown_stock')
-                            .update({ current_stock: newStock, updated_at: new Date().toISOString() })
-                            .eq('product_id', item.product_id)
-                            .eq('godown_id', formData.godown_id);
-                    } else {
-                        await supabase
-                            .from('product_godown_stock')
-                            .insert([{
-                                product_id: item.product_id,
-                                godown_id: formData.godown_id,
-                                current_stock: newStock
-                            }]);
-                    }
+                    // Update products table directly
+                    await supabase
+                        .from('products')
+                        .update({ 
+                            closing_quantity: newStock, 
+                            quantity: (newStock * mux).toFixed(3),
+                            updated_at: new Date().toISOString() 
+                        })
+                        .eq('product_id', item.product_id);
 
                     await supabase.from('stock_notifications').insert([{
                         notification_type: formData.transaction_type === 'in' ? 'stock_in' : 'stock_out',
@@ -386,42 +434,25 @@ const StockManagement = () => {
             </div>
 
             {/* Tabs */}
-            <div className="flex items-center gap-6 border-b border-slate-200 overflow-x-auto scrollbar-hide">
-                <button
-                    onClick={() => setActiveTab('stocks')}
-                    className={`pb-3 text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'stocks' ? 'text-primary border-b-2 border-primary translate-y-[1px]' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    <Package size={16} />
-                    Stocks
-                </button>
-                <button
-                    onClick={() => setActiveTab('products')}
-                    className={`pb-3 text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'products' ? 'text-primary border-b-2 border-primary translate-y-[1px]' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    <LayoutGrid size={16} />
-                    Products
-                </button>
-                <button
-                    onClick={() => setActiveTab('godowns')}
-                    className={`pb-3 text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'godowns' ? 'text-primary border-b-2 border-primary translate-y-[1px]' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    <MapPin size={16} />
-                    Godowns
-                </button>
-                <button
-                    onClick={() => setActiveTab('transporters')}
-                    className={`pb-3 text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'transporters' ? 'text-primary border-b-2 border-primary translate-y-[1px]' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    <Truck size={16} />
-                    Transporters
-                </button>
-                <button
-                    onClick={() => setActiveTab('internal-transactions')}
-                    className={`pb-3 text-sm font-medium transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === 'internal-transactions' ? 'text-primary border-b-2 border-primary translate-y-[1px]' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    <ArrowRightLeft size={16} />
-                    Internal Transactions
-                </button>
+            <div className="flex border-b border-slate-200 overflow-x-auto overflow-y-hidden custom-scrollbar">
+                {allowedTabs.map(tab => (
+                    <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={cn(
+                            "flex-1 min-w-[120px] pb-3 text-xs sm:text-sm font-medium transition-all flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 whitespace-nowrap relative",
+                            activeTab === tab.id
+                                ? 'text-primary'
+                                : 'text-slate-500 hover:text-slate-700'
+                        )}
+                    >
+                        <tab.icon size={16} />
+                        {tab.label}
+                        {activeTab === tab.id && (
+                            <div className="absolute bottom-[-1px] left-0 right-0 h-0.5 bg-primary animate-in fade-in slide-in-from-bottom-1" />
+                        )}
+                    </button>
+                ))}
             </div>
 
             {activeTab === 'stocks' && (
@@ -431,407 +462,419 @@ const StockManagement = () => {
                             <StatItem label="Total Entries" value={entries.length} />
                         </div>
 
-                    <div className="flex items-center gap-3">
-                        <div className="relative w-full sm:w-64">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
-                            <Input
-                                type="text"
-                                placeholder="Search entries..."
-                                className="pl-9"
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                            />
+                        <div className="flex items-center gap-3">
+                            <div className="relative w-full sm:w-64">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
+                                <Input
+                                    type="text"
+                                    placeholder="Search entries..."
+                                    className="pl-9"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                            </div>
+
+                            <Select value={filterType} onValueChange={setFilterType}>
+                                <SelectTrigger className="w-[150px] h-10">
+                                    <SelectValue placeholder="All Types" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectGroup>
+                                        <SelectLabel>Type</SelectLabel>
+                                        <SelectItem value="all">All Types</SelectItem>
+                                        <SelectItem value="in">Stock In</SelectItem>
+                                        <SelectItem value="out">Stock Out</SelectItem>
+                                    </SelectGroup>
+                                </SelectContent>
+                            </Select>
+
+                            <Select value={filterGodown} onValueChange={setFilterGodown}>
+                                <SelectTrigger className="w-[180px] h-10">
+                                    <SelectValue placeholder="All Godowns" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectGroup>
+                                        <SelectLabel>Godown</SelectLabel>
+                                        <SelectItem value="all">All Godowns</SelectItem>
+                                        {godowns.map(g => (
+                                            <SelectItem key={g.godown_id} value={g.godown_id}>{g.name}</SelectItem>
+                                        ))}
+                                    </SelectGroup>
+                                </SelectContent>
+                            </Select>
+
+                            {!loading && (
+                                <Button onClick={() => handleOpenModal()} className="gap-2 px-4 shadow-sm font-medium">
+                                    <Plus size={20} />
+                                    <span>New Entry</span>
+                                </Button>
+                            )}
                         </div>
+                    </div>
 
-                        <Select value={filterType} onValueChange={setFilterType}>
-                            <SelectTrigger className="w-[150px] h-10">
-                                <SelectValue placeholder="All Types" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectGroup>
-                                    <SelectLabel>Type</SelectLabel>
-                                    <SelectItem value="all">All Types</SelectItem>
-                                    <SelectItem value="in">Stock In</SelectItem>
-                                    <SelectItem value="out">Stock Out</SelectItem>
-                                </SelectGroup>
-                            </SelectContent>
-                        </Select>
-
-                        <Select value={filterGodown} onValueChange={setFilterGodown}>
-                            <SelectTrigger className="w-[180px] h-10">
-                                <SelectValue placeholder="All Godowns" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectGroup>
-                                    <SelectLabel>Godown</SelectLabel>
-                                    <SelectItem value="all">All Godowns</SelectItem>
-                                    {godowns.map(g => (
-                                        <SelectItem key={g.godown_id} value={g.godown_id}>{g.name}</SelectItem>
-                                    ))}
-                                </SelectGroup>
-                            </SelectContent>
-                        </Select>
-
-                        {!loading && (
-                            <Button onClick={() => handleOpenModal()} className="gap-2 px-4 shadow-sm font-medium">
-                                <Plus size={20} />
-                                <span>New Entry</span>
-                            </Button>
+                    {/* Mobile View */}
+                    <div className="md:hidden space-y-3">
+                        {loading ? (
+                            <div className="text-center py-10 text-slate-500">Loading...</div>
+                        ) : currentItems.length === 0 ? (
+                            <div className="text-center py-10 text-slate-500">No entries found.</div>
+                        ) : (
+                            currentItems.map((e) => (
+                                <MobileEntryCard
+                                    key={e.entry_id}
+                                    entry={e}
+                                    getGodownName={getGodownName}
+                                    getProductName={getProductName}
+                                    onEdit={() => handleOpenModal(e)}
+                                    onDelete={() => handleDelete(e)}
+                                />
+                            ))
                         )}
                     </div>
-                </div>
 
-                {/* Mobile View */}
-                <div className="md:hidden space-y-3">
-                    {loading ? (
-                        <div className="text-center py-10 text-slate-500">Loading...</div>
-                    ) : currentItems.length === 0 ? (
-                        <div className="text-center py-10 text-slate-500">No entries found.</div>
-                    ) : (
-                        currentItems.map((e) => (
-                            <MobileEntryCard
-                                key={e.entry_id}
-                                entry={e}
-                                getGodownName={getGodownName}
-                                getProductName={getProductName}
-                                onEdit={() => handleOpenModal(e)}
-                                onDelete={() => handleDelete(e)}
+                    {/* Desktop View */}
+                    <div className="hidden md:flex bg-white rounded-2xl shadow-sm border border-slate-200/60 flex-col">
+                        <div className="overflow-x-auto custom-scrollbar">
+                            <table className="w-full text-left border-collapse">
+                                <thead>
+                                    <tr className="bg-slate-50/50 border-b border-slate-100 sticky top-0 z-10 backdrop-blur-md">
+                                        <HeaderCell>Entry ID</HeaderCell>
+                                        <HeaderCell>Type</HeaderCell>
+                                        <HeaderCell>Product</HeaderCell>
+                                        <HeaderCell>Godown</HeaderCell>
+                                        <HeaderCell>Qty</HeaderCell>
+                                        <HeaderCell>Opening</HeaderCell>
+                                        <HeaderCell>Closing</HeaderCell>
+                                        <HeaderCell>Date</HeaderCell>
+                                        <HeaderCell align="right">Actions</HeaderCell>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {loading ? (
+                                        <EmptyRow message="Loading..." />
+                                    ) : currentItems.length === 0 ? (
+                                        <EmptyRow message="No entries found." />
+                                    ) : (
+                                        currentItems.map((e) => (
+                                            <EntryRow
+                                                key={e.entry_id}
+                                                entry={e}
+                                                getGodownName={getGodownName}
+                                                getProductName={getProductName}
+                                                onEdit={() => handleOpenModal(e)}
+                                                onDelete={() => handleDelete(e)}
+                                            />
+                                        ))
+                                    )}
+                                    {Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
+                                        <tr key={`empty-${i}`}><td colSpan="8" className="h-16"></td></tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {!loading && filteredEntries.length > 0 && (
+                            <Pagination
+                                currentPage={currentPage}
+                                totalPages={totalPages}
+                                totalItems={filteredEntries.length}
+                                startIndex={(currentPage - 1) * ITEMS_PER_PAGE + 1}
+                                endIndex={Math.min(currentPage * ITEMS_PER_PAGE, filteredEntries.length)}
+                                onPageChange={setCurrentPage}
+                                className="border-t border-slate-100"
                             />
-                        ))
-                    )}
-                </div>
-
-                {/* Desktop View */}
-                <div className="hidden md:flex bg-white rounded-2xl shadow-sm border border-slate-200/60 flex-col">
-                    <div className="overflow-x-auto custom-scrollbar">
-                        <table className="w-full text-left border-collapse">
-                            <thead>
-                                <tr className="bg-slate-50/50 border-b border-slate-100 sticky top-0 z-10 backdrop-blur-md">
-                                    <HeaderCell>Entry ID</HeaderCell>
-                                    <HeaderCell>Type</HeaderCell>
-                                    <HeaderCell>Product</HeaderCell>
-                                    <HeaderCell>Godown</HeaderCell>
-                                    <HeaderCell>Qty</HeaderCell>
-                                    <HeaderCell>Opening</HeaderCell>
-                                    <HeaderCell>Closing</HeaderCell>
-                                    <HeaderCell>Date</HeaderCell>
-                                    <HeaderCell align="right">Actions</HeaderCell>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {loading ? (
-                                    <EmptyRow message="Loading..." />
-                                ) : currentItems.length === 0 ? (
-                                    <EmptyRow message="No entries found." />
-                                ) : (
-                                    currentItems.map((e) => (
-                                        <EntryRow
-                                            key={e.entry_id}
-                                            entry={e}
-                                            getGodownName={getGodownName}
-                                            getProductName={getProductName}
-                                            onEdit={() => handleOpenModal(e)}
-                                            onDelete={() => handleDelete(e)}
-                                        />
-                                    ))
-                                )}
-                                {Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
-                                    <tr key={`empty-${i}`}><td colSpan="8" className="h-16"></td></tr>
-                                ))}
-                            </tbody>
-                        </table>
+                        )}
                     </div>
 
                     {!loading && filteredEntries.length > 0 && (
-                        <Pagination
-                            currentPage={currentPage}
-                            totalPages={totalPages}
-                            totalItems={filteredEntries.length}
-                            startIndex={(currentPage - 1) * ITEMS_PER_PAGE + 1}
-                            endIndex={Math.min(currentPage * ITEMS_PER_PAGE, filteredEntries.length)}
-                            onPageChange={setCurrentPage}
-                            className="border-t border-slate-100"
-                        />
-                    )}
-                </div>
-
-                {!loading && filteredEntries.length > 0 && (
-                    <div className="md:hidden shrink-0 mt-auto">
-                        <Pagination
-                            currentPage={currentPage}
-                            totalPages={totalPages}
-                            totalItems={filteredEntries.length}
-                            startIndex={(currentPage - 1) * ITEMS_PER_PAGE + 1}
-                            endIndex={Math.min(currentPage * ITEMS_PER_PAGE, filteredEntries.length)}
-                            onPageChange={setCurrentPage}
-                            className="bg-white border-t border-slate-200 rounded-t-xl shadow-sm"
-                        />
-                    </div>
-                )}
-
-            {/* Modal */}
-            {isModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={handleCloseModal}></div>
-                    <div className="relative bg-white rounded-2xl shadow-xl w-full sm:max-w-2xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
-                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
-                            <h2 className="text-xl font-bold text-slate-800">
-                                {editingEntry ? 'Edit Entry' : 'New Stock Entry'}
-                            </h2>
-                            <Button variant="ghost" size="icon" type="button" onClick={handleCloseModal} className="rounded-full text-slate-400 hover:text-slate-600">
-                                <X size={20} />
-                            </Button>
+                        <div className="md:hidden shrink-0 mt-auto">
+                            <Pagination
+                                currentPage={currentPage}
+                                totalPages={totalPages}
+                                totalItems={filteredEntries.length}
+                                startIndex={(currentPage - 1) * ITEMS_PER_PAGE + 1}
+                                endIndex={Math.min(currentPage * ITEMS_PER_PAGE, filteredEntries.length)}
+                                onPageChange={setCurrentPage}
+                                className="bg-white border-t border-slate-200 rounded-t-xl shadow-sm"
+                            />
                         </div>
+                    )}
 
-                        <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
-                            <form onSubmit={handleSubmit} className="space-y-5">
-                                <div className="space-y-2">
-                                    <label className="block text-sm font-medium text-slate-700">Type <span className="text-red-500">*</span></label>
-                                    <div className="flex gap-2">
-                                        <button
-                                            type="button"
-                                            onClick={() => setFormData(prev => ({ ...prev, transaction_type: 'in' }))}
-                                            className={cn(
-                                                "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all",
-                                                formData.transaction_type === 'in'
-                                                    ? 'border-primary bg-primary/10 text-primary'
-                                                    : 'border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
-                                            )}
-                                        >
-                                            <ArrowDown size={16} />
-                                            Stock In
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setFormData(prev => ({ ...prev, transaction_type: 'out' }))}
-                                            className={cn(
-                                                "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all",
-                                                formData.transaction_type === 'out'
-                                                    ? 'border-primary bg-primary/10 text-primary'
-                                                    : 'border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
-                                            )}
-                                        >
-                                            <ArrowUp size={16} />
-                                            Stock Out
-                                        </button>
-                                    </div>
+                    {/* Modal */}
+                    {isModalOpen && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+                            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={handleCloseModal}></div>
+                            <div className="relative bg-white rounded-2xl shadow-xl w-full sm:max-w-2xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
+                                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
+                                    <h2 className="text-xl font-bold text-slate-800">
+                                        {editingEntry ? 'Edit Entry' : 'New Stock Entry'}
+                                    </h2>
+                                    <Button variant="ghost" size="icon" type="button" onClick={handleCloseModal} className="rounded-full text-slate-400 hover:text-slate-600">
+                                        <X size={20} />
+                                    </Button>
                                 </div>
 
-                                <div className="space-y-1.5">
-                                    <label className="block text-sm font-medium text-slate-700">Date</label>
-                                    <DatePicker
-                                        value={formData.date}
-                                        onChange={handleDateChange}
-                                    />
-                                </div>
-
-                                <div className="space-y-1.5">
-                                    <label className="block text-sm font-medium text-slate-700">Godown <span className="text-red-500">*</span></label>
-                                    <SearchableSelect
-                                        options={godowns.map(g => ({ value: g.godown_id, label: g.name }))}
-                                        value={formData.godown_id}
-                                        onChange={(val) => setFormData(prev => ({ ...prev, godown_id: val }))}
-                                        placeholder="Select Godown"
-                                        searchPlaceholder="Search godowns..."
-                                        error={errors.godown_id}
-                                    />
-                                </div>
-
-                                {formData.transaction_type === 'in' && (
-                                    <div className="space-y-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
-                                        <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                                            <Truck size={16} />
-                                            Transporter Details
-                                        </h3>
+                                <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
+                                    <form onSubmit={handleSubmit} className="space-y-5">
+                                        <div className="space-y-2">
+                                            <label className="block text-sm font-medium text-slate-700">Type <span className="text-red-500">*</span></label>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setFormData(prev => ({ ...prev, transaction_type: 'in' }))}
+                                                    className={cn(
+                                                        "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all",
+                                                        formData.transaction_type === 'in'
+                                                            ? 'border-primary bg-primary/10 text-primary'
+                                                            : 'border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
+                                                    )}
+                                                >
+                                                    <ArrowDown size={16} />
+                                                    Stock In
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setFormData(prev => ({ ...prev, transaction_type: 'out' }))}
+                                                    className={cn(
+                                                        "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all",
+                                                        formData.transaction_type === 'out'
+                                                            ? 'border-primary bg-primary/10 text-primary'
+                                                            : 'border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
+                                                    )}
+                                                >
+                                                    <ArrowUp size={16} />
+                                                    Stock Out
+                                                </button>
+                                            </div>
+                                        </div>
 
                                         <div className="space-y-1.5">
-                                            <label className="block text-sm font-medium text-slate-700">Transporter Name <span className="text-red-500">*</span></label>
-                                            <SearchableSelect
-                                                options={transporters.map(t => ({ value: t.transporter_id, label: t.name }))}
-                                                value={formData.transporter_id}
-                                                onChange={(val) => setFormData(prev => ({ ...prev, transporter_id: val }))}
-                                                placeholder="Select Transporter"
-                                                searchPlaceholder="Search transporters..."
-                                                error={errors.transporter_id}
+                                            <label className="block text-sm font-medium text-slate-700">Date</label>
+                                            <DatePicker
+                                                value={formData.date}
+                                                onChange={handleDateChange}
                                             />
                                         </div>
 
-                                        <FormField
-                                            label="LR Number" name="lr_number" value={formData.lr_number}
-                                            onChange={handleInputChange}
-                                            placeholder="Enter LR Number"
-                                            error={errors.lr_number}
-                                        />
-
                                         <div className="space-y-1.5">
-                                            <label className="block text-sm font-medium text-slate-700">From Location <span className="text-red-500">*</span></label>
+                                            <label className="block text-sm font-medium text-slate-700">Godown <span className="text-red-500">*</span></label>
                                             <SearchableSelect
                                                 options={godowns.map(g => ({ value: g.godown_id, label: g.name }))}
-                                                value={formData.from_location}
-                                                onChange={(val) => setFormData(prev => ({ ...prev, from_location: val }))}
-                                                placeholder="Select Location"
-                                                searchPlaceholder="Search locations..."
-                                                error={errors.from_location}
+                                                value={formData.godown_id}
+                                                onChange={(val) => setFormData(prev => ({ ...prev, godown_id: val }))}
+                                                placeholder="Select Godown"
+                                                searchPlaceholder="Search godowns..."
+                                                error={errors.godown_id}
                                             />
                                         </div>
 
-                                        <FormField
-                                            label="Freight Amount" name="freight_amount" type="number" value={formData.freight_amount}
-                                            onChange={handleInputChange}
-                                            placeholder="Enter freight amount"
-                                        />
-                                    </div>
-                                )}
+                                        {formData.transaction_type === 'in' && (
+                                            <div className="space-y-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
+                                                <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                                                    <Truck size={16} />
+                                                    Transporter Details
+                                                </h3>
 
-                                <div className="space-y-3">
-                                    <div className="flex items-center justify-between">
-                                        <label className="block text-sm font-medium text-slate-700">
-                                            Products <span className="text-red-500">*</span>
-                                        </label>
-                                        {formData.productItems.length > 0 && !editingEntry && (
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={() => setFormData(prev => ({ ...prev, productItems: [] }))}
-                                                className="h-auto p-0 text-xs text-slate-500 hover:text-red-500"
-                                            >
-                                                Clear All
-                                            </Button>
+                                                <div className="space-y-1.5">
+                                                    <label className="block text-sm font-medium text-slate-700">Transporter Name <span className="text-red-500">*</span></label>
+                                                    <SearchableSelect
+                                                        options={transporters.map(t => ({ value: t.transporter_id, label: t.name }))}
+                                                        value={formData.transporter_id}
+                                                        onChange={(val) => setFormData(prev => ({ ...prev, transporter_id: val }))}
+                                                        placeholder="Select Transporter"
+                                                        searchPlaceholder="Search transporters..."
+                                                        error={errors.transporter_id}
+                                                    />
+                                                </div>
+
+                                                <FormField
+                                                    label="LR Number" name="lr_number" value={formData.lr_number}
+                                                    onChange={handleInputChange}
+                                                    placeholder="Enter LR Number"
+                                                    error={errors.lr_number}
+                                                />
+
+                                                <div className="space-y-1.5">
+                                                    <label className="block text-sm font-medium text-slate-700">From Location <span className="text-red-500">*</span></label>
+                                                    <SearchableSelect
+                                                        options={godowns.map(g => ({ value: g.godown_id, label: g.name }))}
+                                                        value={formData.from_location}
+                                                        onChange={(val) => setFormData(prev => ({ ...prev, from_location: val }))}
+                                                        placeholder="Select Location"
+                                                        searchPlaceholder="Search locations..."
+                                                        error={errors.from_location}
+                                                    />
+                                                </div>
+
+                                                <FormField
+                                                    label="Freight Amount" name="freight_amount" type="number" value={formData.freight_amount}
+                                                    onChange={handleInputChange}
+                                                    placeholder="Enter freight amount"
+                                                />
+                                            </div>
                                         )}
-                                    </div>
-                                    {errors.productItems && (
-                                        <p className="text-red-500 text-xs">{errors.productItems}</p>
-                                    )}
 
-                                    {!editingEntry && (
-                                        <div className="flex gap-2 p-3 bg-slate-50 rounded-lg border-2 border-dashed border-slate-200 hover:border-primary/50 transition-colors">
-                                            <div className="flex-1">
-                                                <SearchableSelect
-                                                    options={availableProducts.map(p => ({ value: p.product_id, label: p.name }))}
-                                                    value={selectedProduct}
-                                                    onChange={(val) => setSelectedProduct(val)}
-                                                    placeholder="Search and select product..."
-                                                    searchPlaceholder="Search products..."
-                                                />
+                                        <div className="space-y-3">
+                                            <div className="flex items-center justify-between">
+                                                <label className="block text-sm font-medium text-slate-700">
+                                                    Products <span className="text-red-500">*</span>
+                                                </label>
+                                                {formData.productItems.length > 0 && !editingEntry && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => setFormData(prev => ({ ...prev, productItems: [] }))}
+                                                        className="h-auto p-0 text-xs text-slate-500 hover:text-red-500"
+                                                    >
+                                                        Clear All
+                                                    </Button>
+                                                )}
                                             </div>
-                                            <div className="w-28">
-                                                <Input
-                                                    type="number"
-                                                    min="1"
-                                                    value={selectedQty}
-                                                    onChange={(e) => setSelectedQty(e.target.value)}
-                                                    placeholder="Qty"
-                                                    className="h-10 text-center font-medium"
-                                                />
-                                            </div>
-                                            <Button
-                                                type="button"
-                                                onClick={addProductItem}
-                                                className="h-10 px-4"
-                                                disabled={!selectedProduct || !selectedQty}
-                                            >
-                                                <Plus size={18} />
-                                                <span className="ml-1">Add</span>
-                                            </Button>
-                                        </div>
-                                    )}
+                                            {errors.productItems && (
+                                                <p className="text-red-500 text-xs">{errors.productItems}</p>
+                                            )}
 
-                                    {formData.productItems.length === 0 ? (
-                                        <div className="text-center py-8 px-4 bg-slate-50 rounded-lg border border-slate-200">
-                                            <Package className="mx-auto h-10 w-10 text-slate-300 mb-2" />
-                                            <p className="text-sm text-slate-500">No products added yet</p>
-                                            <p className="text-xs text-slate-400 mt-1">Select products above to add them</p>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-2">
-                                            <div className="flex items-center justify-between px-1">
-                                                <span className="text-xs text-slate-500">{formData.productItems.length} product(s) selected</span>
-                                                <span className="text-xs text-slate-500 font-medium">
-                                                    Total Qty: {formData.productItems.reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0)}
-                                                </span>
-                                            </div>
-                                            <div className="max-h-48 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                                                {formData.productItems.map((item) => {
-                                                    const product = products.find(p => p.product_id === item.product_id);
-                                                    return (
-                                                        <div
-                                                            key={item.product_id}
-                                                            className="flex items-center gap-3 p-3 bg-white rounded-lg border border-slate-200 hover:border-slate-300 transition-colors group"
-                                                        >
-                                                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                                                                <Package size={14} className="text-primary" />
-                                                            </div>
-                                                            <div className="flex-1 min-w-0">
-                                                                <p className="text-sm font-medium text-slate-900 truncate">
-                                                                    {getProductName(item.product_id)}
-                                                                </p>
-                                                                {product?.sku && (
-                                                                    <p className="text-xs text-slate-400">SKU: {product.sku}</p>
-                                                                )}
-                                                            </div>
-                                                            <div className="flex items-center gap-2">
-                                                                <div className="flex items-center gap-1">
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => updateProductQty(item.product_id, Math.max(1, (parseInt(item.quantity) || 1) - 1))}
-                                                                        className="w-7 h-7 rounded-md bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors"
-                                                                    >
-                                                                        <span className="text-sm font-medium">−</span>
-                                                                    </button>
-                                                                    <Input
-                                                                        type="number"
-                                                                        min="1"
-                                                                        value={item.quantity}
-                                                                        onChange={(e) => updateProductQty(item.product_id, e.target.value)}
-                                                                        className="w-16 h-8 text-center font-medium text-sm"
-                                                                    />
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => updateProductQty(item.product_id, (parseInt(item.quantity) || 1) + 1)}
-                                                                        className="w-7 h-7 rounded-md bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors"
-                                                                    >
-                                                                        <span className="text-sm font-medium">+</span>
-                                                                    </button>
+                                            {!editingEntry && (
+                                                <div className="flex gap-2 p-3 bg-slate-50 rounded-lg border-2 border-dashed border-slate-200 hover:border-primary/50 transition-colors">
+                                                    <div className="flex-1">
+                                                        <SearchableSelect
+                                                            options={availableProducts.map(p => ({ 
+                                                                value: p.product_id, 
+                                                                label: p.name,
+                                                                stock: p.closing_quantity || 0
+                                                            }))}
+                                                            renderOption={(option) => (
+                                                                <div className="flex items-center justify-between w-full gap-4">
+                                                                    <span className="truncate">{option.label}</span>
+                                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                                        <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Stock:</span>
+                                                                        <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200/60 min-w-[2.5rem] text-center">
+                                                                            {parseFloat(option.stock).toLocaleString()}
+                                                                        </span>
+                                                                    </div>
                                                                 </div>
-                                                                {!editingEntry && (
-                                                                    <Button
-                                                                        type="button"
-                                                                        variant="ghost"
-                                                                        size="icon"
-                                                                        onClick={() => removeProductItem(item.product_id)}
-                                                                        className="h-8 w-8 text-slate-400 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all"
-                                                                    >
-                                                                        <X size={14} />
-                                                                    </Button>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                                </form>
-                        </div>
+                                                            )}
+                                                            value={selectedProduct}
+                                                            onChange={(val) => setSelectedProduct(val)}
+                                                            placeholder="Search and select product..."
+                                                            searchPlaceholder="Search products..."
+                                                        />
+                                                    </div>
+                                                    <div className="w-28">
+                                                        <Input
+                                                            type="number"
+                                                            min="1"
+                                                            value={selectedQty}
+                                                            onChange={(e) => setSelectedQty(e.target.value)}
+                                                            placeholder="Qty"
+                                                            className="h-10 text-center font-medium"
+                                                        />
+                                                    </div>
+                                                    <Button
+                                                        type="button"
+                                                        onClick={addProductItem}
+                                                        className="h-10 px-4"
+                                                        disabled={!selectedProduct || !selectedQty}
+                                                    >
+                                                        <Plus size={18} />
+                                                        <span className="ml-1">Add</span>
+                                                    </Button>
+                                                </div>
+                                            )}
 
-                        <div className="p-4 sm:px-6 border-t border-slate-100 bg-slate-50 rounded-b-2xl grid grid-cols-2 gap-3 sm:flex sm:justify-end">
-                            <Button type="button" variant="outline" onClick={handleCloseModal} className="w-full sm:w-auto px-5 py-2.5 sm:py-2 text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 font-medium transition-colors text-sm sm:text-base">Cancel</Button>
-                            <Button onClick={handleSubmit} className="w-full sm:w-auto px-5 py-2.5 sm:py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 font-medium transition-colors shadow-sm text-sm sm:text-base">
-                                {editingEntry ? 'Save Changes' : 'Create Entry'}
-                            </Button>
+                                            {formData.productItems.length === 0 ? (
+                                                <div className="text-center py-8 px-4 bg-slate-50 rounded-lg border border-slate-200">
+                                                    <Package className="mx-auto h-10 w-10 text-slate-300 mb-2" />
+                                                    <p className="text-sm text-slate-500">No products added yet</p>
+                                                    <p className="text-xs text-slate-400 mt-1">Select products above to add them</p>
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-2">
+                                                    <div className="flex items-center justify-between px-1">
+                                                        <span className="text-xs text-slate-500">{formData.productItems.length} product(s) selected</span>
+                                                        <span className="text-xs text-slate-500 font-medium">
+                                                            Total Qty: {formData.productItems.reduce((sum, item) => sum + (parseInt(item.quantity) || 0), 0)}
+                                                        </span>
+                                                    </div>
+                                                    <div className="max-h-48 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                                                        {formData.productItems.map((item) => {
+                                                            const product = products.find(p => p.product_id === item.product_id);
+                                                            return (
+                                                                <div
+                                                                    key={item.product_id}
+                                                                    className="flex items-center gap-3 p-3 bg-white rounded-lg border border-slate-200 hover:border-slate-300 transition-colors group"
+                                                                >
+                                                                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                                                                        <Package size={14} className="text-primary" />
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <p className="text-sm font-medium text-slate-900 truncate">
+                                                                            {getProductName(item.product_id)}
+                                                                        </p>
+                                                                        {/* SKU removed */}
+                                                                    </div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <div className="flex items-center gap-1">
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => updateProductQty(item.product_id, Math.max(1, (parseInt(item.quantity) || 1) - 1))}
+                                                                                className="w-7 h-7 rounded-md bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors"
+                                                                            >
+                                                                                <span className="text-sm font-medium">−</span>
+                                                                            </button>
+                                                                            <Input
+                                                                                type="number"
+                                                                                min="1"
+                                                                                value={item.quantity}
+                                                                                onChange={(e) => updateProductQty(item.product_id, e.target.value)}
+                                                                                className="w-16 h-8 text-center font-medium text-sm"
+                                                                            />
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => updateProductQty(item.product_id, (parseInt(item.quantity) || 1) + 1)}
+                                                                                className="w-7 h-7 rounded-md bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-colors"
+                                                                            >
+                                                                                <span className="text-sm font-medium">+</span>
+                                                                            </button>
+                                                                        </div>
+                                                                        {!editingEntry && (
+                                                                            <Button
+                                                                                type="button"
+                                                                                variant="ghost"
+                                                                                size="icon"
+                                                                                onClick={() => removeProductItem(item.product_id)}
+                                                                                className="h-8 w-8 text-slate-400 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all"
+                                                                            >
+                                                                                <X size={14} />
+                                                                            </Button>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </form>
+                                </div>
+
+                                <div className="p-4 sm:px-6 border-t border-slate-100 bg-slate-50 rounded-b-2xl grid grid-cols-2 gap-3 sm:flex sm:justify-end">
+                                    <Button type="button" variant="outline" onClick={handleCloseModal} className="w-full sm:w-auto px-5 py-2.5 sm:py-2 text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 font-medium transition-colors text-sm sm:text-base">Cancel</Button>
+                                    <Button onClick={handleSubmit} className="w-full sm:w-auto px-5 py-2.5 sm:py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 font-medium transition-colors shadow-sm text-sm sm:text-base">
+                                        {editingEntry ? 'Save Changes' : 'Create Entry'}
+                                    </Button>
+                                </div>
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </div>
             )}
-        </div>
-    )}
 
-        {activeTab === 'products' && <Products isTab={true} />}
-        {activeTab === 'godowns' && <Godowns isTab={true} />}
-        {activeTab === 'transporters' && <Transporters isTab={true} />}
-        {activeTab === 'internal-transactions' && <InternalTransactions isTab={true} />}
+            {activeTab === 'products' && <Products isTab={true} />}
+            {activeTab === 'godowns' && <Godowns isTab={true} />}
+            {activeTab === 'transporters' && <Transporters isTab={true} />}
 
         </div>
     );

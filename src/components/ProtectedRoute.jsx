@@ -25,6 +25,7 @@ const ProtectedRoute = ({ children }) => {
     const isAllowed =
       allowedPages.includes(currentPath) ||
       (currentPath === '/' && allowedPages.includes('/')) ||
+      (currentPath === 'stock-management' && ['products', 'godowns', 'transporters'].some(p => allowedPages.includes(p))) ||
       allowedPages.some(page =>
         page !== '/' && (currentPath === page || currentPath.startsWith(`${page}/`))
       );

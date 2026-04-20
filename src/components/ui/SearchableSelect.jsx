@@ -143,9 +143,11 @@ const SearchableSelect = ({
                                         value === option.value && 'bg-primary/5 text-primary'
                                     )}
                                 >
-                                    <span className="truncate">
-                                        {renderOption ? renderOption(option) : (option.label || option.name)}
-                                    </span>
+                                    {renderOption ? renderOption(option) : (
+                                        <span className="truncate">
+                                            {option.label || option.name}
+                                        </span>
+                                    )}
                                     {value === option.value && (
                                         <Check size={14} className="shrink-0 text-primary" />
                                     )}

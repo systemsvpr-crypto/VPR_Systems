@@ -8,7 +8,6 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Settings from './pages/Settings';
 import Godowns from './pages/Godowns';
 import Products from './pages/Products';
-import InternalTransactions from './pages/InternalTransactions';
 import StockNotifications from './pages/StockNotifications';
 import StockManagement from './pages/StockManagement';
 import LiveStockDashboard from './pages/LiveStockDashboard';
@@ -33,7 +32,6 @@ function App() {
             <Route path="godowns" element={<Godowns />} />
             <Route path="transporters" element={<Transporters />} />
             <Route path="products" element={<Products />} />
-            <Route path="internal-transactions" element={<InternalTransactions />} />
             <Route path="stock-notifications" element={<StockNotifications />} />
             <Route path="stock-management" element={<StockManagement />} />
             <Route path="live-stock-dashboard" element={<LiveStockDashboard />} />

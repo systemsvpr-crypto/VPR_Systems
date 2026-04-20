@@ -5,14 +5,13 @@ export const GENDERS = ['Male', 'Female', 'Other'];
 
 export const PAGES = [
     { id: 'my-profile', label: 'My Profile' },
-    { id: 'settings', label: 'Settings' },
+    { id: 'live-stock-dashboard', label: 'Live Stock Dashboard' },
+    { id: 'stock-management', label: 'Stocks' },
+    { id: 'products', label: 'Products' },
     { id: 'godowns', label: 'Godowns' },
     { id: 'transporters', label: 'Transporters' },
-    { id: 'products', label: 'Products' },
-    { id: 'internal-transactions', label: 'Internal Transfers' },
     { id: 'stock-notifications', label: 'Notifications' },
-    { id: 'stock-management', label: 'Stock Management' },
-    { id: 'live-stock-dashboard', label: 'Live Stock' },
+    { id: 'settings', label: 'Settings' },
 ];
 
 export const DEFAULT_USER_PAGES = ['my-profile'];
