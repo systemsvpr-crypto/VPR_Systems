@@ -17,7 +17,7 @@ const useAuthStore = create(
       },
     }),
     {
-      name: 'mesin-tech', // persists in localStorage
+      name: 'vpr', // persists in localStorage
     }
   )
 );

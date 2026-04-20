@@ -324,12 +324,12 @@ const Settings = () => {
                 toast.success('User updated successfully');
 
                 // Update local session if needed
-                if (currentUser && currentUser.user_id === editingUser.user_id) {
+                if (currentUser && (currentUser.user_id === editingUser.user_id || currentUser.username === editingUser.username)) {
                     const updatedUserCompat = {
                         ...currentUser,
                         ...userData,
                         Name: userData.full_name,
-                        Admin: (userData.role?.toLowerCase() === 'admin') ? 'Yes' : 'No'
+                        Admin: (userData.role?.toUpperCase() === 'ADMIN' || userData.role?.toUpperCase() === 'SUPER ADMIN') ? 'Yes' : 'No'
                     };
                     useAuthStore.getState().login(updatedUserCompat);
                     localStorage.setItem('user', JSON.stringify(updatedUserCompat));

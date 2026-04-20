@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Package, MapPin, RotateCcw, X, ArrowDown, ArrowUp, Download, RefreshCcw } from 'lucide-react';
+import { Search, Package, MapPin, RotateCcw, X, ArrowUp, Download, RefreshCcw } from 'lucide-react';
 import { supabase } from '../supabase';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
@@ -81,18 +81,6 @@ const LiveStockDashboard = () => {
         });
     }, [enrichedStock, searchTerm, filterGodown]);
 
-    // Metrics calculation
-    const metrics = useMemo(() => {
-        const totalProducts = products.length;
-        const totalWeight = enrichedStock.reduce((sum, s) => sum + ((parseFloat(s.mux) || 0) * (parseFloat(s.current_stock) || 0)), 0);
-        const lowStockItems = enrichedStock.filter(s => s.current_stock <= 10).length;
-
-        return {
-            totalProducts,
-            totalWeight: totalWeight.toFixed(2),
-            lowStockItems
-        };
-    }, [products, enrichedStock]);
 
     // Dynamic Master Summary Logic
     const dynamicSummary = useMemo(() => {
@@ -215,28 +203,6 @@ const LiveStockDashboard = () => {
                 <p className="text-slate-500 mt-1 text-sm">Manage and view inventory.</p>
             </div>
 
-            {/* Status Metrics Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-2">
-                <MetricCard 
-                    label="Total Products" 
-                    value={metrics.totalProducts} 
-                    icon={Package} 
-                    color="blue" 
-                />
-                <MetricCard 
-                    label="Total Weight (KG)" 
-                    value={metrics.totalWeight} 
-                    icon={MapPin} 
-                    color="indigo" 
-                />
-                <MetricCard 
-                    label="Low Stock Alert" 
-                    value={metrics.lowStockItems} 
-                    icon={ArrowDown} 
-                    color="red" 
-                    trend={metrics.lowStockItems > 0 ? "Check inventory" : "All good"}
-                />
-            </div>
 
             {/* Tabs */}
             <div className="flex items-center gap-6 border-b border-slate-200 mt-2">
@@ -641,29 +607,6 @@ const HeaderCell = ({ children, align = "left" }) => (
     </th>
 );
 
-const MetricCard = ({ label, value, icon: Icon, color, trend }) => {
-    const colors = {
-        blue: 'bg-blue-50 text-blue-600 border-blue-100',
-        indigo: 'bg-indigo-50 text-indigo-600 border-indigo-100',
-        orange: 'bg-orange-50 text-orange-600 border-orange-100',
-        red: 'bg-red-50 text-red-600 border-red-100',
-    };
-
-    return (
-        <div className={cn("p-4 rounded-2xl border flex flex-col gap-1 shadow-sm transition-all hover:shadow-md", colors[color])}>
-            <div className="flex items-center justify-between">
-                <div className={cn("p-2 rounded-xl bg-white/80")}>
-                    <Icon size={20} />
-                </div>
-                {trend && <span className="text-[10px] font-bold uppercase tracking-wider opacity-70">{trend}</span>}
-            </div>
-            <div className="mt-2">
-                <h3 className="text-2xl font-black">{value}</h3>
-                <p className="text-[11px] font-bold uppercase tracking-widest opacity-80">{label}</p>
-            </div>
-        </div>
-    );
-};
 const TransferModal = ({ details, transactions, godowns, products, onClose }) => {
     const getGodownName = (id) => godowns.find(g => g.godown_id === id)?.name || id;
     const getProductName = (id) => products.find(p => p.product_id === id)?.name || id;

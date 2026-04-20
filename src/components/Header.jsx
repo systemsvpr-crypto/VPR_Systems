@@ -143,6 +143,7 @@ const Header = ({ children }) => {
 
   const handleLogout = () => {
     logout();
+    localStorage.removeItem('user');
     navigate('/login');
     toast.success('Logged out successfully');
   };
@@ -290,7 +291,7 @@ const Header = ({ children }) => {
             >
               <div className="flex flex-col items-end hidden md:block text-right">
                 <p className="text-sm font-semibold text-slate-700 leading-tight group-hover:text-primary transition-colors">
-                  {user?.full_name || user?.Name || 'Guest User'}
+                  {user?.full_name || user?.Name || user?.username || 'Guest User'}
                 </p>
                 <p className="text-xs text-slate-500 font-medium capitalize">
                   {user?.role || user?.designation || 'User'}
@@ -313,7 +314,7 @@ const Header = ({ children }) => {
             {isDropdownOpen && (
               <div className="absolute right-0 mt-3 w-56 bg-white rounded-xl shadow-xl border border-slate-100 py-2 z-50 transform origin-top-right transition-all">
                 <div className="px-4 py-3 border-b border-slate-50">
-                  <p className="text-sm font-bold text-slate-800 truncate">{user?.full_name || user?.Name || 'Guest User'}</p>
+                  <p className="text-sm font-bold text-slate-800 truncate">{user?.full_name || user?.Name || user?.username || 'Guest User'}</p>
                   <p className="text-xs text-slate-500 truncate">{user?.email || 'No email'}</p>
                 </div>
 

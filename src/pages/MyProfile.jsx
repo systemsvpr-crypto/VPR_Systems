@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../supabase';
+import useAuthStore from '../store/authStore';
 import { USER_ROLES, GENDERS } from '../constants';
 import {
   Select,
@@ -112,6 +113,14 @@ const MyProfile = () => {
       if (!isEditing && profileData) {
         await supabase.from('users').update({ profile_picture: publicUrl }).eq('user_id', profileData.user_id);
         setProfileData(prev => ({ ...prev, profile_picture: publicUrl }));
+        
+        // Sync with store and localStorage
+        const currentUser = useAuthStore.getState().user;
+        if (currentUser) {
+          const updatedUser = { ...currentUser, profile_picture: publicUrl };
+          useAuthStore.getState().login(updatedUser);
+          localStorage.setItem('user', JSON.stringify(updatedUser));
+        }
         toast.success('Profile picture updated');
       }
 
@@ -160,6 +169,20 @@ const MyProfile = () => {
       setProfileData({ ...formData, password: '' });
       setFormData(prev => ({ ...prev, password: '' }));
       setIsEditing(false);
+
+      // Sync with store and localStorage
+      const currentUser = useAuthStore.getState().user;
+      if (currentUser) {
+        const updatedUser = {
+          ...currentUser,
+          ...cleanUpdates,
+          Name: cleanUpdates.full_name || currentUser.Name,
+          Admin: (cleanUpdates.role?.toUpperCase() === 'ADMIN' || cleanUpdates.role?.toUpperCase() === 'SUPER ADMIN') ? 'Yes' : 'No'
+        };
+        useAuthStore.getState().login(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      }
+
       toast.success("Profile updated successfully!");
 
     } catch (error) {

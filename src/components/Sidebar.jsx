@@ -70,8 +70,11 @@ const Sidebar = ({ onClose }) => {
               ...newData,
               page_access: newPageAccess || newData.page_access || currentUser.page_access,
               Name: newData.full_name || currentUser?.Name,
-              Admin: (newData.role?.toLowerCase() === 'admin' || newData.role === 'Admin') ? 'Yes' : 'No',
+              Admin: (newData.role?.toUpperCase() === 'ADMIN' || newData.role?.toUpperCase() === 'SUPER ADMIN') ? 'Yes' : 'No',
             };
+
+            // Sync with localStorage for components that don't use the store (e.g., ProtectedRoute)
+            localStorage.setItem('user', JSON.stringify(updatedUser));
 
             // Update the store immediately
             useAuthStore.getState().login(updatedUser);
@@ -86,6 +89,7 @@ const Sidebar = ({ onClose }) => {
   }, [user?.user_id]);
 
   const handleLogout = () => {
+    useAuthStore.getState().logout();
     localStorage.removeItem('user');
     navigate('/login', { replace: true });
   };
@@ -217,13 +221,11 @@ const SidebarContent = ({ menuItems, onClose, isCollapsed = false, user, handleL
     <div className={`flex items-center justify-between px-6 py-8 ${isCollapsed ? 'justify-center' : ''}`}>
       {!isCollapsed && (
         <div className="flex items-center gap-3 w-full">
-          <div className="flex items-center justify-center w-12 h-12">
-            <img src="/logo.png" alt="VPR System" className="w-full h-full object-contain" />
-          </div>
           <div className="flex flex-col">
-            <span className="text-lg font-bold text-sidebar-foreground tracking-tight leading-none">
-              VPR System
-            </span>
+            <h1 className="text-2xl font-extrabold tracking-tighter cursor-default">
+              <span className="text-blue-600">VPR</span>
+              <span className="text-slate-800 ml-1.5 uppercase">Systems</span>
+            </h1>
           </div>
         </div>
       )}
@@ -324,13 +326,17 @@ const SidebarContent = ({ menuItems, onClose, isCollapsed = false, user, handleL
     {/* Footer - Always visible */}
     <div className="p-4 mt-auto">
       <div className={`flex items-center gap-3 p-3 rounded-2xl ${isCollapsed ? 'justify-center' : 'bg-sidebar-accent/30 border border-sidebar-border/50'}`}>
-        <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shrink-0 border border-sidebar-border text-sidebar-primary shadow-sm">
-          <User size={20} />
+        <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shrink-0 border border-sidebar-border text-sidebar-primary shadow-sm overflow-hidden">
+          {user?.profile_picture ? (
+            <img src={user.profile_picture} alt="Profile" className="w-full h-full object-cover" />
+          ) : (
+            <User size={20} />
+          )}
         </div>
         {!isCollapsed && (
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-sidebar-foreground truncate">{user?.Name || user?.full_name || user?.Username || 'Guest'}</p>
-            <p className="text-xs text-sidebar-foreground/60 truncate capitalize">{user?.role || 'User'}</p>
+            <p className="text-sm font-semibold text-sidebar-foreground truncate">{user?.full_name || user?.Name || user?.username || 'Guest'}</p>
+            <p className="text-xs text-sidebar-foreground/60 truncate capitalize">{user?.role || user?.designation || 'User'}</p>
           </div>
         )}
         {!isCollapsed && (
