@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Package, MapPin, RotateCcw, X, ArrowDown, ArrowUp, Truck } from 'lucide-react';
+import { Search, Package, MapPin, RotateCcw, X, ArrowDown, ArrowUp } from 'lucide-react';
 import { supabase } from '../supabase';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
@@ -13,7 +13,6 @@ const LiveStockDashboard = () => {
     const [activeTab, setActiveTab] = useState('master');
     const [products, setProducts] = useState([]);
     const [godowns, setGodowns] = useState([]);
-    const [transporters, setTransporters] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [filterGodown, setFilterGodown] = useState('');
@@ -21,7 +20,7 @@ const LiveStockDashboard = () => {
     const [currentPage, setCurrentPage] = useState(1);
     const [summaryDate, setSummaryDate] = useState(new Date().toISOString().split('T')[0]);
     const [dayTransactions, setDayTransactions] = useState([]);
-    const [stockOutEntries, setStockOutEntries] = useState([]);
+    const [selectedTransfer, setSelectedTransfer] = useState(null);
 
     useEffect(() => {
         fetchData();
@@ -34,22 +33,15 @@ const LiveStockDashboard = () => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const [productsRes, godownsRes, transactionsRes, stockOutRes, transportersRes] = await Promise.all([
+            const [productsRes, godownsRes, transactionsRes] = await Promise.all([
                 supabase.from('products').select('*').eq('is_active', true).order('name', { ascending: true }),
                 supabase.from('godowns').select('*').eq('is_active', true).order('name', { ascending: true }),
-                supabase.from('stock_management').select('*').eq('date', summaryDate),
-                supabase.from('stock_management')
-                    .select('*, transporters(name), godowns!stock_management_godown_id_fkey(name)')
-                    .eq('transaction_type', 'out')
-                    .order('created_at', { ascending: false }),
-                supabase.from('transporters').select('*').eq('is_active', true)
+                supabase.from('stock_management').select('*').eq('date', summaryDate)
             ]);
             
             setProducts(productsRes.data || []);
             setGodowns(godownsRes.data || []);
             setDayTransactions(transactionsRes.data || []);
-            setStockOutEntries(stockOutRes.data || []);
-            setTransporters(transportersRes.data || []);
         } catch (error) {
             console.error('Error fetching data:', error);
             toast.error('Failed to fetch stock data');
@@ -91,15 +83,13 @@ const LiveStockDashboard = () => {
         const totalProducts = products.length;
         const totalWeight = enrichedStock.reduce((sum, s) => sum + ((parseFloat(s.mux) || 0) * (parseFloat(s.current_stock) || 0)), 0);
         const lowStockItems = enrichedStock.filter(s => s.current_stock <= 10).length;
-        const activeTransits = stockOutEntries.length;
 
         return {
             totalProducts,
             totalWeight: totalWeight.toFixed(2),
-            lowStockItems,
-            activeTransits
+            lowStockItems
         };
-    }, [products, enrichedStock, stockOutEntries]);
+    }, [products, enrichedStock]);
 
     // Dynamic Master Summary Logic
     const dynamicSummary = useMemo(() => {
@@ -125,6 +115,10 @@ const LiveStockDashboard = () => {
                 opening_stock: isToday ? opening_stock : '-', // Only accurate for today without historical chain
                 in_stock,
                 out_stock,
+                transfers: dayTransactions.filter(t => t.product_id === p.product_id && (t.godown_id === p.godown_id ? t.from_location : t.from_location === p.godown_id)).length > 0
+                    ? (dayTransactions.filter(t => t.product_id === p.product_id && t.godown_id === p.godown_id && t.from_location).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0) +
+                       dayTransactions.filter(t => t.product_id === p.product_id && t.from_location === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0))
+                    : 0,
                 closing_stock: isToday ? closing_stock : '-',
                 master_opening: p.opening_quantity || 0,
                 master_closing: p.closing_quantity || 0,
@@ -206,12 +200,6 @@ const LiveStockDashboard = () => {
                     color="red" 
                     trend={metrics.lowStockItems > 0 ? "Check inventory" : "All good"}
                 />
-                <MetricCard 
-                    label="In-Transit" 
-                    value={metrics.activeTransits} 
-                    icon={Truck} 
-                    color="orange" 
-                />
             </div>
 
             {/* Tabs */}
@@ -227,18 +215,6 @@ const LiveStockDashboard = () => {
                     className={`pb-3 text-sm font-medium transition-all ${activeTab === 'live' ? 'text-primary border-b-2 border-primary translate-y-[1px]' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                     Live Stock
-                </button>
-                <button
-                    onClick={() => setActiveTab('in-transit')}
-                    className={`pb-3 text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'in-transit' ? 'text-primary border-b-2 border-primary translate-y-[1px]' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    <Truck size={16} />
-                    In-Transit
-                    {stockOutEntries.length > 0 && (
-                        <span className="px-1.5 py-0.5 bg-orange-100 text-orange-600 text-xs font-medium rounded-full">
-                            {stockOutEntries.length}
-                        </span>
-                    )}
                 </button>
             </div>
 
@@ -285,6 +261,7 @@ const LiveStockDashboard = () => {
                                         <HeaderCell>In</HeaderCell>
                                         <HeaderCell>Out</HeaderCell>
                                         <HeaderCell>Closing</HeaderCell>
+                                        <HeaderCell>Transfers</HeaderCell>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
@@ -313,6 +290,21 @@ const LiveStockDashboard = () => {
                                                 <td className="px-4 py-3 text-sm font-medium text-green-600">+{totalIn.toLocaleString()}</td>
                                                 <td className="px-4 py-3 text-sm font-medium text-red-600">-{totalOut.toLocaleString()}</td>
                                                 <td className="px-4 py-3 text-sm font-bold">{isToday ? totalClosing.toLocaleString() : '-'}</td>
+                                                <td className="px-4 py-3">
+                                                    <button 
+                                                        onClick={() => setSelectedTransfer({ type: 'godown', id: godown.godown_id, name: godown.name })}
+                                                        className={cn(
+                                                            "text-sm font-medium px-2 py-1 rounded-md transition-colors",
+                                                            (dayTransactions.filter(t => t.godown_id === godown.godown_id && t.from_location).length > 0 || 
+                                                             dayTransactions.filter(t => t.from_location === godown.godown_id).length > 0)
+                                                            ? "bg-blue-50 text-blue-600 hover:bg-blue-100"
+                                                            : "text-slate-400 cursor-default"
+                                                        )}
+                                                    >
+                                                        {(dayTransactions.filter(t => t.godown_id === godown.godown_id && t.from_location).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0) +
+                                                         dayTransactions.filter(t => t.from_location === godown.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0)).toLocaleString()}
+                                                    </button>
+                                                </td>
                                             </tr>
                                         );
                                     })}
@@ -341,6 +333,7 @@ const LiveStockDashboard = () => {
                                             <HeaderCell>In Stock</HeaderCell>
                                             <HeaderCell>Out Stock</HeaderCell>
                                             <HeaderCell>Closing Stock</HeaderCell>
+                                            <HeaderCell>Transfers</HeaderCell>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
@@ -355,6 +348,17 @@ const LiveStockDashboard = () => {
                                                 <td className="px-4 py-3 text-sm font-medium text-green-600">+{s.in_stock}</td>
                                                 <td className="px-4 py-3 text-sm font-medium text-red-600">-{s.out_stock}</td>
                                                 <td className="px-4 py-3 text-sm font-bold">{s.closing_stock}</td>
+                                                <td className="px-4 py-3">
+                                                    <button 
+                                                       onClick={() => setSelectedTransfer({ type: 'product', id: s.product_id, godown_id: s.godown_id, name: s.product_name })}
+                                                       className={cn(
+                                                           "text-sm font-medium px-2 py-1 rounded-md transition-colors",
+                                                           s.transfers > 0 ? "bg-blue-50 text-blue-600 hover:bg-blue-100" : "text-slate-400 cursor-default"
+                                                       )}
+                                                    >
+                                                        {s.transfers}
+                                                    </button>
+                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -480,95 +484,16 @@ const LiveStockDashboard = () => {
                 </div>
             )}
 
-            {activeTab === 'in-transit' && (
-                <div className="flex flex-col gap-4">
-                    {loading ? (
-                        <div className="text-center py-20 text-slate-500">Loading...</div>
-                    ) : stockOutEntries.length === 0 ? (
-                        <div className="text-center py-20 bg-white rounded-2xl border border-slate-200">
-                            <Truck className="mx-auto h-12 w-12 text-slate-300 mb-3" />
-                            <p className="text-slate-500 font-medium">No products in transit</p>
-                            <p className="text-slate-400 text-sm mt-1">Products dispatched to customers will appear here</p>
-                        </div>
-                    ) : (
-                        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                            <div className="overflow-x-auto">
-                                <table className="w-full text-left">
-                                    <thead>
-                                        <tr className="bg-slate-50/50 border-b border-slate-100">
-                                            <HeaderCell>Entry ID</HeaderCell>
-                                            <HeaderCell>Product</HeaderCell>
-                                            <HeaderCell>Transporter</HeaderCell>
-                                            <HeaderCell>Dispatcher</HeaderCell>
-                                            <HeaderCell>Quantity</HeaderCell>
-                                            <HeaderCell>Date</HeaderCell>
-                                            <HeaderCell>LR Number</HeaderCell>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                        {stockOutEntries.map((entry) => {
-                                            const product = products.find(p => p.product_id === entry.product_id);
-                                            return (
-                                                <tr key={entry.entry_id} className="hover:bg-slate-50/80">
-                                                    <td className="px-4 py-3 text-sm text-slate-900 font-mono">{entry.entry_id}</td>
-                                                    <td className="px-4 py-3">
-                                                        <div className="flex items-center gap-2">
-                                                            <div className="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center">
-                                                                 <Package size={12} className="text-orange-600" />
-                                                            </div>
-                                                            <div>
-                                                                <span className="text-sm font-medium text-slate-900 block">{product?.name || entry.product_id}</span>
-                                                                <span className="text-[10px] text-slate-500 uppercase">{product?.product_id}</span>
-                                                            </div>
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-4 py-3">
-                                                        <div className="flex items-center gap-2">
-                                                            <Truck size={14} className="text-slate-400" />
-                                                            <span className="text-sm text-slate-600 font-medium">
-                                                                {entry.transporters?.name || 'Self Carry'}
-                                                            </span>
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-4 py-3 text-sm text-slate-600">
-                                                        <div className="flex flex-col">
-                                                            <span className="font-medium text-slate-800">{entry.godowns?.name || entry.godown_id}</span>
-                                                            <span className="text-[10px] text-slate-500">Dispatch Godown</span>
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-4 py-3">
-                                                        <span className="text-sm font-bold text-orange-600">-{entry.quantity}</span>
-                                                    </td>
-                                                    <td className="px-4 py-3 text-sm text-slate-500">{entry.date}</td>
-                                                    <td className="px-4 py-3 text-sm text-slate-500">
-                                                        <div className="px-2 py-0.5 bg-slate-100 rounded text-[11px] font-mono w-fit">
-                                                            {entry.lr_number || 'N/A'}
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </div>
 
-                            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <Truck size={18} className="text-orange-500" />
-                                        <span className="text-sm font-medium text-slate-700">Total In-Transit</span>
-                                    </div>
-                                    <div className="flex items-center gap-4">
-                                        <span className="text-xs text-slate-500">{stockOutEntries.length} entries</span>
-                                        <span className="text-lg font-bold text-orange-600">
-                                            {stockOutEntries.reduce((sum, e) => sum + (parseInt(e.quantity) || 0), 0)} units
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
+
+            {selectedTransfer && (
+                <TransferModal
+                    details={selectedTransfer}
+                    transactions={dayTransactions}
+                    godowns={godowns}
+                    products={products}
+                    onClose={() => setSelectedTransfer(null)}
+                />
             )}
 
         </div>
@@ -679,6 +604,101 @@ const MetricCard = ({ label, value, icon: Icon, color, trend }) => {
             <div className="mt-2">
                 <h3 className="text-2xl font-black">{value}</h3>
                 <p className="text-[11px] font-bold uppercase tracking-widest opacity-80">{label}</p>
+            </div>
+        </div>
+    );
+};
+const TransferModal = ({ details, transactions, godowns, products, onClose }) => {
+    const getGodownName = (id) => godowns.find(g => g.godown_id === id)?.name || id;
+    const getProductName = (id) => products.find(p => p.product_id === id)?.name || id;
+
+    const filteredTransfers = useMemo(() => {
+        if (details.type === 'godown') {
+            return transactions.filter(t => t.from_location === details.id || (t.godown_id === details.id && t.from_location));
+        } else {
+            return transactions.filter(t => t.product_id === details.id && (t.from_location === details.godown_id || (t.godown_id === details.godown_id && t.from_location)));
+        }
+    }, [details, transactions]);
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={onClose}></div>
+            <div className="relative bg-white rounded-3xl shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col animate-in zoom-in-95 duration-200 overflow-hidden">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600">
+                            <RotateCcw size={20} />
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-bold text-slate-900">Stock Transfers</h2>
+                            <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">{details.name}</p>
+                        </div>
+                    </div>
+                    <Button variant="ghost" size="icon" onClick={onClose} className="rounded-full">
+                        <X size={20} />
+                    </Button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto">
+                    {filteredTransfers.length === 0 ? (
+                        <div className="text-center py-12 text-slate-500">
+                            No transfers recorded for this selection.
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left">
+                                <thead>
+                                    <tr className="bg-slate-50/50 border-b border-slate-100">
+                                        <HeaderCell>Product</HeaderCell>
+                                        <HeaderCell>From</HeaderCell>
+                                        <HeaderCell>To</HeaderCell>
+                                        <HeaderCell align="right">Quantity</HeaderCell>
+                                        <HeaderCell align="center">Type</HeaderCell>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {filteredTransfers.map((t, idx) => {
+                                        const isOut = t.from_location === (details.type === 'godown' ? details.id : details.godown_id);
+                                        return (
+                                            <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                                                <td className="px-4 py-3">
+                                                    <p className="text-sm font-bold text-slate-900">{getProductName(t.product_id)}</p>
+                                                    <p className="text-[10px] text-slate-400 font-mono">{t.product_id}</p>
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-slate-600 font-medium">
+                                                    {getGodownName(t.from_location)}
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-slate-600 font-medium">
+                                                    {getGodownName(t.godown_id)}
+                                                </td>
+                                                <td className="px-4 py-3 text-right">
+                                                    <span className={cn(
+                                                        "text-sm font-black tracking-tight",
+                                                        isOut ? "text-amber-600" : "text-emerald-600"
+                                                    )}>
+                                                        {isOut ? '-' : '+'}{t.quantity}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                    <span className={cn(
+                                                        "px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border",
+                                                        isOut ? "bg-amber-50 text-amber-700 border-amber-100" : "bg-emerald-50 text-emerald-700 border-emerald-100"
+                                                    )}>
+                                                        {isOut ? 'Stock Out' : 'Stock In'}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </div>
+
+                <div className="p-4 bg-white border-t border-slate-100 flex justify-end">
+                    <Button onClick={onClose} className="px-6 rounded-xl">Close</Button>
+                </div>
             </div>
         </div>
     );
