@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Edit2, X, MapPin, Phone, Mail, Trash2 } from 'lucide-react';
+import { Search, Plus, Edit2, X, MapPin, Phone, Mail, Trash2, Tag } from 'lucide-react';
 import { supabase } from '../supabase';
+import useAuthStore from '../store/authStore';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
+import DeleteModal from '@/components/ui/DeleteModal';
 import { cn } from '@/lib/utils';
 
 const ITEMS_PER_PAGE = 6;
@@ -13,17 +15,13 @@ const DEFAULT_FORM_DATA = {
     godown_id: '',
     name: '',
     address: '',
-    city: '',
-    state: '',
-    pincode: '',
     contact_person: '',
     contact_number: '',
-    email: '',
-    description: '',
     is_active: true,
 };
 
 const Godowns = ({ isTab = false }) => {
+    const { user } = useAuthStore();
     const [godowns, setGodowns] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -32,6 +30,9 @@ const Godowns = ({ isTab = false }) => {
     const [currentPage, setCurrentPage] = useState(1);
     const [formData, setFormData] = useState(DEFAULT_FORM_DATA);
     const [errors, setErrors] = useState({});
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [itemToDelete, setItemToDelete] = useState(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
         fetchGodowns();
@@ -141,27 +142,36 @@ const Godowns = ({ isTab = false }) => {
         }
     };
 
-    const handleDelete = async (godown) => {
-        if (!confirm(`Are you sure you want to delete "${godown.name}"?`)) return;
+    const handleDelete = (godown) => {
+        setItemToDelete(godown);
+        setIsDeleteModalOpen(true);
+    };
+
+    const confirmDelete = async () => {
+        if (!itemToDelete) return;
+        setIsDeleting(true);
         try {
             const { error } = await supabase
                 .from('godowns')
                 .delete()
-                .eq('godown_id', godown.godown_id);
+                .eq('godown_id', itemToDelete.godown_id);
             if (error) throw error;
             toast.success('Godown deleted successfully');
             fetchGodowns();
+            setIsDeleteModalOpen(false);
+            setItemToDelete(null);
         } catch (error) {
             console.error('Error deleting godown:', error);
             toast.error(`Error: ${error.message}`);
+        } finally {
+            setIsDeleting(false);
         }
     };
 
     const filteredGodowns = useMemo(() => {
         return godowns.filter(godown =>
             godown.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            godown.godown_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            godown.city?.toLowerCase().includes(searchTerm.toLowerCase())
+            godown.godown_id?.toLowerCase().includes(searchTerm.toLowerCase())
         );
     }, [godowns, searchTerm]);
 
@@ -223,6 +233,7 @@ const Godowns = ({ isTab = false }) => {
                             <MobileGodownCard
                                 key={godown.godown_id}
                                 godown={godown}
+                                user={user}
                                 onEdit={() => handleOpenModal(godown)}
                                 onDelete={() => handleDelete(godown)}
                             />
@@ -253,6 +264,7 @@ const Godowns = ({ isTab = false }) => {
                                         <GodownRow
                                             key={godown.godown_id}
                                             godown={godown}
+                                            user={user}
                                             onEdit={() => handleOpenModal(godown)}
                                             onDelete={() => handleDelete(godown)}
                                         />
@@ -310,12 +322,15 @@ const Godowns = ({ isTab = false }) => {
 
                         <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
                             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                <FormField
-                                    label="Godown ID" name="godown_id" value={formData.godown_id}
-                                    onChange={handleInputChange} required error={errors.godown_id}
-                                    icon={MapPin} placeholder="Auto-generated"
-                                    disabled={!!editingGodown}
-                                />
+                                <div className="md:col-span-2">
+                                    <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                                        Godown ID
+                                    </label>
+                                    <div className="inline-flex items-center px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-700 font-mono text-sm font-bold shadow-sm mb-2">
+                                        <Tag size={14} className="mr-2" />
+                                        {formData.godown_id || 'AUTO-GENERATING...'}
+                                    </div>
+                                </div>
 
                                 <FormField
                                     label="Name" name="name" value={formData.name}
@@ -333,21 +348,6 @@ const Godowns = ({ isTab = false }) => {
                                 </div>
 
                                 <FormField
-                                    label="City" name="city" value={formData.city}
-                                    onChange={handleInputChange} icon={MapPin} placeholder="City"
-                                />
-
-                                <FormField
-                                    label="State" name="state" value={formData.state}
-                                    onChange={handleInputChange} icon={MapPin} placeholder="State"
-                                />
-
-                                <FormField
-                                    label="Pincode" name="pincode" value={formData.pincode}
-                                    onChange={handleInputChange} placeholder="Pincode"
-                                />
-
-                                <FormField
                                     label="Contact Person" name="contact_person" value={formData.contact_person}
                                     onChange={handleInputChange} placeholder="Contact person name"
                                 />
@@ -356,20 +356,6 @@ const Godowns = ({ isTab = false }) => {
                                     label="Contact Number" name="contact_number" value={formData.contact_number}
                                     onChange={handleInputChange} icon={Phone} placeholder="10 digit number"
                                 />
-
-                                <FormField
-                                    label="Email" name="email" type="email" value={formData.email}
-                                    onChange={handleInputChange} icon={Mail} placeholder="email@example.com"
-                                />
-
-                                <div className="md:col-span-2">
-                                    <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-                                    <textarea
-                                        name="description" value={formData.description} onChange={handleInputChange}
-                                        rows="2" className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-                                        placeholder="Additional details"
-                                    ></textarea>
-                                </div>
 
                                 <div className="md:col-span-2 mt-2">
                                     <label className="flex items-center gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200 cursor-pointer">
@@ -395,6 +381,16 @@ const Godowns = ({ isTab = false }) => {
                     </div>
                 </div>
             )}
+
+            <DeleteModal
+                isOpen={isDeleteModalOpen}
+                onClose={() => setIsDeleteModalOpen(false)}
+                onConfirm={confirmDelete}
+                title="Delete Godown"
+                description="Are you sure you want to delete this godown? This action will remove all recorded location details."
+                itemLabel={itemToDelete?.name}
+                loading={isDeleting}
+            />
         </div>
     );
 };
@@ -437,7 +433,7 @@ const EmptyRow = ({ message }) => (
     </tr>
 );
 
-const GodownRow = ({ godown, onEdit, onDelete }) => (
+const GodownRow = ({ godown, user, onEdit, onDelete }) => (
     <tr className="hover:bg-slate-50/80 transition-colors group">
         <td className="px-4 py-3">
             <div className="flex items-center gap-3">
@@ -451,8 +447,7 @@ const GodownRow = ({ godown, onEdit, onDelete }) => (
             </div>
         </td>
         <td className="px-4 py-3">
-            <div className="text-sm text-slate-900">{godown.city || '-'}</div>
-            <div className="text-xs text-slate-500">{godown.state || '-'}</div>
+            <div className="text-sm text-slate-900">{godown.address || '-'}</div>
         </td>
         <td className="px-4 py-3">
             <div className="text-sm text-slate-900">{godown.contact_person || '-'}</div>
@@ -469,15 +464,17 @@ const GodownRow = ({ godown, onEdit, onDelete }) => (
                 <Button variant="ghost" size="icon" type="button" onClick={onEdit} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded transition-all" title="Edit">
                     <Edit2 size={16} />
                 </Button>
-                <Button variant="ghost" size="icon" type="button" onClick={onDelete} className="p-1.5 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded transition-all" title="Delete">
-                    <Trash2 size={16} />
-                </Button>
+                {user?.role === 'SUPER ADMIN' && (
+                    <Button variant="ghost" size="icon" type="button" onClick={onDelete} className="p-1.5 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded transition-all" title="Delete">
+                        <Trash2 size={16} />
+                    </Button>
+                )}
             </div>
         </td>
     </tr>
 );
 
-const MobileGodownCard = ({ godown, onEdit, onDelete }) => (
+const MobileGodownCard = ({ godown, user, onEdit, onDelete }) => (
     <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-start justify-between">
         <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
@@ -486,7 +483,7 @@ const MobileGodownCard = ({ godown, onEdit, onDelete }) => (
             <div>
                 <h3 className="font-semibold text-slate-900 text-sm">{godown.name}</h3>
                 <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-xs text-slate-500">{godown.city || 'No city'}</span>
+                    <span className="text-xs text-slate-500">{godown.address || 'No address'}</span>
                 </div>
             </div>
         </div>
@@ -494,9 +491,11 @@ const MobileGodownCard = ({ godown, onEdit, onDelete }) => (
             <Button variant="ghost" size="icon" onClick={onEdit} className="text-slate-400 hover:text-primary hover:bg-primary/5 rounded-full transition-colors">
                 <Edit2 size={18} />
             </Button>
-            <Button variant="ghost" size="icon" onClick={onDelete} className="text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded-full transition-colors">
-                <Trash2 size={18} />
-            </Button>
+            {user?.role === 'SUPER ADMIN' && (
+                <Button variant="ghost" size="icon" onClick={onDelete} className="text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded-full transition-colors">
+                    <Trash2 size={18} />
+                </Button>
+            )}
         </div>
     </div>
 );

@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Edit2, X, Trash2, Truck, Phone, Package, ArrowDown } from 'lucide-react';
+import { Search, Plus, Edit2, X, Trash2, Truck, Phone, Package, ArrowDown, Tag } from 'lucide-react';
 import { supabase } from '../supabase';
+import useAuthStore from '../store/authStore';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
+import DeleteModal from '@/components/ui/DeleteModal';
 import { cn } from '@/lib/utils';
 import {
     Select,
@@ -26,6 +28,7 @@ const DEFAULT_FORM_DATA = {
 };
 
 const Transporters = ({ isTab = false }) => {
+    const { user } = useAuthStore();
     const [transporters, setTransporters] = useState([]);
     const [godowns, setGodowns] = useState([]);
     const [products, setProducts] = useState([]);
@@ -41,6 +44,9 @@ const Transporters = ({ isTab = false }) => {
     const [historyPage, setHistoryPage] = useState(1);
     const [formData, setFormData] = useState(DEFAULT_FORM_DATA);
     const [errors, setErrors] = useState({});
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [itemToDelete, setItemToDelete] = useState(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
         fetchData();
@@ -134,8 +140,6 @@ const Transporters = ({ isTab = false }) => {
     const validateForm = (data) => {
         const newErrors = {};
         if (!data.name) newErrors.name = 'Transporter Name is required';
-        if (!data.vehicle_number) newErrors.vehicle_number = 'Vehicle Number is required';
-        if (!data.driver_phone) newErrors.driver_phone = 'Driver Phone No. is required';
         return newErrors;
     };
 
@@ -171,19 +175,29 @@ const Transporters = ({ isTab = false }) => {
         }
     };
 
-    const handleDelete = async (transporter) => {
-        if (!confirm(`Are you sure you want to delete "${transporter.name}"?`)) return;
+    const handleDelete = (transporter) => {
+        setItemToDelete(transporter);
+        setIsDeleteModalOpen(true);
+    };
+
+    const confirmDelete = async () => {
+        if (!itemToDelete) return;
+        setIsDeleting(true);
         try {
             const { error } = await supabase
                 .from('transporters')
                 .delete()
-                .eq('transporter_id', transporter.transporter_id);
+                .eq('transporter_id', itemToDelete.transporter_id);
             if (error) throw error;
             toast.success('Transporter deleted successfully');
             fetchData();
+            setIsDeleteModalOpen(false);
+            setItemToDelete(null);
         } catch (error) {
             console.error('Error deleting transporter:', error);
             toast.error(`Error: ${error.message}`);
+        } finally {
+            setIsDeleting(false);
         }
     };
 
@@ -297,6 +311,7 @@ const Transporters = ({ isTab = false }) => {
                                 <MobileTransporterCard
                                     key={transporter.transporter_id}
                                     transporter={transporter}
+                                    user={user}
                                     onEdit={() => handleOpenModal(transporter)}
                                     onDelete={() => handleDelete(transporter)}
                                 />
@@ -327,6 +342,7 @@ const Transporters = ({ isTab = false }) => {
                                             <TransporterRow
                                                 key={transporter.transporter_id}
                                                 transporter={transporter}
+                                                user={user}
                                                 onEdit={() => handleOpenModal(transporter)}
                                                 onDelete={() => handleDelete(transporter)}
                                             />
@@ -549,6 +565,16 @@ const Transporters = ({ isTab = false }) => {
 
                         <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
                             <form onSubmit={handleSubmit} className="space-y-5">
+                                <div className="flex flex-col gap-1.5">
+                                    <label className="block text-sm font-medium text-slate-700">
+                                        Transporter ID
+                                    </label>
+                                    <div className="inline-flex items-center px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-700 font-mono text-sm font-bold shadow-sm w-fit">
+                                        <Tag size={14} className="mr-2" />
+                                        {editingTransporter?.transporter_id || 'AUTO-GENERATING...'}
+                                    </div>
+                                </div>
+
                                 <FormField
                                     label="Transporter Name" name="name" value={formData.name}
                                     onChange={handleInputChange} required error={errors.name}
@@ -557,13 +583,13 @@ const Transporters = ({ isTab = false }) => {
 
                                 <FormField
                                     label="Vehicle Number" name="vehicle_number" value={formData.vehicle_number}
-                                    onChange={handleInputChange} required error={errors.vehicle_number}
+                                    onChange={handleInputChange} error={errors.vehicle_number}
                                     icon={Truck} placeholder="e.g., MH12AB1234"
                                 />
 
                                 <FormField
                                     label="Driver Phone No." name="driver_phone" value={formData.driver_phone}
-                                    onChange={handleInputChange} required error={errors.driver_phone}
+                                    onChange={handleInputChange} error={errors.driver_phone}
                                     icon={Phone} placeholder="10 digit phone number"
                                     type="tel"
                                 />
@@ -592,6 +618,16 @@ const Transporters = ({ isTab = false }) => {
                     </div>
                 </div>
             )}
+
+            <DeleteModal
+                isOpen={isDeleteModalOpen}
+                onClose={() => setIsDeleteModalOpen(false)}
+                onConfirm={confirmDelete}
+                title="Delete Transporter"
+                description="Are you sure you want to delete this transporter? This will remove all their associated records from the history."
+                itemLabel={itemToDelete?.name}
+                loading={isDeleting}
+            />
         </div>
     );
 };
@@ -633,7 +669,7 @@ const EmptyRow = ({ message }) => (
     </tr>
 );
 
-const TransporterRow = ({ transporter, onEdit, onDelete }) => (
+const TransporterRow = ({ transporter, user, onEdit, onDelete }) => (
     <tr className="hover:bg-slate-50/80 transition-colors group">
         <td className="px-4 py-3">
             <div className="flex items-center gap-3">
@@ -666,15 +702,17 @@ const TransporterRow = ({ transporter, onEdit, onDelete }) => (
                 <Button variant="ghost" size="icon" type="button" onClick={onEdit} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded transition-all" title="Edit">
                     <Edit2 size={16} />
                 </Button>
-                <Button variant="ghost" size="icon" type="button" onClick={onDelete} className="p-1.5 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded transition-all" title="Delete">
-                    <Trash2 size={16} />
-                </Button>
+                {user?.role === 'SUPER ADMIN' && (
+                    <Button variant="ghost" size="icon" type="button" onClick={onDelete} className="p-1.5 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded transition-all" title="Delete">
+                        <Trash2 size={16} />
+                    </Button>
+                )}
             </div>
         </td>
     </tr>
 );
 
-const MobileTransporterCard = ({ transporter, onEdit, onDelete }) => (
+const MobileTransporterCard = ({ transporter, user, onEdit, onDelete }) => (
     <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-start justify-between">
         <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
@@ -693,9 +731,11 @@ const MobileTransporterCard = ({ transporter, onEdit, onDelete }) => (
             <Button variant="ghost" size="icon" onClick={onEdit} className="text-slate-400 hover:text-primary hover:bg-primary/5 rounded-full transition-colors">
                 <Edit2 size={18} />
             </Button>
-            <Button variant="ghost" size="icon" onClick={onDelete} className="text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded-full transition-colors">
-                <Trash2 size={18} />
-            </Button>
+            {user?.role === 'SUPER ADMIN' && (
+                <Button variant="ghost" size="icon" onClick={onDelete} className="text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded-full transition-colors">
+                    <Trash2 size={18} />
+                </Button>
+            )}
         </div>
     </div>
 );

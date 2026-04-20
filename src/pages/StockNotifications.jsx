@@ -4,6 +4,8 @@ import { supabase } from '../supabase';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import DeleteModal from '@/components/ui/DeleteModal';
+import useAuthStore from '../store/authStore';
 import {
     Select,
     SelectContent,
@@ -17,6 +19,7 @@ import {
 const ITEMS_PER_PAGE = 6;
 
 const StockNotifications = () => {
+    const { user } = useAuthStore();
     const [notifications, setNotifications] = useState([]);
     const [products, setProducts] = useState([]);
     const [godowns, setGodowns] = useState([]);
@@ -25,6 +28,9 @@ const StockNotifications = () => {
     const [filterType, setFilterType] = useState('all');
     const [viewNotification, setViewNotification] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [itemToDelete, setItemToDelete] = useState(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
         fetchData();
@@ -83,19 +89,29 @@ const StockNotifications = () => {
         }
     };
 
-    const handleDelete = async (id) => {
-        if (!confirm('Are you sure you want to delete this notification?')) return;
+    const handleDelete = (id) => {
+        setItemToDelete(id);
+        setIsDeleteModalOpen(true);
+    };
+
+    const confirmDelete = async () => {
+        if (!itemToDelete) return;
+        setIsDeleting(true);
         try {
             const { error } = await supabase
                 .from('stock_notifications')
                 .delete()
-                .eq('id', id);
+                .eq('id', itemToDelete);
             if (error) throw error;
             toast.success('Notification deleted');
             fetchData();
+            setIsDeleteModalOpen(false);
+            setItemToDelete(null);
         } catch (error) {
             console.error('Error deleting:', error);
             toast.error(`Error: ${error.message}`);
+        } finally {
+            setIsDeleting(false);
         }
     };
 
@@ -205,6 +221,7 @@ const StockNotifications = () => {
                                 getGodownName={getGodownName}
                                 onMarkAsRead={() => handleMarkAsRead(n.id)}
                                 onDelete={() => handleDelete(n.id)}
+                                user={user}
                             />
                         ))
                     )}
@@ -240,6 +257,7 @@ const StockNotifications = () => {
                                             getGodownName={getGodownName}
                                             onMarkAsRead={() => handleMarkAsRead(n.id)}
                                             onDelete={() => handleDelete(n.id)}
+                                            user={user}
                                         />
                                     ))
                                 )}
@@ -277,6 +295,15 @@ const StockNotifications = () => {
                     </div>
                 )}
             </div>
+
+            <DeleteModal
+                isOpen={isDeleteModalOpen}
+                onClose={() => setIsDeleteModalOpen(false)}
+                onConfirm={confirmDelete}
+                title="Delete Notification"
+                description="Are you sure you want to delete this notification? This action is permanent."
+                loading={isDeleting}
+            />
         </div>
     );
 };
@@ -304,7 +331,7 @@ const EmptyRow = ({ message }) => (
     </tr>
 );
 
-const NotificationRow = ({ notification, getTypeIcon, getTypeLabel, getProductName, getGodownName, onMarkAsRead, onDelete }) => (
+const NotificationRow = ({ notification, user, getTypeIcon, getTypeLabel, getProductName, getGodownName, onMarkAsRead, onDelete }) => (
     <tr className={`hover:bg-slate-50/80 transition-colors group ${!notification.is_read ? 'bg-blue-50/30' : ''}`}>
         <td className="px-4 py-3">
             <div className="flex items-center gap-3">
@@ -346,15 +373,17 @@ const NotificationRow = ({ notification, getTypeIcon, getTypeLabel, getProductNa
                         <Check size={16} />
                     </Button>
                 )}
-                <Button variant="ghost" size="icon" type="button" onClick={onDelete} className="p-1.5 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded transition-all" title="Delete">
-                    <Trash2 size={16} />
-                </Button>
+                {user?.role === 'SUPER ADMIN' && (
+                    <Button variant="ghost" size="icon" type="button" onClick={onDelete} className="p-1.5 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded transition-all" title="Delete">
+                        <Trash2 size={16} />
+                    </Button>
+                )}
             </div>
         </td>
     </tr>
 );
 
-const MobileNotificationCard = ({ notification, getTypeIcon, getTypeLabel, getProductName, getGodownName, onMarkAsRead, onDelete }) => (
+const MobileNotificationCard = ({ notification, user, getTypeIcon, getTypeLabel, getProductName, getGodownName, onMarkAsRead, onDelete }) => (
     <div className={`bg-white p-4 rounded-xl border shadow-sm flex items-start justify-between ${!notification.is_read ? 'border-blue-200 bg-blue-50/20' : 'border-slate-200'}`}>
         <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
@@ -374,9 +403,11 @@ const MobileNotificationCard = ({ notification, getTypeIcon, getTypeLabel, getPr
                     <Check size={18} />
                 </Button>
             )}
-            <Button variant="ghost" size="icon" onClick={onDelete} className="text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded-full transition-colors">
-                <Trash2 size={18} />
-            </Button>
+            {user?.role === 'SUPER ADMIN' && (
+                <Button variant="ghost" size="icon" onClick={onDelete} className="text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded-full transition-colors">
+                    <Trash2 size={18} />
+                </Button>
+            )}
         </div>
     </div>
 );

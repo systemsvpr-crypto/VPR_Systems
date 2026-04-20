@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Package, MapPin, RotateCcw, X, ArrowDown, ArrowUp } from 'lucide-react';
+import { Search, Package, MapPin, RotateCcw, X, ArrowDown, ArrowUp, Download, RefreshCcw } from 'lucide-react';
 import { supabase } from '../supabase';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
@@ -20,6 +20,7 @@ const LiveStockDashboard = () => {
     const [currentPage, setCurrentPage] = useState(1);
     const [summaryDate, setSummaryDate] = useState(new Date().toISOString().split('T')[0]);
     const [dayTransactions, setDayTransactions] = useState([]);
+    const [dailySnapshots, setDailySnapshots] = useState([]);
     const [selectedTransfer, setSelectedTransfer] = useState(null);
 
     useEffect(() => {
@@ -33,15 +34,17 @@ const LiveStockDashboard = () => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const [productsRes, godownsRes, transactionsRes] = await Promise.all([
+            const [productsRes, godownsRes, transactionsRes, snapshotsRes] = await Promise.all([
                 supabase.from('products').select('*').eq('is_active', true).order('name', { ascending: true }),
                 supabase.from('godowns').select('*').eq('is_active', true).order('name', { ascending: true }),
-                supabase.from('stock_management').select('*').eq('date', summaryDate)
+                supabase.from('stock_management').select('*').eq('date', summaryDate),
+                supabase.from('daily_stock_summary').select('*').eq('date', summaryDate)
             ]);
             
             setProducts(productsRes.data || []);
             setGodowns(godownsRes.data || []);
             setDayTransactions(transactionsRes.data || []);
+            setDailySnapshots(snapshotsRes.data || []);
         } catch (error) {
             console.error('Error fetching data:', error);
             toast.error('Failed to fetch stock data');
@@ -101,8 +104,12 @@ const LiveStockDashboard = () => {
             // If date is today, closing is current stock.
             // Opening = current - in + out
             const isToday = summaryDate === new Date().toISOString().split('T')[0];
-            const closing_stock = p.closing_quantity || 0;
-            const opening_stock = closing_stock - in_stock + out_stock;
+            
+            // Try to find snapshot for this product + godown
+            const snapshot = dailySnapshots.find(s => s.product_id === p.product_id && s.godown_id === p.godown_id);
+
+            const closing_stock = isToday ? (p.closing_quantity || 0) : (snapshot ? snapshot.closing_stock : 0);
+            const opening_stock = isToday ? (closing_stock - in_stock + out_stock) : (snapshot ? snapshot.opening_stock : 0);
 
             const godown = getGodownDetails(p.godown_id);
 
@@ -112,14 +119,14 @@ const LiveStockDashboard = () => {
                 godown_id: p.godown_id,
                 godown_name: godown.name || p.godown_id,
                 mux: p.mux || '',
-                opening_stock: isToday ? opening_stock : '-', // Only accurate for today without historical chain
+                opening_stock: isToday || snapshot ? opening_stock : '-', 
                 in_stock,
                 out_stock,
                 transfers: dayTransactions.filter(t => t.product_id === p.product_id && (t.godown_id === p.godown_id ? t.from_location : t.from_location === p.godown_id)).length > 0
                     ? (dayTransactions.filter(t => t.product_id === p.product_id && t.godown_id === p.godown_id && t.from_location).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0) +
                        dayTransactions.filter(t => t.product_id === p.product_id && t.from_location === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0))
                     : 0,
-                closing_stock: isToday ? closing_stock : '-',
+                closing_stock: isToday || snapshot ? closing_stock : '-',
                 master_opening: p.opening_quantity || 0,
                 master_closing: p.closing_quantity || 0,
             };
@@ -172,6 +179,35 @@ const LiveStockDashboard = () => {
         };
     }, [summaryDate]);
 
+    const handleExport = () => {
+        const headers = ["Godown", "Product", "MUX", "Opening", "In", "Out", "Closing", "Transfers"];
+        const rows = filteredSummary.map(s => [
+            s.godown_name,
+            s.product_name,
+            s.mux || '-',
+            s.opening_stock === '-' ? 0 : s.opening_stock,
+            s.in_stock,
+            s.out_stock,
+            s.closing_stock === '-' ? 0 : s.closing_stock,
+            s.transfers
+        ]);
+
+        const csvContent = [headers, ...rows]
+            .map(row => row.map(cell => `"${(cell ?? '').toString().replace(/"/g, '""')}"`).join(","))
+            .join("\n");
+            
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+        link.setAttribute("download", `Stock_Summary_${summaryDate}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        toast.success(`Exported data for ${summaryDate}`);
+    };
+
     return (
         <div className="flex flex-col gap-4 pb-6">
             <div>
@@ -222,8 +258,29 @@ const LiveStockDashboard = () => {
                 <div className="flex flex-col gap-4">
                     {/* Date Picker */}
                     <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <div className="w-[280px]">
+                        <div className="flex items-center gap-3">
+                            <Button 
+                                onClick={fetchData} 
+                                className="bg-blue-600 hover:bg-blue-700 text-white gap-2 rounded-xl shadow-sm hover:shadow-md transition-all active:scale-95"
+                            >
+                                <RefreshCcw size={16} className={cn(loading && "animate-spin")} />
+                                Refresh
+                            </Button>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            {summaryDate && summaryDate !== new Date().toISOString().split('T')[0] && (
+                                <Button
+                                    variant="ghost"
+                                    onClick={() => { setSummaryDate(new Date().toISOString().split('T')[0]); fetchData(); }}
+                                    className="h-10 px-3 text-red-500 hover:text-red-600 hover:bg-red-50 rounded-xl"
+                                >
+                                    <X size={16} />
+                                    Clear
+                                </Button>
+                            )}
+
+                            <div className="w-[240px]">
                                 <DatePicker
                                     value={summaryDate}
                                     onChange={(e) => setSummaryDate(e.target.value)}
@@ -231,21 +288,20 @@ const LiveStockDashboard = () => {
                                     placeholder="Select date"
                                 />
                             </div>
-                            {summaryDate && summaryDate !== new Date().toISOString().split('T')[0] && (
-                                <Button
-                                    variant="ghost"
-                                    onClick={() => { setSummaryDate(new Date().toISOString().split('T')[0]); fetchData(); }}
-                                    className="h-10 px-3 text-red-500 hover:text-red-600 hover:bg-red-50"
-                                >
-                                    <X size={16} />
-                                    Clear
-                                </Button>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <Button variant="outline" onClick={() => { setSummaryDate(new Date().toISOString().split('T')[0]); fetchData(); }} className="gap-2">
-                                <RotateCcw size={16} />
-                                Today
+
+                            <Button 
+                                variant="outline" 
+                                onClick={handleExport} 
+                                disabled={!summaryDate}
+                                className={cn(
+                                    "gap-2 transition-all rounded-xl border border-emerald-200",
+                                    summaryDate 
+                                        ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shadow-sm" 
+                                        : "opacity-50 cursor-not-allowed bg-slate-50 text-slate-400 border-slate-200"
+                                )}
+                            >
+                                <Download size={16} />
+                                Export CSV
                             </Button>
                         </div>
                     </div>

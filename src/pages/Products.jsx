@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Plus, Edit2, X, Package, Trash2, ToggleLeft, ToggleRight, Layers, Tag, Weight, FileText, CheckCircle2, Info } from 'lucide-react';
 import { supabase } from '../supabase';
+import useAuthStore from '../store/authStore';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import DeleteModal from '@/components/ui/DeleteModal';
 import { cn } from '@/lib/utils';
 import {
     Select,
@@ -20,10 +22,8 @@ const ITEMS_PER_PAGE = 10;
 const DEFAULT_FORM_DATA = {
     product_id: '',
     name: '',
-    category: '',
     description: '',
     unit: 'KG',
-    hsn_code: '',
     mux: '',
     godown_id: '',
     quantity: 0,
@@ -32,15 +32,14 @@ const DEFAULT_FORM_DATA = {
     is_active: true,
 };
 
-const CATEGORIES = ['Electronics', 'Furniture', 'Clothing', 'Food', 'Tools', 'Raw Materials', 'Other'];
 const UNITS = ['KG'];
 
 const Products = ({ isTab = false }) => {
+    const { user } = useAuthStore();
     const [products, setProducts] = useState([]);
     const [godowns, setGodowns] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-    const [filterCategory, setFilterCategory] = useState('all');
     const [filterStatus, setFilterStatus] = useState('all');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState(null);
@@ -48,6 +47,9 @@ const Products = ({ isTab = false }) => {
     const [formData, setFormData] = useState(DEFAULT_FORM_DATA);
     const [errors, setErrors] = useState({});
     const [confirmDisable, setConfirmDisable] = useState(null);
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [itemToDelete, setItemToDelete] = useState(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
         fetchData();
@@ -55,7 +57,7 @@ const Products = ({ isTab = false }) => {
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchTerm, filterCategory, filterStatus]);
+    }, [searchTerm, filterStatus]);
 
     const fetchData = async () => {
         setLoading(true);
@@ -167,19 +169,29 @@ const Products = ({ isTab = false }) => {
         }
     };
 
-    const handleDelete = async (product) => {
-        if (!confirm(`Are you sure you want to delete "${product.name}"?`)) return;
+    const handleDelete = (product) => {
+        setItemToDelete(product);
+        setIsDeleteModalOpen(true);
+    };
+
+    const confirmDelete = async () => {
+        if (!itemToDelete) return;
+        setIsDeleting(true);
         try {
             const { error } = await supabase
                 .from('products')
                 .delete()
-                .eq('product_id', product.product_id);
+                .eq('product_id', itemToDelete.product_id);
             if (error) throw error;
             toast.success('Product deleted successfully');
             fetchData();
+            setIsDeleteModalOpen(false);
+            setItemToDelete(null);
         } catch (error) {
             console.error('Error deleting product:', error);
             toast.error(`Error: ${error.message}`);
+        } finally {
+            setIsDeleting(false);
         }
     };
 
@@ -207,13 +219,12 @@ const Products = ({ isTab = false }) => {
                 product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 product.product_id?.toLowerCase().includes(searchTerm.toLowerCase())
             );
-            const matchesCategory = filterCategory === 'all' || product.category === filterCategory;
             const matchesStatus = filterStatus === 'all' || 
                 (filterStatus === 'active' && product.is_active) ||
                 (filterStatus === 'inactive' && !product.is_active);
-            return matchesSearch && matchesCategory && matchesStatus;
+            return matchesSearch && matchesStatus;
         });
-    }, [products, searchTerm, filterCategory, filterStatus]);
+    }, [products, searchTerm, filterStatus]);
 
     const totalPages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE);
     const currentItems = useMemo(() => {
@@ -253,20 +264,6 @@ const Products = ({ isTab = false }) => {
                             />
                         </div>
 
-                        <Select value={filterCategory} onValueChange={setFilterCategory}>
-                            <SelectTrigger className="w-[180px] h-10">
-                                <SelectValue placeholder="All Categories" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectGroup>
-                                    <SelectLabel>Category</SelectLabel>
-                                    <SelectItem value="all">All Categories</SelectItem>
-                                    {CATEGORIES.map(cat => (
-                                        <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                                    ))}
-                                </SelectGroup>
-                            </SelectContent>
-                        </Select>
 
                         <Select value={filterStatus} onValueChange={setFilterStatus}>
                             <SelectTrigger className="w-[140px] h-10">
@@ -303,6 +300,7 @@ const Products = ({ isTab = false }) => {
                                 key={product.product_id}
                                 product={product}
                                 godowns={godowns}
+                                user={user}
                                 onEdit={() => handleOpenModal(product)}
                                 onDelete={() => handleDelete(product)}
                                 onToggle={() => setConfirmDisable(product)}
@@ -318,9 +316,7 @@ const Products = ({ isTab = false }) => {
                             <thead>
                                 <tr className="bg-slate-50/50 border-b border-slate-100 sticky top-0 z-10 backdrop-blur-md">
                                     <HeaderCell>Product Details</HeaderCell>
-                                    <HeaderCell>HSN Code</HeaderCell>
                                     <HeaderCell>MUX</HeaderCell>
-                                    <HeaderCell>Category</HeaderCell>
                                     <HeaderCell>Godown</HeaderCell>
                                     <HeaderCell>Unit</HeaderCell>
                                     <HeaderCell>Qty</HeaderCell>
@@ -341,6 +337,7 @@ const Products = ({ isTab = false }) => {
                                             key={product.product_id}
                                             product={product}
                                             godowns={godowns}
+                                            user={user}
                                             onEdit={() => handleOpenModal(product)}
                                             onDelete={() => handleDelete(product)}
                                             onToggle={() => setConfirmDisable(product)}
@@ -348,7 +345,7 @@ const Products = ({ isTab = false }) => {
                                     ))
                                 )}
                                 {Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
-                                    <tr key={`empty-${i}`}><td colSpan="11" className="h-16"></td></tr>
+                                    <tr key={`empty-${i}`}><td colSpan="9" className="h-16"></td></tr>
                                 ))}
                             </tbody>
                         </table>
@@ -421,26 +418,17 @@ const Products = ({ isTab = false }) => {
                                             icon={Package} placeholder="e.g. Copper Wire 2.5mm"
                                         />
                                         
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <FormField
-                                                label="Product ID" name="product_id" value={formData.product_id}
-                                                onChange={handleInputChange} required error={errors.product_id}
-                                                icon={Tag} placeholder="Auto-gen"
-                                                disabled={!!editingProduct}
-                                            />
-                                            <FormSelect
-                                                label="Category" name="category" value={formData.category}
-                                                onChange={handleInputChange} options={CATEGORIES}
-                                                icon={Layers}
-                                            />
+                                        <div className="flex flex-col gap-1.5">
+                                            <label className="block text-sm font-medium text-slate-700">
+                                                Product ID
+                                            </label>
+                                            <div className="inline-flex items-center px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-700 font-mono text-sm font-bold shadow-sm w-fit">
+                                                <Tag size={14} className="mr-2" />
+                                                {formData.product_id || 'AUTO-GEN'}
+                                            </div>
                                         </div>
 
                                         <div className="grid grid-cols-2 gap-4">
-                                            <FormField
-                                                label="HSN Code" name="hsn_code" value={formData.hsn_code}
-                                                onChange={handleInputChange} placeholder="8-digit code"
-                                                icon={FileText}
-                                            />
                                             <FormSelect
                                                 label="Base Unit" name="unit" value={formData.unit}
                                                 onChange={handleInputChange} options={UNITS}
@@ -570,6 +558,16 @@ const Products = ({ isTab = false }) => {
                     </div>
                 </div>
             )}
+
+            <DeleteModal
+                isOpen={isDeleteModalOpen}
+                onClose={() => setIsDeleteModalOpen(false)}
+                onConfirm={confirmDelete}
+                title="Delete Product"
+                description="Are you sure you want to delete this product? This will remove all associated inventory data."
+                itemLabel={itemToDelete?.name}
+                loading={isDeleting}
+            />
         </div>
     );
 };
@@ -675,13 +673,13 @@ const HeaderCell = ({ children, align = "left" }) => (
 
 const EmptyRow = ({ message }) => (
     <tr>
-        <td colSpan="11" className="px-4 py-8 text-center text-slate-500 text-sm">
+        <td colSpan="9" className="px-4 py-8 text-center text-slate-500 text-sm">
             {message}
         </td>
     </tr>
 );
 
-const ProductRow = ({ product, godowns, onEdit, onDelete, onToggle }) => (
+const ProductRow = ({ product, godowns, user, onEdit, onDelete, onToggle }) => (
     <tr className="hover:bg-slate-50/80 transition-colors group">
         <td className="px-4 py-3">
             <div className="flex items-center gap-3">
@@ -695,13 +693,7 @@ const ProductRow = ({ product, godowns, onEdit, onDelete, onToggle }) => (
             </div>
         </td>
         <td className="px-4 py-3">
-            <div className="text-sm text-slate-900">{product.hsn_code || '-'}</div>
-        </td>
-        <td className="px-4 py-3">
             <div className="text-sm text-slate-900">{product.mux || '-'}</div>
-        </td>
-        <td className="px-4 py-3">
-            <span className="text-sm text-slate-900">{product.category || '-'}</span>
         </td>
         <td className="px-4 py-3">
             <span className="text-sm text-slate-900">
@@ -734,15 +726,17 @@ const ProductRow = ({ product, godowns, onEdit, onDelete, onToggle }) => (
                 <Button variant="ghost" size="icon" type="button" onClick={onToggle} className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded transition-all" title={product.is_active ? 'Disable' : 'Enable'}>
                     {product.is_active ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
                 </Button>
-                <Button variant="ghost" size="icon" type="button" onClick={onDelete} className="p-1.5 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded transition-all" title="Delete">
-                    <Trash2 size={16} />
-                </Button>
+                {user?.role === 'SUPER ADMIN' && (
+                    <Button variant="ghost" size="icon" type="button" onClick={onDelete} className="p-1.5 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded transition-all" title="Delete">
+                        <Trash2 size={16} />
+                    </Button>
+                )}
             </div>
         </td>
     </tr>
 );
 
-const MobileProductCard = ({ product, godowns, onEdit, onDelete, onToggle }) => (
+const MobileProductCard = ({ product, godowns, user, onEdit, onDelete, onToggle }) => (
     <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-start justify-between gap-4">
         <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
@@ -781,9 +775,11 @@ const MobileProductCard = ({ product, godowns, onEdit, onDelete, onToggle }) => 
             <Button variant="ghost" size="icon" onClick={onEdit} className="text-slate-400 hover:text-primary hover:bg-primary/5 rounded-full transition-colors">
                 <Edit2 size={18} />
             </Button>
-            <Button variant="ghost" size="icon" onClick={onDelete} className="text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded-full transition-colors">
-                <Trash2 size={18} />
-            </Button>
+            {user?.role === 'SUPER ADMIN' && (
+                <Button variant="ghost" size="icon" onClick={onDelete} className="text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded-full transition-colors">
+                    <Trash2 size={18} />
+                </Button>
+            )}
         </div>
     </div>
 );

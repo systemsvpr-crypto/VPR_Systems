@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
 import SearchableSelect from '@/components/ui/SearchableSelect';
+import DeleteModal from '@/components/ui/DeleteModal';
 import { cn } from '@/lib/utils';
 import Products from './Products';
 import Godowns from './Godowns';
@@ -65,6 +66,9 @@ const StockManagement = () => {
     const [errors, setErrors] = useState({});
     const [selectedProduct, setSelectedProduct] = useState('');
     const [selectedQty, setSelectedQty] = useState(1);
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [itemToDelete, setItemToDelete] = useState(null);
+    const [isDeleting, setIsDeleting] = useState(false);
     const { user } = useAuthStore();
     const [activeTab, setActiveTab] = useState('stocks');
 
@@ -389,19 +393,29 @@ const StockManagement = () => {
         }
     };
 
-    const handleDelete = async (entry) => {
-        if (!confirm('Are you sure you want to delete this entry?')) return;
+    const handleDelete = (entry) => {
+        setItemToDelete(entry);
+        setIsDeleteModalOpen(true);
+    };
+
+    const confirmDelete = async () => {
+        if (!itemToDelete) return;
+        setIsDeleting(true);
         try {
             const { error } = await supabase
                 .from('stock_management')
                 .delete()
-                .eq('entry_id', entry.entry_id);
+                .eq('entry_id', itemToDelete.entry_id);
             if (error) throw error;
             toast.success('Entry deleted successfully');
             fetchData();
+            setIsDeleteModalOpen(false);
+            setItemToDelete(null);
         } catch (error) {
             console.error('Error deleting entry:', error);
             toast.error(`Error: ${error.message}`);
+        } finally {
+            setIsDeleting(false);
         }
     };
 
@@ -523,6 +537,7 @@ const StockManagement = () => {
                                 <MobileEntryCard
                                     key={e.entry_id}
                                     entry={e}
+                                    user={user}
                                     getGodownName={getGodownName}
                                     getProductName={getProductName}
                                     onEdit={() => handleOpenModal(e)}
@@ -559,6 +574,7 @@ const StockManagement = () => {
                                             <EntryRow
                                                 key={e.entry_id}
                                                 entry={e}
+                                                user={user}
                                                 getGodownName={getGodownName}
                                                 getProductName={getProductName}
                                                 onEdit={() => handleOpenModal(e)}
@@ -876,6 +892,15 @@ const StockManagement = () => {
             {activeTab === 'godowns' && <Godowns isTab={true} />}
             {activeTab === 'transporters' && <Transporters isTab={true} />}
 
+            <DeleteModal
+                isOpen={isDeleteModalOpen}
+                onClose={() => setIsDeleteModalOpen(false)}
+                onConfirm={confirmDelete}
+                title="Delete Stock Entry"
+                description="Are you sure you want to delete this stock entry? This will permanently remove the record from history."
+                itemLabel={itemToDelete?.entry_id}
+                loading={isDeleting}
+            />
         </div>
     );
 };
@@ -911,7 +936,7 @@ const EmptyRow = ({ message }) => (
     </tr>
 );
 
-const EntryRow = ({ entry, getGodownName, getProductName, onEdit, onDelete }) => (
+const EntryRow = ({ entry, user, getGodownName, getProductName, onEdit, onDelete }) => (
     <tr className="hover:bg-slate-50/80 transition-colors group">
         <td className="px-4 py-3 text-sm text-slate-900">{entry.entry_id}</td>
         <td className="px-4 py-3">
@@ -933,15 +958,17 @@ const EntryRow = ({ entry, getGodownName, getProductName, onEdit, onDelete }) =>
                 <Button variant="ghost" size="icon" type="button" onClick={onEdit} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded transition-all" title="Edit">
                     <Edit2 size={16} />
                 </Button>
-                <Button variant="ghost" size="icon" type="button" onClick={onDelete} className="p-1.5 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded transition-all" title="Delete">
-                    <Trash2 size={16} />
-                </Button>
+                {user?.role === 'SUPER ADMIN' && (
+                    <Button variant="ghost" size="icon" type="button" onClick={onDelete} className="p-1.5 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded transition-all" title="Delete">
+                        <Trash2 size={16} />
+                    </Button>
+                )}
             </div>
         </td>
     </tr>
 );
 
-const MobileEntryCard = ({ entry, getGodownName, getProductName, onEdit, onDelete }) => (
+const MobileEntryCard = ({ entry, user, getGodownName, getProductName, onEdit, onDelete }) => (
     <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-start justify-between">
         <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0
@@ -961,9 +988,11 @@ const MobileEntryCard = ({ entry, getGodownName, getProductName, onEdit, onDelet
             <Button variant="ghost" size="icon" onClick={onEdit} className="text-slate-400 hover:text-primary hover:bg-primary/5 rounded-full transition-colors">
                 <Edit2 size={18} />
             </Button>
-            <Button variant="ghost" size="icon" onClick={onDelete} className="text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded-full transition-colors">
-                <Trash2 size={18} />
-            </Button>
+            {user?.role === 'SUPER ADMIN' && (
+                <Button variant="ghost" size="icon" onClick={onDelete} className="text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded-full transition-colors">
+                    <Trash2 size={18} />
+                </Button>
+            )}
         </div>
     </div>
 );
