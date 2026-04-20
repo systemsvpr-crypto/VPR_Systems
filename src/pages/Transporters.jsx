@@ -565,15 +565,6 @@ const Transporters = ({ isTab = false }) => {
 
                         <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
                             <form onSubmit={handleSubmit} className="space-y-5">
-                                <div className="flex flex-col gap-1.5">
-                                    <label className="block text-sm font-medium text-slate-700">
-                                        Transporter ID
-                                    </label>
-                                    <div className="inline-flex items-center px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-lg text-blue-700 font-mono text-sm font-bold shadow-sm w-fit">
-                                        <Tag size={14} className="mr-2" />
-                                        {editingTransporter?.transporter_id || 'AUTO-GENERATING...'}
-                                    </div>
-                                </div>
 
                                 <FormField
                                     label="Transporter Name" name="name" value={formData.name}

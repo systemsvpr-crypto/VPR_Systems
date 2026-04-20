@@ -34,7 +34,7 @@ const Header = ({ children }) => {
 // Fetch Stock Notifications
   useEffect(() => {
     const fetchNotifications = async () => {
-      if (!user) return;
+      if (!user || (user.role !== 'SUPER ADMIN' && user.role !== 'ADMIN')) return;
 
       try {
         const { data, error } = await supabase
@@ -112,8 +112,10 @@ const Header = ({ children }) => {
     fetchNotifications();
 
     // Real-time subscription for new notifications
-    const channel = supabase
-      .channel('header-stock-notifications')
+    let channel = null;
+    if (user && (user.role === 'SUPER ADMIN' || user.role === 'ADMIN')) {
+      channel = supabase
+        .channel('header-stock-notifications')
       .on(
         'postgres_changes',
         {
@@ -127,11 +129,15 @@ const Header = ({ children }) => {
         }
       )
       .subscribe();
+    }
 
-    const interval = setInterval(fetchNotifications, 30000);
+    const interval = (user && (user.role === 'SUPER ADMIN' || user.role === 'ADMIN')) 
+      ? setInterval(fetchNotifications, 30000) 
+      : null;
+
     return () => {
-      clearInterval(interval);
-      supabase.removeChannel(channel);
+      if (interval) clearInterval(interval);
+      if (channel) supabase.removeChannel(channel);
     };
   }, [user]);
 
@@ -172,7 +178,8 @@ const Header = ({ children }) => {
         <div className="flex items-center space-x-4 sm:space-x-6">
 
           {/* Notification Bell */}
-          <div className="relative" ref={notificationRef}>
+          {(user?.role === 'SUPER ADMIN' || user?.role === 'ADMIN') && (
+            <div className="relative" ref={notificationRef}>
             <button
               onClick={() => setIsNotificationOpen(!isNotificationOpen)}
               className="relative p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-full transition-all focus:outline-none"
@@ -272,6 +279,7 @@ const Header = ({ children }) => {
               </div>
             )}
           </div>
+          )}
 
           <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
 

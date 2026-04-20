@@ -134,6 +134,9 @@ const Products = ({ isTab = false }) => {
         const newErrors = {};
         if (!data.name) newErrors.name = 'Product name is required';
         if (!data.product_id) newErrors.product_id = 'Product ID is required';
+        if (!data.godown_id) newErrors.godown_id = 'Default Godown is required';
+        if (!data.mux) newErrors.mux = 'MUX Value is required';
+        if (!data.unit) newErrors.unit = 'Base Unit is required';
         return newErrors;
     };
 
@@ -432,7 +435,7 @@ const Products = ({ isTab = false }) => {
                                             <FormSelect
                                                 label="Base Unit" name="unit" value={formData.unit}
                                                 onChange={handleInputChange} options={UNITS}
-                                                icon={Weight}
+                                                icon={Weight} required error={errors.unit}
                                             />
                                         </div>
 
@@ -459,11 +462,11 @@ const Products = ({ isTab = false }) => {
                                             <FormField
                                                 label="MUX Value" name="mux" value={formData.mux}
                                                 onChange={handleInputChange} placeholder="Value"
-                                                icon={Layers}
+                                                icon={Layers} required error={errors.mux}
                                             />
                                             <FormSelect
                                                 label="Default Godown" name="godown_id" value={formData.godown_id}
-                                                onChange={handleInputChange} 
+                                                onChange={handleInputChange} required error={errors.godown_id}
                                                 options={godowns.map(g => ({ label: g.name, value: g.godown_id }))}
                                                 icon={Package}
                                             />

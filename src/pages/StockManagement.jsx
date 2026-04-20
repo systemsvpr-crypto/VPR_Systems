@@ -239,8 +239,10 @@ const StockManagement = () => {
             newErrors.productItems = 'At least one product is required';
         }
         if (data.transaction_type === 'in') {
-            if (!data.transporter_id) newErrors.transporter_id = 'Transporter is required';
             if (!data.from_location) newErrors.from_location = 'From Location is required';
+            if (data.godown_id && data.from_location && data.godown_id === data.from_location) {
+                newErrors.from_location = 'From Location cannot be same as Godown';
+            }
         }
         return newErrors;
     };
@@ -285,9 +287,9 @@ const StockManagement = () => {
                     quantity: qty,
                     opening_stock: currentStock,
                     closing_stock: newStock,
-                    transporter_id: formData.transaction_type === 'in' ? formData.transporter_id : null,
-                    lr_number: formData.transaction_type === 'in' ? formData.lr_number : null,
-                    from_location: formData.transaction_type === 'in' ? formData.from_location : null,
+                    transporter_id: formData.transaction_type === 'in' ? (formData.transporter_id || null) : null,
+                    lr_number: formData.transaction_type === 'in' ? (formData.lr_number || null) : null,
+                    from_location: formData.transaction_type === 'in' ? (formData.from_location || null) : null,
                 };
 
                 const { error } = await supabase
@@ -351,9 +353,9 @@ const StockManagement = () => {
                         reference_number: formData.reference_number,
                         date: formData.date,
                         notes: formData.notes,
-                        transporter_id: formData.transaction_type === 'in' ? formData.transporter_id : null,
-                        lr_number: formData.transaction_type === 'in' ? formData.lr_number : null,
-                        from_location: formData.transaction_type === 'in' ? formData.from_location : null,
+                        transporter_id: formData.transaction_type === 'in' ? (formData.transporter_id || null) : null,
+                        lr_number: formData.transaction_type === 'in' ? (formData.lr_number || null) : null,
+                        from_location: formData.transaction_type === 'in' ? (formData.from_location || null) : null,
                         freight_amount: formData.transaction_type === 'in' && formData.freight_amount ? parseFloat(formData.freight_amount) : null,
                     };
 
@@ -665,7 +667,7 @@ const StockManagement = () => {
                                         </div>
 
                                         <div className="space-y-1.5">
-                                            <label className="block text-sm font-medium text-slate-700">Date</label>
+                                            <label className="block text-sm font-medium text-slate-700">Date <span className="text-red-500">*</span></label>
                                             <DatePicker
                                                 value={formData.date}
                                                 onChange={handleDateChange}
@@ -692,7 +694,7 @@ const StockManagement = () => {
                                                 </h3>
 
                                                 <div className="space-y-1.5">
-                                                    <label className="block text-sm font-medium text-slate-700">Transporter Name <span className="text-red-500">*</span></label>
+                                                    <label className="block text-sm font-medium text-slate-700">Transporter Name</label>
                                                     <SearchableSelect
                                                         options={transporters.map(t => ({ value: t.transporter_id, label: t.name }))}
                                                         value={formData.transporter_id}
