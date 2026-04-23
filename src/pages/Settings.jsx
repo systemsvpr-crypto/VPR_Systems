@@ -171,7 +171,8 @@ const Settings = () => {
 
             // Auto-set admin pages
             if (name === 'role' && (newValue === 'admin' || newValue === 'Admin')) {
-                newState.page_access = PAGES.map(p => p.id);
+                const allPageIds = PAGES.flatMap(cat => cat.items.map(p => p.id));
+                newState.page_access = allPageIds;
             }
             return newState;
         });
@@ -622,22 +623,63 @@ const Settings = () => {
                                             <div className="flex items-center gap-2 mb-2">
                                                 <label className="block text-sm font-medium text-slate-700">Page Access</label>
                                                 <div className="flex gap-2 text-xs">
-                                                    <Button variant="link" size="sm" type="button" onClick={() => setFormData(prev => ({ ...prev, page_access: PAGES.map(p => p.id) }))} className="text-primary h-auto p-0">Select All</Button>
+                                                    <Button variant="link" size="sm" type="button" onClick={() => {
+                                                        const allPageIds = PAGES.flatMap(cat => cat.items.map(p => p.id));
+                                                        setFormData(prev => ({ ...prev, page_access: allPageIds }));
+                                                    }} className="text-primary h-auto p-0">Select All</Button>
                                                     <span className="text-slate-300">|</span>
                                                     <Button variant="link" size="sm" type="button" onClick={() => setFormData(prev => ({ ...prev, page_access: [] }))} className="text-slate-500 h-auto p-0">None</Button>
                                                 </div>
                                             </div>
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-4 rounded-lg border border-slate-200">
-                                                {PAGES.map(page => (
-                                                    <label key={page.id} className="flex items-center gap-2 cursor-pointer">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={formData.page_access?.includes(page.id) || false}
-                                                            onChange={() => handlePageAccessToggle(page.id)}
-                                                            className="rounded text-primary focus:ring-primary"
-                                                        />
-                                                        <span className="text-sm text-slate-700">{page.label}</span>
-                                                    </label>
+                                            <div className="flex flex-col gap-6 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                                                {PAGES.map(cat => (
+                                                    <div key={cat.category} className="space-y-3">
+                                                        <div className="flex items-center gap-2 border-b border-slate-200 pb-1">
+                                                            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">{cat.category}</h4>
+                                                            <div className="flex gap-2 text-[10px]">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        const catIds = cat.items.map(i => i.id);
+                                                                        setFormData(prev => ({
+                                                                            ...prev,
+                                                                            page_access: [...new Set([...(prev.page_access || []), ...catIds])]
+                                                                        }));
+                                                                    }}
+                                                                    className="text-primary hover:underline"
+                                                                >
+                                                                    Select All
+                                                                </button>
+                                                                <span className="text-slate-300">|</span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        const catIds = cat.items.map(i => i.id);
+                                                                        setFormData(prev => ({
+                                                                            ...prev,
+                                                                            page_access: (prev.page_access || []).filter(id => !catIds.includes(id))
+                                                                        }));
+                                                                    }}
+                                                                    className="text-slate-400 hover:underline"
+                                                                >
+                                                                    Clear
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+                                                            {cat.items.map(page => (
+                                                                <label key={page.id} className="flex items-center gap-2 cursor-pointer group">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={formData.page_access?.includes(page.id) || false}
+                                                                        onChange={() => handlePageAccessToggle(page.id)}
+                                                                        className="rounded text-primary focus:ring-primary w-4 h-4"
+                                                                    />
+                                                                    <span className="text-sm text-slate-600 group-hover:text-slate-900 transition-colors">{page.label}</span>
+                                                                </label>
+                                                            ))}
+                                                        </div>
+                                                    </div>
                                                 ))}
                                             </div>
                                         </div>

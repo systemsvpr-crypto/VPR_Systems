@@ -62,12 +62,23 @@ const MyProfile = () => {
         query = query.eq('username', sessionUser.username);
       }
 
-      const { data, error } = await query.single();
-      if (error) throw error;
-      if (!data) throw new Error("User profile not found.");
+      const { data, error } = await query.limit(1);
+      if (error) {
+         throw error;
+      }
+      const userData = data && data.length > 0 ? data[0] : null;
+      if (!userData) {
+        // User not found in 'users', maybe they are an old 'app_users' user.
+        // Let's clear their session and ask them to login again
+        useAuthStore.getState().logout();
+        localStorage.removeItem('user');
+        toast.error("Session expired or user not found. Please log in again.");
+        window.location.href = '/login';
+        return;
+      }
 
-      setProfileData(data);
-      setFormData({ ...data, password: data.password || '' });
+      setProfileData(userData);
+      setFormData({ ...userData, password: userData.password || '' });
     } catch (error) {
       console.error("Error fetching user profile:", error);
       toast.error(`Failed to load profile: ${error.message}`);

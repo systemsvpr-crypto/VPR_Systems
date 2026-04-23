@@ -12,11 +12,32 @@ import StockNotifications from './pages/StockNotifications';
 import StockManagement from './pages/StockManagement';
 import LiveStockDashboard from './pages/LiveStockDashboard';
 import Transporters from './pages/Transporters';
+import Sell from './pages/Sell';
+import Purchase from './pages/Purchase';
+
+// Patch stale localStorage 'user' — re-evaluate Admin flag from role on every app load
+// This fixes sessions that were stored before the case-insensitive Admin fix.
+const patchStoredUser = () => {
+  try {
+    const raw = localStorage.getItem('user');
+    if (!raw) return;
+    const u = JSON.parse(raw);
+    if (!u || !u.role) return;
+    const roleUp = u.role.toUpperCase().trim();
+    const shouldBeAdmin = roleUp === 'ADMIN' || roleUp === 'SUPER ADMIN' || roleUp === 'SUPER_ADMIN';
+    const currentlyAdmin = u.Admin === 'Yes';
+    if (shouldBeAdmin !== currentlyAdmin) {
+      const patched = { ...u, Admin: shouldBeAdmin ? 'Yes' : 'No' };
+      localStorage.setItem('user', JSON.stringify(patched));
+    }
+  } catch { /* ignore */ }
+};
+patchStoredUser();
 
 function App() {
   return (
     <div className="gradient-bg min-h-screen">
-      <Router>
+      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Toaster position="top-right" containerStyle={{ zIndex: 99999 }} />
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -35,6 +56,8 @@ function App() {
             <Route path="stock-notifications" element={<StockNotifications />} />
             <Route path="stock-management" element={<StockManagement />} />
             <Route path="live-stock-dashboard" element={<LiveStockDashboard />} />
+            <Route path="sell" element={<Sell />} />
+            <Route path="purchase" element={<Purchase />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />

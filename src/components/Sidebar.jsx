@@ -3,7 +3,6 @@ import useAuthStore from '../store/authStore';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase';
 import {
- 
   LogOut as LogOutIcon,
   X,
   User,
@@ -24,9 +23,9 @@ import {
   Bell,
   TrendingUp,
   Truck,
-
   ShoppingBag,
-  HardHat
+  HardHat,
+  BadgeDollarSign,
 } from 'lucide-react';
 
 const Sidebar = ({ onClose }) => {
@@ -95,17 +94,24 @@ const Sidebar = ({ onClose }) => {
   };
 
   /* Combined Master Menu List for Permission Checking */
-  const MASTER_MENU_ITEMS = [
+  const MENU_ITEMS = [
     { path: '/live-stock-dashboard', icon: LayoutDashboard, label: 'Live Stock Dashboard', id: 'live-stock-dashboard' },
-    { path: '/stock-management', icon: TrendingUp, label: 'Stocks', id: 'stock-management' },
+    { path: '/stock-management', icon: TrendingUp, label: 'Stock', id: 'stock-management' },
     { path: '/stock-notifications', icon: Bell, label: 'Notifications', id: 'stock-notifications' },
+    { path: '/sell', icon: BadgeDollarSign, label: 'Sell / Dispatch', id: 'sell' },
+    { path: '/purchase', icon: ShoppingCart, label: 'Purchase', id: 'purchase-dashboard' },
     { type: 'separator', label: 'SETTINGS' },
     { path: '/settings', icon: Settings, label: 'Settings', id: 'settings' },
     { path: '/my-profile', icon: User, label: 'My Profile', id: 'my-profile' },
   ];
 
   // Helper: Check if user has access to a specific page ID
+  const isAdmin = user?.role?.toUpperCase() === 'ADMIN' || user?.role?.toUpperCase() === 'SUPER ADMIN' || user?.Admin === 'Yes';
+
   const hasAccess = (pageId) => {
+    // Admins always have access to everything
+    if (isAdmin) return true;
+
     // If no page_access defined (legacy users), fallback to basic employee pages
     if (!user?.page_access || !Array.isArray(user?.page_access)) {
       const DEFAULT_ACCESS = ['my-profile'];
@@ -116,7 +122,7 @@ const Sidebar = ({ onClose }) => {
   };
 
   // Filter the menu items
-  const baseMenuItems = MASTER_MENU_ITEMS.reduce((acc, item) => {
+  const baseMenuItems = MENU_ITEMS.reduce((acc, item) => {
     // Handle separators - always show them
     if (item.type === 'separator') {
       acc.push(item);
@@ -125,92 +131,102 @@ const Sidebar = ({ onClose }) => {
 
     // Handle Dropdowns specially
     if (item.type === 'dropdown') {
-      // Check if any child is accessible
       const accessibleChildren = item.items.filter(child => hasAccess(child.id));
       if (accessibleChildren.length > 0) {
         acc.push({ ...item, items: accessibleChildren });
       }
-    } else {
-      // Normal Item
-      if (hasAccess(item.id)) {
+      return acc;
+    }
+
+    // Normal Item
+    if (hasAccess(item.id)) {
+      acc.push(item);
+    } else if (item.id === 'stock-management') {
+      // Special check for Stocks: show if user has access to any of its tabs
+      const STOCKS_TABS = ['products', 'godowns', 'transporters'];
+      if (STOCKS_TABS.some(tabId => hasAccess(tabId))) {
         acc.push(item);
-      } else if (item.id === 'stock-management') {
-        // Special check for Stocks: show if user has access to any of its tabs
-        const STOCKS_TABS = ['products', 'godowns', 'transporters'];
-        const hasAnyTabAccess = STOCKS_TABS.some(tabId => hasAccess(tabId));
-        if (hasAnyTabAccess) {
-          acc.push(item);
-        }
+      }
+    } else if (item.id === 'sell') {
+      // Show Sell if user has 'sell' in page_access OR is admin OR has any OTD page
+      const SELL_TABS = ['Dashboard', 'Order', 'Dispatch Planning', 'Inform to Party Before Dispatch', 'Dispatch Completed', 'Inform to Party After Dispatch', 'Godown', 'PC Report', 'Skip Delivered', 'sell'];
+      if (user?.page_access?.some(p => SELL_TABS.includes(p)) || isAdmin) {
+        acc.push(item);
+      }
+    } else if (item.id === 'purchase-dashboard') {
+      const PURCHASE_TABS = ['purchase-dashboard', 'purchase-orders'];
+      if (user?.page_access?.some(p => PURCHASE_TABS.includes(p)) || isAdmin) {
+        acc.push(item);
       }
     }
     return acc;
   }, []);
 
-  const menuItems = baseMenuItems;
+const menuItems = baseMenuItems;
 
 
-  return (
-    <>
-      {/* Mobile menu button */}
-      <button
-        className={`md:hidden fixed top-4 left-4 z-50 p-2 text-slate-500 hover:text-slate-700 transition-all duration-300 ${isOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
-        onClick={() => setIsOpen(true)}
-      >
-        <Menu className="w-6 h-6" />
-      </button>
+return (
+  <>
+    {/* Mobile menu button */}
+    <button
+      className={`md:hidden fixed top-4 left-4 z-50 p-2 text-slate-500 hover:text-slate-700 transition-all duration-300 ${isOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+      onClick={() => setIsOpen(true)}
+    >
+      <Menu className="w-6 h-6" />
+    </button>
 
-      {/* Tablet menu button */}
-      <button
-        className={`hidden md:block lg:hidden fixed top-4 left-4 z-50 p-2 text-slate-500 hover:text-slate-700 transition-all duration-300 ${isOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
-        onClick={() => setIsOpen(true)}
-      >
-        <Menu className="w-6 h-6" />
-      </button>
+    {/* Tablet menu button */}
+    <button
+      className={`hidden md:block lg:hidden fixed top-4 left-4 z-50 p-2 text-slate-500 hover:text-slate-700 transition-all duration-300 ${isOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+      onClick={() => setIsOpen(true)}
+    >
+      <Menu className="w-6 h-6" />
+    </button>
 
-      {/* Desktop Sidebar - Static Flow (Flex Item) */}
-      <div className="hidden lg:flex h-screen sticky top-0 bg-white border-r border-slate-100 z-30 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
+    {/* Desktop Sidebar - Static Flow (Flex Item) */}
+    <div className="hidden lg:flex h-screen sticky top-0 bg-white border-r border-slate-100 z-30 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
+      <SidebarContent
+        menuItems={menuItems}
+        user={user}
+        handleLogout={handleLogout}
+      />
+    </div>
+
+    {/* Tablet Sidebar - collapsible */}
+    <div className={`hidden md:block lg:hidden fixed inset-0 z-50 transition-all duration-500 ease-out ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+      <div
+        className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm transition-opacity duration-500"
+        onClick={() => setIsOpen(false)}
+      />
+      <div className={`fixed left-0 top-0 h-full z-50 transform ${isOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-500 cubic-bezier(0.19, 1, 0.22, 1)`}>
         <SidebarContent
           menuItems={menuItems}
+          onClose={() => setIsOpen(false)}
           user={user}
           handleLogout={handleLogout}
+          isMobile={true}
         />
       </div>
+    </div>
 
-      {/* Tablet Sidebar - collapsible */}
-      <div className={`hidden md:block lg:hidden fixed inset-0 z-50 transition-all duration-500 ease-out ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-        <div
-          className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm transition-opacity duration-500"
-          onClick={() => setIsOpen(false)}
+    {/* Mobile Sidebar - collapsible */}
+    <div className={`md:hidden fixed inset-0 z-50 transition-all duration-500 ease-out ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+      <div
+        className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm transition-opacity duration-500"
+        onClick={() => setIsOpen(false)}
+      />
+      <div className={`fixed left-0 top-0 h-full z-50 transform ${isOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-500 cubic-bezier(0.19, 1, 0.22, 1)`}>
+        <SidebarContent
+          menuItems={menuItems}
+          onClose={() => setIsOpen(false)}
+          user={user}
+          handleLogout={handleLogout}
+          isMobile={true}
         />
-        <div className={`fixed left-0 top-0 h-full z-50 transform ${isOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-500 cubic-bezier(0.19, 1, 0.22, 1)`}>
-          <SidebarContent
-            menuItems={menuItems}
-            onClose={() => setIsOpen(false)}
-            user={user}
-            handleLogout={handleLogout}
-            isMobile={true}
-          />
-        </div>
       </div>
-
-      {/* Mobile Sidebar - collapsible */}
-      <div className={`md:hidden fixed inset-0 z-50 transition-all duration-500 ease-out ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-        <div
-          className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm transition-opacity duration-500"
-          onClick={() => setIsOpen(false)}
-        />
-        <div className={`fixed left-0 top-0 h-full z-50 transform ${isOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-500 cubic-bezier(0.19, 1, 0.22, 1)`}>
-          <SidebarContent
-            menuItems={menuItems}
-            onClose={() => setIsOpen(false)}
-            user={user}
-            handleLogout={handleLogout}
-            isMobile={true}
-          />
-        </div>
-      </div>
-    </>
-  );
+    </div>
+  </>
+);
 };
 
 // Extracted SidebarContent to prevent re-renders

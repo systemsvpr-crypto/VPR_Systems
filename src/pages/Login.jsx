@@ -55,10 +55,15 @@ const Login = () => {
       toast.success('Login successful!');
 
       // Compatibility object
+      const roleNormalized = (user.role || '').toUpperCase().trim();
       const userForStore = {
         ...user,
         Name: user.full_name,
-        Admin: (user.role && user.role.toLowerCase() === 'admin') ? 'Yes' : 'No'
+        Admin: (
+          roleNormalized === 'ADMIN' ||
+          roleNormalized === 'SUPER ADMIN' ||
+          roleNormalized === 'SUPER_ADMIN'
+        ) ? 'Yes' : 'No'
       };
 
       localStorage.setItem('user', JSON.stringify(userForStore));
