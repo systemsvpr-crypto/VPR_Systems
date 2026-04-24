@@ -257,7 +257,7 @@ const OtdInformBefore = () => {
                 </div>
 
                 {/* Filters */}
-                <div className="flex flex-col lg:flex-row justify-between gap-4 lg:items-start">
+                <div className="flex flex-col lg:flex-row justify-between gap-4 lg:items-start relative z-20">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 w-full">
                         <input
                             type="text"

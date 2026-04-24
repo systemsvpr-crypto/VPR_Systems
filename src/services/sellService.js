@@ -95,9 +95,9 @@ export const sellService = {
   /** Fetch dropdown lists for products, customers, godowns */
   async getMasterData() {
     const [productsRes, customersRes, godownsRes] = await Promise.all([
-      supabase.from('master_products').select('product_name, godown_name').order('product_name'),
-      supabase.from('master_customers').select('customer_name').order('customer_name'),
-      supabase.from('master_godowns').select('godown_name').order('godown_name'),
+      supabase.from('products').select('name, godown_id').order('name'),
+      supabase.from('users').select('full_name').order('full_name'),
+      supabase.from('godowns').select('name').order('name'),
     ]);
     if (productsRes.error) throw productsRes.error;
     if (customersRes.error) throw customersRes.error;
@@ -105,13 +105,13 @@ export const sellService = {
 
     const productGodownMap = {};
     productsRes.data.forEach(p => {
-      if (p.product_name) productGodownMap[p.product_name] = p.godown_name;
+      if (p.name) productGodownMap[p.name] = p.godown_id;
     });
 
     return {
-      products: productsRes.data.map(p => p.product_name),
-      customers: customersRes.data.map(c => c.customer_name),
-      godowns: godownsRes.data.map(g => g.godown_name),
+      products: productsRes.data.map(p => p.name),
+      customers: customersRes.data.map(c => c.full_name).filter(Boolean),
+      godowns: godownsRes.data.map(g => g.name),
       productGodownMap,
     };
   },
@@ -122,7 +122,7 @@ export const sellService = {
   async getPendingOrdersWithStock() {
     const [ordersRes, stockRes, plansRes] = await Promise.all([
       supabase.from('app_orders').select('*').order('created_at', { ascending: false }),
-      supabase.from('stock_levels').select('item_name, godown_name, closing_stock'),
+      supabase.from('products').select('name, godown_id, closing_quantity'),
       supabase.from('dispatch_plans').select('order_id, planned_qty, status, dispatch_completed').neq('status', 'Canceled'),
     ]);
     if (ordersRes.error) throw ordersRes.error;
@@ -131,8 +131,8 @@ export const sellService = {
     // Build stock lookup
     const stockMap = {};
     stockRes.data.forEach(s => {
-      const key = `${String(s.item_name).trim().toLowerCase()}|${String(s.godown_name).trim().toLowerCase()}`;
-      stockMap[key] = s.closing_stock;
+      const key = `${String(s.name).trim().toLowerCase()}|${String(s.godown_id).trim().toLowerCase()}`;
+      stockMap[key] = s.closing_quantity;
     });
 
     // Build planned-qty map

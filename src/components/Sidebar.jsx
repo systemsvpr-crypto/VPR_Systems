@@ -97,10 +97,10 @@ const Sidebar = ({ onClose }) => {
   const MENU_ITEMS = [
     { path: '/live-stock-dashboard', icon: LayoutDashboard, label: 'Live Stock Dashboard', id: 'live-stock-dashboard' },
     { path: '/stock-management', icon: TrendingUp, label: 'Stock', id: 'stock-management' },
-    { path: '/stock-notifications', icon: Bell, label: 'Notifications', id: 'stock-notifications' },
-    { path: '/sell', icon: BadgeDollarSign, label: 'Sell / Dispatch', id: 'sell' },
+    { path: '/sell', icon: BadgeDollarSign, label: 'Sales', id: 'sell' },
     { path: '/purchase', icon: ShoppingCart, label: 'Purchase', id: 'purchase-dashboard' },
     { type: 'separator', label: 'SETTINGS' },
+    { path: '/master', icon: LayoutDashboard, label: 'Master Config', id: 'master' },
     { path: '/settings', icon: Settings, label: 'Settings', id: 'settings' },
     { path: '/my-profile', icon: User, label: 'My Profile', id: 'my-profile' },
   ];
@@ -142,9 +142,14 @@ const Sidebar = ({ onClose }) => {
     if (hasAccess(item.id)) {
       acc.push(item);
     } else if (item.id === 'stock-management') {
-      // Special check for Stocks: show if user has access to any of its tabs
-      const STOCKS_TABS = ['products', 'godowns', 'transporters'];
-      if (STOCKS_TABS.some(tabId => hasAccess(tabId))) {
+      // Show Stocks if user has access to stock-management
+      if (hasAccess('stock-management')) {
+        acc.push(item);
+      }
+    } else if (item.id === 'master') {
+      // Show Master Config if user has access to any master tabs
+      const MASTER_TABS = ['products', 'godowns', 'transporters'];
+      if (MASTER_TABS.some(tabId => hasAccess(tabId))) {
         acc.push(item);
       }
     } else if (item.id === 'sell') {

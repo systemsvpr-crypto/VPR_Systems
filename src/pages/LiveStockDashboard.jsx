@@ -65,8 +65,8 @@ const LiveStockDashboard = () => {
                 mux: product.mux || '',
                 godown_name: godown.name || product.godown_id || 'Not Assigned',
                 current_stock: parseFloat(product.closing_quantity) || 0,
-                master_opening: product.opening_quantity || 0,
-                master_closing: product.closing_quantity || 0,
+                opening_quantity: product.opening_quantity || 0,
+                closing_quantity: product.closing_quantity || 0,
             };
         });
     }, [products, godowns]);
@@ -115,8 +115,8 @@ const LiveStockDashboard = () => {
                        dayTransactions.filter(t => t.product_id === p.product_id && t.from_location === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0))
                     : 0,
                 closing_stock: isToday || snapshot ? closing_stock : '-',
-                master_opening: p.opening_quantity || 0,
-                master_closing: p.closing_quantity || 0,
+                opening_quantity: p.opening_quantity || 0,
+                closing_quantity: p.closing_quantity || 0,
             };
         });
     }, [products, dayTransactions, summaryDate, godowns]);
@@ -349,8 +349,8 @@ const LiveStockDashboard = () => {
                                             <HeaderCell>Godown</HeaderCell>
                                             <HeaderCell>Product</HeaderCell>
                                             <HeaderCell>MUX</HeaderCell>
-                                            <HeaderCell>Master Opening</HeaderCell>
-                                            <HeaderCell>Master Closing</HeaderCell>
+                                            <HeaderCell>Opening Quantity</HeaderCell>
+                                            <HeaderCell>Closing Quantity</HeaderCell>
                                             <HeaderCell>Opening Stock</HeaderCell>
                                             <HeaderCell>In Stock</HeaderCell>
                                             <HeaderCell>Out Stock</HeaderCell>
@@ -364,8 +364,8 @@ const LiveStockDashboard = () => {
                                                 <td className="px-4 py-3 text-sm text-slate-900">{s.godown_name}</td>
                                                 <td className="px-4 py-3 text-sm text-slate-900">{s.product_name}</td>
                                                 <td className="px-4 py-3 text-sm text-slate-900">{s.mux || '-'}</td>
-                                                <td className="px-4 py-3 text-sm font-medium text-slate-500">{s.master_opening}</td>
-                                                <td className="px-4 py-3 text-sm font-medium text-slate-500">{s.master_closing}</td>
+                                                <td className="px-4 py-3 text-sm font-medium text-slate-500">{s.opening_quantity}</td>
+                                                <td className="px-4 py-3 text-sm font-medium text-slate-500">{s.closing_quantity}</td>
                                                 <td className="px-4 py-3 text-sm font-medium">{s.opening_stock}</td>
                                                 <td className="px-4 py-3 text-sm font-medium text-green-600">+{s.in_stock}</td>
                                                 <td className="px-4 py-3 text-sm font-medium text-red-600">-{s.out_stock}</td>
@@ -471,8 +471,8 @@ const LiveStockDashboard = () => {
                                             <HeaderCell>MUX</HeaderCell>
                                             <HeaderCell>Units</HeaderCell>
                                             <HeaderCell>Weight (KG)</HeaderCell>
-                                            <HeaderCell>Master Opening</HeaderCell>
-                                            <HeaderCell>Master Closing</HeaderCell>
+                                            <HeaderCell>Opening Quantity</HeaderCell>
+                                            <HeaderCell>Closing Quantity</HeaderCell>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
@@ -494,8 +494,8 @@ const LiveStockDashboard = () => {
                                                 <td className="px-4 py-3 text-sm font-bold text-primary">
                                                     {((parseFloat(stock.mux) || 0) * (parseFloat(stock.current_stock) || 0)).toFixed(3)}
                                                 </td>
-                                                <td className="px-4 py-3 text-sm text-slate-500">{stock.master_opening}</td>
-                                                <td className="px-4 py-3 text-sm text-slate-500">{stock.master_closing}</td>
+                                                <td className="px-4 py-3 text-sm text-slate-500">{stock.opening_quantity}</td>
+                                                <td className="px-4 py-3 text-sm text-slate-500">{stock.closing_quantity}</td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -505,7 +505,6 @@ const LiveStockDashboard = () => {
                     )}
                 </div>
             )}
-
 
 
             {selectedTransfer && (
@@ -590,11 +589,11 @@ const StockCard = ({ stock }) => {
             <div className="mt-4 pt-4 border-t border-slate-50 grid grid-cols-2 gap-2">
                 <div className="text-center py-1 bg-slate-50 rounded-xl">
                     <p className="text-[9px] font-black text-slate-400 uppercase mb-0.5">Opening</p>
-                    <p className="text-xs font-bold text-slate-600">{stock.master_opening}</p>
+                    <p className="text-xs font-bold text-slate-600">{stock.opening_quantity}</p>
                 </div>
                 <div className="text-center py-1 bg-blue-50/50 rounded-xl">
                     <p className="text-[9px] font-black text-blue-400 uppercase mb-0.5">Closing</p>
-                    <p className="text-xs font-bold text-blue-700">{stock.master_closing}</p>
+                    <p className="text-xs font-bold text-blue-700">{stock.closing_quantity}</p>
                 </div>
             </div>
         </div>

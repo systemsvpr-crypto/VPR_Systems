@@ -197,23 +197,22 @@ const OtdDashboard = () => {
     // Over Planned: absolute value of negative planning quantity
     const overPlannedQtySum = orders.reduce((sum, item) => sum + (item.planningPendingQty < 0 ? Math.abs(item.planningPendingQty) : 0), 0);
 
+    const nonCancelledPlans = planningData.filter(p => p.status !== 'Canceled');
+
     // 2. Stage 1: Planning
     // Pending: Orders with remaining quantity to plan
     // Done: Total created dispatch plans (excluding cancelled)
     const pendingPlanning = orders.filter(o => o.planningPendingQty > 0).length;
-    const completedPlanning = planningData.filter(p => p.status !== 'Canceled').length;
+    const completedPlanning = nonCancelledPlans.length;
 
     // 3. Stage 2: Inform Before Dispatch
-    // Only counts ACTIVE plans (not yet dispatched, not cancelled)
-    // A completed plan is already past Stage 2
-    const activePlans = planningData.filter(p => p.status !== 'Canceled' && p.status !== 'Completed');
-    const stage2Pending = activePlans.filter(p => !p.informed_before_dispatch).length;
-    const stage2Done    = activePlans.filter(p =>  p.informed_before_dispatch).length;
+    // Counts all non-canceled plans to show total pipeline throughput
+    const stage2Pending = nonCancelledPlans.filter(p => !p.informed_before_dispatch).length;
+    const stage2Done    = nonCancelledPlans.filter(p =>  p.informed_before_dispatch).length;
 
     // 4. Stage 3: Dispatch Completion
     // Done   = status strictly 'Completed' (fixed — cancelled plans also have dispatch_completed=true)
     // Pending = non-cancelled plans not yet completed
-    const nonCancelledPlans = planningData.filter(p => p.status !== 'Canceled');
     const stage3Done    = nonCancelledPlans.filter(p => p.status === 'Completed').length;
     const stage3Pending = nonCancelledPlans.filter(p => p.status !== 'Completed').length;
 

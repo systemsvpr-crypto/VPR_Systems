@@ -72,7 +72,6 @@ const StockManagement = () => {
     const { user } = useAuthStore();
     const [activeTab, setActiveTab] = useState('stocks');
 
-    // Filter tabs based on user access
     const allowedTabs = useMemo(() => {
         const tabs = [];
         const pageAccess = user?.page_access || [];
@@ -80,15 +79,6 @@ const StockManagement = () => {
 
         if (isAdmin || pageAccess.includes('stock-management')) {
             tabs.push({ id: 'stocks', label: 'Stocks', icon: Package });
-        }
-        if (isAdmin || pageAccess.includes('products')) {
-            tabs.push({ id: 'products', label: 'Products', icon: LayoutGrid });
-        }
-        if (isAdmin || pageAccess.includes('godowns')) {
-            tabs.push({ id: 'godowns', label: 'Godowns', icon: MapPin });
-        }
-        if (isAdmin || pageAccess.includes('transporters')) {
-            tabs.push({ id: 'transporters', label: 'Transporters', icon: Truck });
         }
         return tabs;
     }, [user]);
@@ -449,30 +439,7 @@ const StockManagement = () => {
                 <p className="text-slate-500 mt-1 text-sm">Centralized stock and inventory administration.</p>
             </div>
 
-            {/* Tabs */}
-            <div className="flex border-b border-slate-200 overflow-x-auto overflow-y-hidden custom-scrollbar">
-                {allowedTabs.map(tab => (
-                    <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id)}
-                        className={cn(
-                            "flex-1 min-w-[120px] pb-3 text-xs sm:text-sm font-medium transition-all flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 whitespace-nowrap relative",
-                            activeTab === tab.id
-                                ? 'text-primary'
-                                : 'text-slate-500 hover:text-slate-700'
-                        )}
-                    >
-                        <tab.icon size={16} />
-                        {tab.label}
-                        {activeTab === tab.id && (
-                            <div className="absolute bottom-[-1px] left-0 right-0 h-0.5 bg-primary animate-in fade-in slide-in-from-bottom-1" />
-                        )}
-                    </button>
-                ))}
-            </div>
-
-            {activeTab === 'stocks' && (
-                <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-4 mt-2">
                     <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 shrink-0">
                         <div className="hidden xl:flex items-center gap-6">
                             <StatItem label="Total Entries" value={entries.length} />
@@ -617,7 +584,6 @@ const StockManagement = () => {
                             />
                         </div>
                     )}
-
                     {/* Modal */}
                     {isModalOpen && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
@@ -887,14 +853,7 @@ const StockManagement = () => {
                             </div>
                         </div>
                     )}
-                </div>
-            )}
-
-            {activeTab === 'products' && <Products isTab={true} />}
-            {activeTab === 'godowns' && <Godowns isTab={true} />}
-            {activeTab === 'transporters' && <Transporters isTab={true} />}
-
-            <DeleteModal
+                </div>            <DeleteModal
                 isOpen={isDeleteModalOpen}
                 onClose={() => setIsDeleteModalOpen(false)}
                 onConfirm={confirmDelete}

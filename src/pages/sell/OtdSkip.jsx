@@ -109,15 +109,24 @@ const OtdSkip = () => {
   const fetchStockData = useCallback(async () => {
     setLoadingStock(true);
     try {
-      const allStock = await fetchAllRows('products', 'name, godown_id, closing_quantity', 'name');
+      const [allStock, godownsData] = await Promise.all([
+        fetchAllRows('products', 'name, godown_id, closing_quantity', 'name'),
+        fetchAllRows('godowns', 'name, godown_id', 'name')
+      ]);
+
+      const godownMap = {};
+      godownsData.forEach(g => {
+        godownMap[g.godown_id] = g.name;
+      });
 
       const sMap = {};
       allStock.forEach(row => {
         const item = normalize(row.name);
-        const godown = String(row.godown_id || "").trim();
+        const godownId = String(row.godown_id || "").trim();
+        const godownName = godownMap[godownId] || godownId;
         const stock = Number(row.closing_quantity) || 0;
 
-        const displayGodown = godown.toLowerCase() === 'godown' ? 'Gdn' : godown;
+        const displayGodown = godownName.toLowerCase() === 'godown' ? 'Gdn' : godownName;
         if (!sMap[item]) sMap[item] = [];
         sMap[item].push(`${displayGodown}:${stock}`);
       });
@@ -527,13 +536,13 @@ const OtdSkip = () => {
             planned_date: edit.dispatchDate,
             godown_name: edit.godown,
             dispatch_completed: true,
-            informed_before_dispatch: false,
-            informed_after_dispatch: false,
+            informed_before_dispatch: true,
+            informed_after_dispatch: true,
             status: 'Completed',
             is_skip: true,
             submitted_by: user?.name || user?.full_name || user?.username || 'System',
             completed_at: now,
-            informed_at: null,
+            informed_at: now,
             // NEW FIELDS
             product_name: item.itemName || null,
             order_qty: item.orderQty || 0,
@@ -557,6 +566,7 @@ const OtdSkip = () => {
           dispatch_qty: parseFloat(edit.dispatchQty) || 0,
           crm_name: user?.name || user?.full_name || user?.username || 'System',
           status: 'Completed',
+          is_skip: true,
           // NEW FIELDS for log as well
           order_number: item.orderNumber || null
         });
@@ -587,7 +597,7 @@ const OtdSkip = () => {
           </div>
         </div>
 
-        <div className="flex flex-col lg:flex-row justify-between gap-4 lg:items-start">
+        <div className="flex flex-col lg:flex-row justify-between gap-4 lg:items-start relative z-20">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 w-full">
             <input type="text" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full h-[42px] px-3 py-2 bg-gray-50 border border-gray-200 rounded focus:ring-2 focus:ring-primary focus:border-transparent outline-none text-sm transition-all" />
             <div className="h-[42px]"><SearchableDropdown value={clientFilter} onChange={setClientFilter} options={allUniqueClients} allLabel="All Clients" className="w-full h-full" focusColor="primary" /></div>

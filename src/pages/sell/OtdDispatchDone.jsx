@@ -276,7 +276,8 @@ const OtdDispatchDone = () => {
             dispatch_qty: finalQty,
             crm_name: item.crmName,
             status: 'Completed',
-            order_no: item.orderNumber
+            order_no: item.orderNumber,
+            is_skip: false
           });
 
           // Update dispatch_plans — item name goes to product_name here, NOT app_orders
@@ -580,7 +581,7 @@ const OtdDispatchDone = () => {
           </div>
         </div>
 
-        <div className="flex flex-col lg:flex-row justify-between gap-4 lg:items-start">
+        <div className="flex flex-col lg:flex-row justify-between gap-4 lg:items-start relative z-20">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 w-full">
             <input
               type="text"

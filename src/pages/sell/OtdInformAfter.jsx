@@ -196,7 +196,7 @@ const OtdInformAfter = () => {
 
       {/* Header & Controls */}
       <div className="max-w-[1400px] mx-auto mb-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
           {/* Row 1: Title & Tabs */}
           <div className="px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-50 gap-4">
             <div className="flex items-center gap-3">
@@ -224,7 +224,7 @@ const OtdInformAfter = () => {
           </div>
 
           {/* Row 2: Filters & Actions */}
-          <div className="px-6 py-4 bg-gray-50/30 flex flex-wrap items-center gap-4">
+          <div className="px-6 py-4 bg-gray-50/30 flex flex-wrap items-center gap-4 relative z-20">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 flex-1 min-w-[300px]">
               <div className="relative">
                 <div className="absolute inset-y-0 left-3 flex items-center text-gray-400"><RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} /></div>

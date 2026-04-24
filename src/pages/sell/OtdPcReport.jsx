@@ -68,7 +68,7 @@ const OtdPcReport = () => {
                 const plans = allPlans.filter(p => p.order_id === order.id);
                 const plannedSum = plans.filter(p => p.status !== 'Canceled').reduce((sum, p) => sum + (parseFloat(p.planned_qty) || 0), 0);
                 const canceledSum = plans.filter(p => p.status === 'Canceled').reduce((sum, p) => sum + (parseFloat(p.planned_qty) || 0), 0);
-                const remaining = (parseFloat(order.qty) || 0) - plannedSum - canceledSum;
+                const remaining = (parseFloat(order.qty) || 0) - plannedSum;
 
                 if (remaining > 0.001) {
                     report.push({

@@ -28,7 +28,6 @@ const DEFAULT_FORM_DATA = {
     godown_id: '',
     quantity: 0,
     opening_quantity: 0,
-    closing_quantity: 0,
     is_active: true,
 };
 
@@ -87,7 +86,6 @@ const Products = ({ isTab = false }) => {
         if (product) {
             setEditingProduct(product);
             setFormData({
-                ...DEFAULT_FORM_DATA,
                 ...product,
             });
         } else {
@@ -122,13 +120,14 @@ const Products = ({ isTab = false }) => {
 
     useEffect(() => {
         const mux = parseFloat(formData.mux) || 0;
-        const closing = parseFloat(formData.closing_quantity) || 0;
-        const calculatedQty = (mux * closing).toFixed(3);
+        const opening = parseFloat(formData.opening_quantity) || 0;
+        const calculatedQty = (mux * opening).toFixed(3);
         
         if (formData.quantity !== parseFloat(calculatedQty)) {
             setFormData(prev => ({ ...prev, quantity: parseFloat(calculatedQty) }));
         }
-    }, [formData.mux, formData.closing_quantity]);
+    }, [formData.mux, formData.opening_quantity]);
+
 
     const validateForm = (data) => {
         const newErrors = {};
@@ -158,9 +157,17 @@ const Products = ({ isTab = false }) => {
                 if (error) throw error;
                 toast.success('Product updated successfully');
             } else {
+                // Initialize closing_quantity and quantity for new products
+                const opening = parseFloat(formData.opening_quantity) || 0;
+                const mux = parseFloat(formData.mux) || 0;
+                const newProductData = {
+                    ...formData,
+                    closing_quantity: opening,
+                    quantity: (opening * mux)
+                };
                 const { error } = await supabase
                     .from('products')
-                    .insert([formData]);
+                    .insert([newProductData]);
                 if (error) throw error;
                 toast.success('Product created successfully');
             }
@@ -472,8 +479,7 @@ const Products = ({ isTab = false }) => {
                                             />
                                         </div>
 
-                                        <div className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100 space-y-4">
-                                            <div className="grid grid-cols-2 gap-4">
+                                        <div className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100">
                                                 <FormField
                                                     label="Opening Quantity" name="opening_quantity" type="number" value={formData.opening_quantity}
                                                     onChange={handleInputChange}
@@ -482,21 +488,13 @@ const Products = ({ isTab = false }) => {
                                                     className="bg-white w-full"
                                                 />
                                                 <FormField
-                                                    label="Closing Quantity" name="closing_quantity" type="number" value={formData.closing_quantity}
-                                                    onChange={handleInputChange}
+                                                    label="Total Weight (KG)" name="quantity" type="number" value={formData.quantity}
                                                     placeholder="0"
-                                                    icon={Package}
-                                                    className="bg-white w-full"
+                                                    icon={Weight}
+                                                    className="bg-white font-bold text-primary"
+                                                    readOnly
                                                 />
                                             </div>
-                                            <FormField
-                                                label="Current Quantity (KG)" name="quantity" type="number" value={formData.quantity}
-                                                onChange={handleInputChange} placeholder="0"
-                                                icon={Weight}
-                                                className="bg-white font-bold text-primary"
-                                                readOnly
-                                            />
-                                        </div>
 
                                         <div className="space-y-4 pt-2">
                                             <label className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-100/50 transition-colors group">

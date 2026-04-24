@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Plus, X, Save, ChevronUp, ChevronDown, RefreshCw, Search, CheckCircle, Trash2, XCircle } from 'lucide-react';
+import { Plus, X, Save, ChevronUp, ChevronDown, RefreshCw, Search, CheckCircle, Trash2, XCircle, MapPin, Package } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
 import SearchableDropdown from '../../components/SearchableDropdown';
 import { supabase } from '../../supabase';
+import { cn } from '../../lib/utils';
 
 const OtdOrder = () => {
   const calculateNextOrderNo = (existingOrders) => {
@@ -12,7 +13,7 @@ const OtdOrder = () => {
       .filter(no => no && String(no).startsWith('VPR/OR-'))
       .map(no => parseInt(String(no).split('-')[1], 10))
       .filter(n => !isNaN(n));
-    
+
     const maxNo = allNumbers.length > 0 ? Math.max(...allNumbers) : 100;
     return `VPR/OR-${maxNo + 1}`;
   };
@@ -55,7 +56,7 @@ const OtdOrder = () => {
       .toLowerCase()
       .trim()
       .replace(/\s+/g, ' ')
-      .replace(/[^a-z0-9*]/g, ''), 
+      .replace(/[^a-z0-9*]/g, ''),
     []);
 
   const fetchAllRows = useCallback(async (table, columns, orderCol) => {
@@ -79,16 +80,28 @@ const OtdOrder = () => {
   const fetchStockData = useCallback(async () => {
     setLoadingStock(true);
     try {
-      const allStock = await fetchAllRows('products', 'name, godown_id, closing_quantity', 'name');
+      const [allStock, godownsData] = await Promise.all([
+        fetchAllRows('products', 'name, godown_id, closing_quantity', 'name'),
+        fetchAllRows('godowns', 'name, godown_id', 'name')
+      ]);
+
+      const godownMap = {};
+      godownsData.forEach(g => {
+        godownMap[g.godown_id] = g.name;
+      });
 
       const sMap = {};
       allStock.forEach(row => {
-        const item = normalize(row.name);
-        const godown = String(row.godown_id || "").trim();
+        const itemKey = normalize(row.name);
+        const godownId = String(row.godown_id || "").trim();
+        const godownName = godownMap[godownId] || godownId;
         const stock = Number(row.closing_quantity) || 0;
-        const displayGodown = godown.toLowerCase() === 'godown' ? 'Gdn' : godown;
-        if (!sMap[item]) sMap[item] = [];
-        sMap[item].push(`${displayGodown}:${stock}`);
+
+        if (!sMap[itemKey]) sMap[itemKey] = [];
+        sMap[itemKey].push({
+          godown: godownName,
+          stock: stock
+        });
       });
       setStockDataMap(sMap);
     } catch (err) {
@@ -117,7 +130,7 @@ const OtdOrder = () => {
           cancelMap[c.order_id] = (cancelMap[c.order_id] || 0) + (parseFloat(c.planned_qty) || 0);
         }
       });
-      
+
       const mappedOrders = (ordersRes.data || []).map((item) => {
         return {
           id: item.id,
@@ -136,12 +149,12 @@ const OtdOrder = () => {
       });
 
       setOrders(mappedOrders);
-      
+
       fetchStockData();
 
       setFormData(prev => ({
-          ...prev,
-          orderNo: calculateNextOrderNo(mappedOrders)
+        ...prev,
+        orderNo: calculateNextOrderNo(mappedOrders)
       }));
     } catch (error) {
       console.error('fetchOrdersData error:', error);
@@ -163,12 +176,13 @@ const OtdOrder = () => {
 
       const mapping = {};
       productsData.forEach(p => {
-        if (p.name) mapping[p.name] = p.godown_id;
+        const godown = godownsData.find(g => g.godown_id === p.godown_id);
+        if (p.name && godown) mapping[p.name] = godown.name;
       });
       setProductGodownMap(mapping);
 
-      setItemNames(productsData.map(p => p.name));
-      setClients(customersData.map(c => c.customer_name));
+      setItemNames([...new Set(productsData.map(p => p.name).filter(Boolean))]);
+      setClients(customersData.map(c => c.customer_name).filter(Boolean));
       setGodowns(godownsData.map(g => g.name));
     } catch (error) {
       console.error('fetchMasterData error:', error);
@@ -243,17 +257,17 @@ const OtdOrder = () => {
     if (!orders) return [];
     const filtered = orders.map(order => {
       const itemKey = normalize(order.itemName);
-      
+
       let stockValues = stockDataMap[itemKey];
       if (!stockValues) {
-          const stockEntry = Object.keys(stockDataMap).find(key =>
-            itemKey.includes(key) || key.includes(itemKey)
-          );
-          if (stockEntry) stockValues = stockDataMap[stockEntry];
+        const stockEntry = Object.keys(stockDataMap).find(key =>
+          itemKey.includes(key) || key.includes(itemKey)
+        );
+        if (stockEntry) stockValues = stockDataMap[stockEntry];
       }
-      
+
       const allStockInfo = stockValues ? stockValues.join(', ') : '-';
-      
+
       return {
         ...order,
         currentStock: allStockInfo,
@@ -300,7 +314,7 @@ const OtdOrder = () => {
   const handleCancelOrder = async (order) => {
     const cancelQtyStr = window.prompt(`Enter quantity to CANCEL for Order ${order.orderNumber} (Max: ${order.qty}):`, order.qty);
     if (cancelQtyStr === null) return;
-    
+
     const qtyToCancel = parseFloat(cancelQtyStr);
     if (isNaN(qtyToCancel) || qtyToCancel <= 0) {
       toast.error('Please enter a valid quantity');
@@ -320,7 +334,7 @@ const OtdOrder = () => {
         const n = parseInt(String(p.dispatch_number).replace(/^(DSP|DN-)/, ''), 10);
         return isNaN(n) ? max : Math.max(max, n);
       }, 1000);
-      
+
       const newDNo = `DN-${maxNo + 1}-CXL`;
 
       const { error: insErr } = await supabase.from('dispatch_plans').insert({
@@ -342,7 +356,7 @@ const OtdOrder = () => {
         .from('app_orders')
         .update({ qty: newOrderTotal })
         .eq('id', order.id);
-      
+
       if (ordErr) {
         throw ordErr;
       }
@@ -360,6 +374,19 @@ const OtdOrder = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isSubmitting) return;
+
+    if (!formData.clientName) {
+      toast.error('Client Name is required');
+      setIsSubmitting(false);
+      return;
+    }
+
+    const missingGodown = formData.items.some(item => !item.godownName);
+    if (missingGodown) {
+      toast.error('Godown is required for all items');
+      setIsSubmitting(false);
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -395,7 +422,7 @@ const OtdOrder = () => {
       console.error('Submit error details:', error);
       let errorMsg = error.message || 'Unknown error';
       if (error.code === '23505') {
-          errorMsg = `Duplicate Order Number: The number "${formData.orderNo}" is already in use. Please use a different number.`;
+        errorMsg = `Duplicate Order Number: The number "${formData.orderNo}" is already in use. Please use a different number.`;
       }
       toast.error(errorMsg);
     } finally {
@@ -408,11 +435,11 @@ const OtdOrder = () => {
       {[...Array(6)].map((_, i) => (
         <tr key={i} className="border-b border-gray-100 last:border-0 relative overflow-hidden">
           {[...Array(14)].map((_, colIdx) => (
-             <td key={colIdx} className="px-6 py-4">
-               <div className="h-4 w-full max-w-[100px] bg-gray-100 rounded-lg relative overflow-hidden">
-                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent animate-shimmer"></div>
-               </div>
-             </td>
+            <td key={colIdx} className="px-6 py-4">
+              <div className="h-4 w-full max-w-[100px] bg-gray-100 rounded-lg relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent animate-shimmer"></div>
+              </div>
+            </td>
           ))}
         </tr>
       ))}
@@ -459,14 +486,14 @@ const OtdOrder = () => {
   return (
     <div className="">
       <div className="flex flex-col gap-4 mb-6 bg-white p-4 lg:p-5 rounded shadow-sm border border-gray-100 max-w-[1200px] mx-auto">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8 relative z-20">
+          <div className="flex flex-col sm:flex-row gap-3 flex-1 relative z-20">
             <h1 className="text-xl font-bold text-gray-800 tracking-tight">Orders</h1>
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Manage Dispatch Orders</p>
           </div>
         </div>
 
-        <div className="flex flex-col lg:flex-row justify-between gap-4 lg:items-start">
+        <div className="flex flex-col lg:flex-row justify-between gap-4 lg:items-start relative z-20">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 w-full">
             <input
               type="text"
@@ -617,11 +644,29 @@ const OtdOrder = () => {
                       </span>
                     </td>
 
-                    <td className="px-6 py-4 text-gray-500 text-[10px] font-bold text-center bg-slate-50/50">
+                    <td className="px-6 py-4 text-center bg-slate-50/30">
                       {loadingStock ? (
                         <RefreshCw size={12} className="animate-spin inline text-primary/40" />
                       ) : (
-                        order.currentStock
+                        <div className="flex flex-wrap justify-center gap-x-2 gap-y-1 max-w-[150px] mx-auto">
+                          {(() => {
+                            const itemStocks = stockDataMap[normalize(order.itemName)] || [];
+                            return itemStocks.map((st, sIdx) => {
+                              const isSelected = normalize(st.godown) === normalize(order.godownName);
+                              return (
+                                <div 
+                                  key={sIdx} 
+                                  className={cn(
+                                    "text-[9px] font-bold uppercase whitespace-nowrap",
+                                    isSelected ? "text-primary font-black scale-110" : "text-slate-400"
+                                  )}
+                                >
+                                  {st.godown} {st.stock}{sIdx < itemStocks.length - 1 ? ',' : ''}
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
                       )}
                     </td>
 
@@ -701,13 +746,13 @@ const OtdOrder = () => {
                   <div className="bg-white p-3 rounded-xl border border-gray-100 flex flex-col items-center">
                     <p className="text-gray-400 text-[8px] font-black uppercase tracking-tighter mb-1 leading-none">Stock</p>
                     <p className="font-black text-gray-700 text-lg">
-                       {loadingStock ? <RefreshCw size={14} className="animate-spin text-primary/40" /> : (order.currentStock || '-')}
+                      {loadingStock ? <RefreshCw size={14} className="animate-spin text-primary/40" /> : (order.currentStock || '-')}
                     </p>
                   </div>
                   <div className="bg-white p-3 rounded-xl border border-gray-100 flex flex-col items-center">
                     <p className="text-gray-400 text-[8px] font-black uppercase tracking-tighter mb-1 leading-none">Intransit</p>
                     <p className="font-black text-gray-700 text-lg">
-                       {loadingIntransit ? <RefreshCw size={14} className="animate-spin text-primary/40" /> : (order.intransitQty || '0')}
+                      {loadingIntransit ? <RefreshCw size={14} className="animate-spin text-primary/40" /> : (order.intransitQty || '0')}
                     </p>
                   </div>
                 </div>
@@ -777,7 +822,7 @@ const OtdOrder = () => {
                     />
                   </div>
                   <div className="space-y-1.5 md:col-span-1">
-                    <label className="text-xs font-bold text-gray-700 uppercase tracking-wide">Client Selection</label>
+                    <label className="text-xs font-bold text-gray-700 uppercase tracking-wide">Client Selection <span className="text-red-500">*</span></label>
                     <SearchableDropdown
                       value={formData.clientName}
                       onChange={(val) => setFormData({ ...formData, clientName: val })}
@@ -816,17 +861,34 @@ const OtdOrder = () => {
                               showAll={false}
                             />
                             {item.itemName && stockDataMap[normalize(item.itemName)] && (
-                              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                                {stockDataMap[normalize(item.itemName)].map((st, sIdx) => (
-                                  <span key={sIdx} className="px-2 py-0.5 bg-slate-50 text-gray-500 rounded border border-gray-100 text-[9px] font-bold">
-                                    {st}
-                                  </span>
-                                ))}
+                              <div className="mt-2 p-2 bg-slate-50 rounded-lg border border-slate-100">
+                                <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                                  <Package size={10} />
+                                  Current Availability
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  {stockDataMap[normalize(item.itemName)].map((st, sIdx) => (
+                                    <div
+                                      key={sIdx}
+                                      className={cn(
+                                        "flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-bold transition-all",
+                                        normalize(st.godown) === normalize(item.godownName)
+                                          ? "bg-primary/10 border-primary/20 text-primary shadow-sm"
+                                          : "bg-white border-slate-200 text-slate-500"
+                                      )}
+                                    >
+                                      <MapPin size={10} className={normalize(st.godown) === normalize(item.godownName) ? "text-primary" : "text-slate-300"} />
+                                      <span>{st.godown}</span>
+                                      <span className="w-px h-2.5 bg-slate-200"></span>
+                                      <span className={st.stock > 0 ? "text-slate-900" : "text-slate-400"}>{st.stock}</span>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
                             )}
                           </div>
-                          <div className="sm:col-span-3 space-y-1.5">
-                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Location / Godown</label>
+                           <div className="sm:col-span-3 space-y-1.5">
+                            <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Location / Godown <span className="text-red-500">*</span></label>
                             <SearchableDropdown
                               value={item.godownName}
                               onChange={(val) => handleItemChange(index, 'godownName', val)}

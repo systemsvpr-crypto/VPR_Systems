@@ -188,7 +188,15 @@ const OtdDispatchPlan = () => {
   const fetchStockData = useCallback(async () => {
     setLoadingStock(true);
     try {
-      const allStock = await fetchAllRows('products', 'name, godown_id, closing_quantity', 'name');
+      const [allStock, godownsData] = await Promise.all([
+        fetchAllRows('products', 'name, godown_id, closing_quantity', 'name'),
+        fetchAllRows('godowns', 'name, godown_id', 'name')
+      ]);
+
+      const godownMap = {};
+      godownsData.forEach(g => {
+        godownMap[g.godown_id] = g.name;
+      });
 
       const sMap = {};
       const analytics = {};
@@ -205,10 +213,11 @@ const OtdDispatchPlan = () => {
         analytics[rawItem].records.push(row);
 
         const item = normalize(row.name);
-        const godown = String(row.godown_id || "").trim();
+        const godownId = String(row.godown_id || "").trim();
+        const godownName = godownMap[godownId] || godownId;
         const stock = Number(row.closing_quantity) || 0;
         
-        const displayGodown = godown.toLowerCase() === 'godown' ? 'Gdn' : godown;
+        const displayGodown = godownName.toLowerCase() === 'godown' ? 'Gdn' : godownName;
         if (!sMap[item]) sMap[item] = [];
         sMap[item].push(`${displayGodown}:${stock}`);
       });
@@ -826,7 +835,7 @@ const OtdDispatchPlan = () => {
         </div>
 
         {/* Filters */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 relative z-20">
           <input
             type="text"
             placeholder="Search..."
