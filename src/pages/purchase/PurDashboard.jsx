@@ -1,36 +1,48 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ClipboardList, Users, CheckSquare, Truck, TrendingUp, RefreshCw, AlertCircle } from 'lucide-react';
+import { ClipboardList, Users, CheckSquare, Truck, TrendingUp, RefreshCw, AlertCircle, Ban, PackageCheck, Box, History, ShoppingCart } from 'lucide-react';
 import { supabase } from '../../supabase';
 import toast from 'react-hot-toast';
 
 const StatCard = ({ title, value, icon: Icon, color, bg, sub }) => (
-  <div className={`bg-white rounded-xl border border-gray-100 p-5 shadow-sm flex items-start gap-4`}>
-    <div className={`${bg} ${color} p-3 rounded-xl flex-shrink-0`}>
+  <div className={`bg-white rounded-xl border border-gray-100 p-5 shadow-sm flex items-start gap-4 transition-all hover:shadow-md`}>
+    <div className={`${bg} ${color} p-3 rounded-xl flex-shrink-0 shadow-inner`}>
       <Icon size={22} />
     </div>
     <div className="min-w-0">
-      <p className="text-xs font-black text-gray-400 uppercase tracking-widest truncate">{title}</p>
+      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest truncate">{title}</p>
       <p className="text-3xl font-black text-gray-900 leading-tight mt-0.5">{value ?? '—'}</p>
-      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+      {sub && <p className="text-xs text-gray-400 mt-0.5 font-medium">{sub}</p>}
     </div>
   </div>
 );
 
-const PipelineRow = ({ label, count, color }) => (
-  <div className="flex items-center justify-between py-3 border-b border-gray-50 last:border-0">
-    <div className="flex items-center gap-2">
-      <div className={`w-2.5 h-2.5 rounded-full ${color}`} />
-      <span className="text-sm font-semibold text-gray-700">{label}</span>
+const PipelineRow = ({ label, count, color, total }) => {
+  const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+  return (
+    <div className="py-3 group">
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${color}`} />
+          <span className="text-[11px] font-black text-gray-500 uppercase tracking-wider">{label}</span>
+        </div>
+        <span className="text-xs font-black text-gray-900">{count}</span>
+      </div>
+      <div className="w-full h-1.5 bg-gray-50 rounded-full overflow-hidden">
+        <div 
+          className={`h-full ${color} transition-all duration-1000 ease-out`} 
+          style={{ width: `${pct}%` }} 
+        />
+      </div>
     </div>
-    <span className={`text-sm font-black ${count > 0 ? 'text-gray-900' : 'text-gray-300'}`}>{count}</span>
-  </div>
-);
+  );
+};
 
 const PurDashboard = () => {
   const [indents, setIndents] = useState([]);
-  const [vendorSelections, setVendorSelections] = useState([]);
-  const [vendorApprovals, setVendorApprovals] = useState([]);
   const [deliveries, setDeliveries] = useState([]);
+  const [cancellations, setCancellations] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [godowns, setGodowns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -38,17 +50,19 @@ const PurDashboard = () => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     try {
-      const [indentsRes, vsRes, vaRes, delRes] = await Promise.all([
-        supabase.from('purchase_indents').select('*'),
-        supabase.from('purchase_vendor_selections').select('*'),
-        supabase.from('purchase_vendor_approvals').select('*'),
-        supabase.from('purchase_deliveries').select('*'),
+      const [indentsRes, delRes, canRes, prodRes, godRes] = await Promise.all([
+        supabase.from('purchase_indent').select('*').order('created_at', { ascending: false }),
+        supabase.from('purchase_delivery').select('*').order('created_at', { ascending: false }),
+        supabase.from('purchase_indent_cancellations').select('*'),
+        supabase.from('products').select('*'),
+        supabase.from('godowns').select('id, name')
       ]);
       if (indentsRes.error) throw indentsRes.error;
       setIndents(indentsRes.data || []);
-      setVendorSelections(vsRes.data || []);
-      setVendorApprovals(vaRes.data || []);
       setDeliveries(delRes.data || []);
+      setCancellations(canRes.data || []);
+      setProducts(prodRes.data || []);
+      setGodowns(godRes.data || []);
     } catch (err) {
       toast.error('Failed to load dashboard: ' + err.message);
     } finally {
@@ -61,60 +75,60 @@ const PurDashboard = () => {
 
   const stats = useMemo(() => {
     const total = indents.length;
-    const activeIndents = indents.filter(i => i.status !== 'Canceled');
+    
+    const pendingSelection = indents.filter(i => i.indent_type === 'Process' && !i.vendor_name).length;
+    const pendingApproval = indents.filter(i => i.indent_type === 'Process' && i.vendor_name && !i.vendor_approval).length;
+    const approved = indents.filter(i => i.vendor_approval === true).length;
+    const arrivedCount = deliveries.filter(d => d.arrival_status === 'Arrived').length;
 
-    // Items not yet in vendor selection
-    const vsIndentIds = new Set(vendorSelections.map(v => v.indent_id));
-    const pendingVendorSelection = activeIndents.filter(i => !vsIndentIds.has(i.id)).length;
+    const cancelledCount = cancellations.length;
+    const cancelledQty = cancellations.reduce((acc, c) => acc + (parseFloat(c.cancelled_qty_kg) || 0), 0);
 
-    // Items in vendor selection but not approved
-    const vaIndentIds = new Set(vendorApprovals.map(v => v.indent_id));
-    const pendingApproval = activeIndents.filter(i => vsIndentIds.has(i.id) && !vaIndentIds.has(i.id)).length;
+    const liveStockQty = products.reduce((acc, p) => acc + (parseFloat(p.closing_quantity) || 0), 0);
 
-    // Items approved but not delivered
-    const approvedIndentIds = new Set(vendorApprovals.filter(v => v.approved_status === 'Approved').map(v => v.indent_id));
-    const delIndentIds = new Set(deliveries.map(d => d.indent_id));
-    const pendingDelivery = activeIndents.filter(i => approvedIndentIds.has(i.id) && !delIndentIds.has(i.id)).length;
+    return { total, pendingSelection, pendingApproval, approved, arrivedCount, cancelledCount, cancelledQty, liveStockQty };
+  }, [indents, deliveries, cancellations, products]);
 
-    const completedThisMonth = indents.filter(i => {
-      const d = deliveries.find(del => del.indent_id === i.id);
-      if (!d?.actual_date) return false;
-      const now = new Date();
-      const da = new Date(d.actual_date);
-      return da.getMonth() === now.getMonth() && da.getFullYear() === now.getFullYear();
-    }).length;
+  const recentArrivals = useMemo(() => {
+    return deliveries
+      .filter(d => d.arrival_status === 'Arrived')
+      .slice(0, 5);
+  }, [deliveries]);
 
-    return { total, pendingVendorSelection, pendingApproval, pendingDelivery, completedThisMonth };
-  }, [indents, vendorSelections, vendorApprovals, deliveries]);
+  const topProducts = useMemo(() => {
+    return [...products]
+      .sort((a, b) => (parseFloat(b.closing_quantity) || 0) - (parseFloat(a.closing_quantity) || 0))
+      .slice(0, 5);
+  }, [products]);
 
-  const recentIndents = useMemo(() =>
-    [...indents].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5),
-    [indents]
-  );
+  const godownMap = useMemo(() => {
+    return Object.fromEntries(godowns.map(g => [g.id, g.name]));
+  }, [godowns]);
 
   if (loading) return (
-    <div className="space-y-4 animate-pulse">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[...Array(4)].map((_, i) => <div key={i} className="h-28 bg-gray-100 rounded-xl" />)}
+    <div className="space-y-4 animate-pulse p-4 sm:p-6">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        {[...Array(5)].map((_, i) => <div key={i} className="h-28 bg-gray-50 rounded-xl" />)}
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {[...Array(2)].map((_, i) => <div key={i} className="h-48 bg-gray-100 rounded-xl" />)}
-      </div>
+      <div className="h-48 bg-gray-50 rounded-xl" />
     </div>
   );
 
   return (
-    <div className="max-w-[1200px] mx-auto space-y-6">
+    <div className="max-w-[1600px] mx-auto p-4 sm:p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
         <div>
-          <h2 className="text-xl font-black text-gray-800">Purchase Dashboard</h2>
-          <p className="text-xs text-gray-400 font-semibold">Procurement pipeline overview</p>
+          <h2 className="text-xl font-black text-gray-800 uppercase tracking-tight">Purchase Dashboard</h2>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span className="flex h-2 w-2 rounded-full bg-orange-500"></span>
+            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Live Procurement Intelligence</p>
+          </div>
         </div>
         <button
           onClick={() => fetchAll(true)}
           disabled={refreshing}
-          className="flex items-center gap-2 px-4 py-2 bg-orange-50 text-orange-600 border border-orange-100 rounded-lg text-sm font-bold hover:bg-orange-100 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-gray-50 text-gray-600 border border-gray-200 rounded-xl text-sm font-bold hover:bg-gray-100 transition-all"
         >
           <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
           Refresh
@@ -122,59 +136,79 @@ const PurDashboard = () => {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Total Indents" value={stats.total} icon={ClipboardList} color="text-orange-600" bg="bg-orange-50" />
-        <StatCard title="Pending Vendor Selection" value={stats.pendingVendorSelection} icon={Users} color="text-blue-600" bg="bg-blue-50" />
-        <StatCard title="Pending Approval" value={stats.pendingApproval} icon={CheckSquare} color="text-yellow-600" bg="bg-yellow-50" />
-        <StatCard title="Pending Delivery" value={stats.pendingDelivery} icon={Truck} color="text-green-600" bg="bg-green-50" />
+      <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <StatCard title="Total Indents" value={stats.total} icon={ClipboardList} color="text-gray-600" bg="bg-gray-50" />
+        <StatCard title="Pending Select" value={stats.pendingSelection} icon={Users} color="text-blue-600" bg="bg-blue-50" />
+        <StatCard title="Pending Approve" value={stats.pendingApproval} icon={CheckSquare} color="text-yellow-600" bg="bg-yellow-50" />
+        <StatCard title="Approved" value={stats.approved} icon={Truck} color="text-green-600" bg="bg-green-50" />
+        <StatCard title="Completed" value={stats.arrivedCount} icon={PackageCheck} color="text-emerald-600" bg="bg-emerald-50" />
       </div>
 
-      {/* Pipeline + Recent Indents */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Pipeline */}
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <TrendingUp size={18} className="text-orange-500" />
-            <h3 className="font-black text-gray-800 text-sm uppercase tracking-widest">Pipeline Status</h3>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Pipeline Progress */}
+        <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-orange-50 rounded-lg"><TrendingUp size={18} className="text-orange-500" /></div>
+              <h3 className="font-black text-gray-800 text-xs uppercase tracking-widest">Process Health</h3>
+            </div>
           </div>
-          <PipelineRow label="Indent Raised" count={indents.length} color="bg-orange-400" />
-          <PipelineRow label="Vendor Selected" count={vendorSelections.length} color="bg-blue-400" />
-          <PipelineRow label="Approved" count={vendorApprovals.filter(v => v.approved_status === 'Approved').length} color="bg-yellow-400" />
-          <PipelineRow label="Delivered" count={deliveries.length} color="bg-green-400" />
-          <PipelineRow label="Completed This Month" count={stats.completedThisMonth} color="bg-emerald-500" />
+          <div className="space-y-4">
+            <PipelineRow label="Procurement Target" count={stats.total} color="bg-gray-400" total={stats.total} />
+            <PipelineRow label="Market Selection" count={stats.pendingSelection} color="bg-blue-400" total={stats.total} />
+            <PipelineRow label="Approved Contracts" count={stats.approved} color="bg-green-400" total={stats.total} />
+            <PipelineRow label="Loss / Cancelled" count={stats.cancelledCount} color="bg-red-400" total={stats.total + stats.cancelledCount} />
+          </div>
+          <div className="mt-8 pt-6 border-t border-dashed border-gray-100 grid grid-cols-2 gap-4">
+              <div className="p-4 bg-red-50 rounded-xl border border-red-100 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                      <div className="p-2 bg-white rounded-lg text-red-500"><Ban size={18} /></div>
+                      <div>
+                          <p className="text-[10px] font-black text-red-400 uppercase tracking-widest">Cancelled Qty</p>
+                          <p className="text-lg font-black text-red-700">{stats.cancelledQty.toLocaleString()} <span className="text-[10px]">KG</span></p>
+                      </div>
+                  </div>
+              </div>
+              <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                      <div className="p-2 bg-white rounded-lg text-indigo-500"><Box size={18} /></div>
+                      <div>
+                          <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Live Inventory</p>
+                          <p className="text-lg font-black text-indigo-700">{stats.liveStockQty.toLocaleString()} <span className="text-[10px]">BAGS</span></p>
+                      </div>
+                  </div>
+              </div>
+          </div>
         </div>
 
-        {/* Recent Indents */}
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <ClipboardList size={18} className="text-orange-500" />
-            <h3 className="font-black text-gray-800 text-sm uppercase tracking-widest">Recent Indents</h3>
+        {/* Recent Arrivals */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+          <div className="flex items-center gap-2 mb-6">
+            <div className="p-2 bg-emerald-50 rounded-lg"><ShoppingCart size={18} className="text-emerald-500" /></div>
+            <h3 className="font-black text-gray-800 text-xs uppercase tracking-widest">Recent Purchases</h3>
           </div>
-          {recentIndents.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-32 text-gray-300">
-              <AlertCircle size={28} />
-              <p className="text-sm font-semibold mt-2">No indents yet</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {recentIndents.map(i => (
-                <div key={i.id} className="flex items-center justify-between p-2.5 bg-gray-50/60 rounded-lg">
-                  <div>
-                    <p className="text-sm font-bold text-gray-800">{i.indent_number}</p>
-                    <p className="text-xs text-gray-400 truncate max-w-[180px]">{i.product_name}</p>
+          <div className="space-y-4">
+              {recentArrivals.length === 0 ? (
+                <div className="text-center py-10">
+                  <p className="text-xs font-bold text-gray-400 uppercase italic">No recent purchases found</p>
+                </div>
+              ) : recentArrivals.map(d => (
+                <div key={d.id} className="group relative pl-4 border-l-2 border-emerald-100 hover:border-emerald-500 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-black text-gray-900 uppercase truncate">{d.product_name}</p>
+                    <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded uppercase tracking-tighter">Arrived</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-black text-orange-600">Qty: {i.qty}</span>
-                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
-                      i.status === 'Completed' ? 'bg-green-100 text-green-600' :
-                      i.status === 'Canceled' ? 'bg-red-100 text-red-500' :
-                      'bg-orange-100 text-orange-600'
-                    }`}>{i.status}</span>
+                  <div className="flex items-center justify-between mt-1">
+                    <p className="text-[10px] font-bold text-gray-400 italic">{d.delivery_number}</p>
+                    <p className="text-[10px] font-black text-gray-600">{parseFloat(d.received_qty_kg || 0).toLocaleString()} Kg</p>
                   </div>
+                  <div className="mt-1 text-[9px] font-black text-gray-300 uppercase tracking-widest">{d.delivery_date}</div>
                 </div>
               ))}
-            </div>
-          )}
+          </div>
+          <div className="mt-6 pt-4 border-t border-gray-50">
+             <button className="w-full py-2 text-[10px] font-black text-gray-400 uppercase tracking-widest hover:text-orange-500 transition-colors">View All History</button>
+          </div>
         </div>
       </div>
     </div>

@@ -7,6 +7,7 @@ import {
   Truck,
   FileText,
   PackageCheck,
+  XCircle,
 } from 'lucide-react';
 import useAuthStore from '../store/authStore';
 
@@ -18,6 +19,7 @@ const PurVendorApprove    = lazy(() => import('./purchase/PurVendorApprove'));
 const PurDelivery         = lazy(() => import('./purchase/PurDelivery'));
 const PurArrival          = lazy(() => import('./purchase/PurArrival'));
 const PurPcReport         = lazy(() => import('./purchase/PurPcReport'));
+const PurCancelled        = lazy(() => import('./purchase/PurCancelled'));
 
 const TABS = [
   { id: 'pur-dashboard',         label: 'Dashboard',         icon: LayoutDashboard, component: PurDashboard,       accessKey: 'purchase-dashboard' },
@@ -25,7 +27,8 @@ const TABS = [
   { id: 'pur-vendor-selection',  label: 'Vendor Selection',  icon: Users,           component: PurVendorSelection,  accessKey: 'purchase-vendor-selection' },
   { id: 'pur-vendor-approve',    label: 'Vendor Approval',   icon: CheckSquare,     component: PurVendorApprove,    accessKey: 'purchase-vendor-approve' },
   { id: 'pur-delivery',          label: 'Delivery',          icon: Truck,           component: PurDelivery,         accessKey: 'purchase-delivery' },
-  { id: 'pur-arrival',           label: 'Material Arrival',  icon: PackageCheck,    component: PurArrival,          accessKey: 'purchase-arrival' },
+  { id: 'pur-arrival',           label: 'Aawak Details',     icon: PackageCheck,    component: PurArrival,          accessKey: 'purchase-arrival' },
+  { id: 'pur-cancelled',         label: 'Cancelled',         icon: XCircle,         component: PurCancelled,        accessKey: 'purchase-cancelled' },
   { id: 'pur-pc-report',         label: 'PC Report',         icon: FileText,        component: PurPcReport,         accessKey: 'purchase-pc-report' },
 ];
 

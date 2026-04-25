@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, X, Save, RefreshCw, AlertCircle, ChevronUp, ChevronDown, Search, Truck, XCircle } from 'lucide-react';
+import { RefreshCw, Search, ChevronUp, ChevronDown, CheckCircle, Truck, AlertCircle, XCircle, Plus, Save, X, Clock, History, Ban, Weight, Package } from 'lucide-react';
 import { supabase } from '../../supabase';
 import useAuthStore from '../../store/authStore';
 import toast from 'react-hot-toast';
@@ -16,15 +16,6 @@ const TS = ({ cols = 6 }) => <>{[...Array(4)].map((_, i) => (
   </tr>
 ))}</>;
 
-const EMPTY_FORM = {
-  received_qty_kg: '',
-  received_qty_bags: '',
-  delivery_date: new Date().toISOString().split('T')[0],
-  lr_number: '',
-  vehicle_number: '',
-  remarks: '',
-};
-
 const genDeliveryNo = async (indent_number) => {
   const { data } = await supabase
     .from('purchase_delivery')
@@ -34,22 +25,22 @@ const genDeliveryNo = async (indent_number) => {
     .limit(1);
   const last = data?.[0]?.delivery_number;
   const lastNum = last ? parseInt(last.split('-').pop()) : 0;
-  return `DLV-${String(lastNum + 1).padStart(3, '0')}`;
+  return `LN-${String(lastNum + 1).padStart(3, '0')}`;
 };
 
 const PurDelivery = () => {
   const { user } = useAuthStore();
   const [indents, setIndents] = useState([]);
   const [deliveries, setDeliveries] = useState([]);
+  const [cancellations, setCancellations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [sort, setSort] = useState({ key: 'created_at', dir: 'desc' });
-  const [isOpen, setIsOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('indents'); // indents | history
   const [saving, setSaving] = useState(false);
-  const [selectedIndent, setSelectedIndent] = useState(null);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [activeTab, setActiveTab] = useState('indents'); // 'indents' | 'deliveries'
+  const [products, setProducts] = useState([]);
+  const [transporters, setTransporters] = useState([]);
 
   // Cancel state
   const [isCancelOpen, setIsCancelOpen] = useState(false);
@@ -57,298 +48,311 @@ const PurDelivery = () => {
   const [cancelSaving, setCancelSaving] = useState(false);
   const [cancelForm, setCancelForm] = useState({ cancelled_qty_kg: '', cancelled_qty_bags: '', reason: '' });
 
+  // Inline forms state
+  const [inlineData, setInlineData] = useState({});
+
   const fetchAll = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
-      const [indRes, delRes] = await Promise.all([
+      const [indRes, delRes, prodRes, transRes, canRes] = await Promise.all([
         supabase.from('purchase_indent').select('*').order('created_at', { ascending: false }),
         supabase.from('purchase_delivery').select('*').order('created_at', { ascending: false }),
+        supabase.from('products').select('name, mux').eq('is_active', true),
+        supabase.from('transporters').select('name').eq('is_active', true).order('name'),
+        supabase.from('purchase_indent_cancellations').select('*')
       ]);
+      
       if (indRes.error) throw indRes.error;
-      setIndents(indRes.data || []);
+
+      const validIndents = (indRes.data || []).filter(i => 
+        i.indent_type !== 'Rejected' && (i.vendor_approval === true || i.indent_type === 'Direct')
+      );
+
+      setIndents(validIndents);
       setDeliveries(delRes.data || []);
+      setProducts(prodRes.data || []);
+      setTransporters(transRes.data || []);
+      setCancellations(canRes.data || []);
+
+      const initialInline = {};
+      validIndents.forEach(ind => {
+        initialInline[ind.id] = {
+          checked: false,
+          received_qty_kg: '',
+          received_qty_bags: '',
+          transporter_name: '',
+          delivery_date: new Date().toISOString().split('T')[0],
+          lr_number: '',
+          vehicle_number: '',
+          remarks: ''
+        };
+      });
+      setInlineData(initialInline);
+      
     } catch (e) { toast.error(e.message); }
     finally { setLoading(false); setRefreshing(false); }
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  const reqSort = k => setSort(p => ({ key: k, dir: p.key === k && p.dir === 'asc' ? 'desc' : 'asc' }));
-  const SI = ({ k }) => <span className="flex flex-col ml-1">
-    <ChevronUp size={9} className={sort.key === k && sort.dir === 'asc' ? 'text-orange-500' : 'text-gray-300'} />
-    <ChevronDown size={9} className={sort.key === k && sort.dir === 'desc' ? 'text-orange-500' : 'text-gray-300'} />
-  </span>;
-
-  // Compute delivered qty per indent
   const deliveredMap = useMemo(() => {
     const map = {};
     deliveries.forEach(d => {
-      if (d.delivery_status !== 'Cancelled') {
-        map[d.indent_id] = (map[d.indent_id] || 0) + (parseFloat(d.received_qty_kg) || 0);
-      }
+      map[d.indent_id] = (map[d.indent_id] || 0) + (parseFloat(d.received_qty_kg) || 0);
     });
     return map;
   }, [deliveries]);
 
-  const filteredIndents = useMemo(() => {
-    let r = indents.filter(i =>
-      Object.values(i).some(v => String(v).toLowerCase().includes(searchTerm.toLowerCase()))
-    );
-    if (sort.key) r = [...r].sort((a, b) => {
-      const av = a[sort.key] ?? '', bv = b[sort.key] ?? '';
-      return sort.dir === 'asc' ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);
+  const cancelledMap = useMemo(() => {
+    const map = {};
+    cancellations.forEach(c => {
+      map[c.indent_number] = (map[c.indent_number] || 0) + (parseFloat(c.cancelled_qty_kg) || 0);
     });
-    return r;
-  }, [indents, searchTerm, sort]);
+    return map;
+  }, [cancellations]);
 
-  const filteredDeliveries = useMemo(() => {
-    return deliveries.filter(d =>
-      Object.values(d).some(v => String(v).toLowerCase().includes(searchTerm.toLowerCase()))
-    );
-  }, [deliveries, searchTerm]);
-
-  const openDelivery = (indent) => {
-    setSelectedIndent(indent);
-    setForm(EMPTY_FORM);
-    setIsOpen(true);
+  const updateInline = (id, field, value) => {
+    setInlineData(prev => {
+      const newData = { ...prev[id], [field]: value };
+      
+      // Auto-calculate KG if Bags changed
+      if (field === 'received_qty_bags') {
+        const ind = indents.find(i => i.id == id);
+        const product = products.find(p => p.name === ind?.product_name);
+        const mux = parseFloat(product?.mux) || 0;
+        const bags = parseFloat(value) || 0;
+        newData.received_qty_kg = bags * mux > 0 ? (bags * mux).toFixed(2) : '';
+      }
+      
+      return { ...prev, [id]: newData };
+    });
   };
 
-  const handleSubmit = async () => {
-    if (!form.received_qty_kg && !form.received_qty_bags) {
-      toast.error('Enter received quantity'); return;
+  const handleBulkSubmit = async () => {
+    const selectedIds = Object.keys(inlineData).filter(id => inlineData[id].checked);
+    if (selectedIds.length === 0) { toast.error('Select at least one record'); return; }
+
+    for (const id of selectedIds) {
+      const d = inlineData[id];
+      if (!d.received_qty_kg || !d.transporter_name) {
+        toast.error('Qty and Transporter are required for selected rows');
+        return;
+      }
     }
+
     setSaving(true);
     try {
-      const deliveryNo = await genDeliveryNo(selectedIndent.indent_number);
-      const totalQty = parseFloat(selectedIndent.qty_kg) || 0;
-      const alreadyDelivered = deliveredMap[selectedIndent.id] || 0;
-      const receivedNow = parseFloat(form.received_qty_kg) || 0;
-      const remaining = totalQty - alreadyDelivered - receivedNow;
+      const payload = await Promise.all(selectedIds.map(async id => {
+        const ind = indents.find(i => i.id == id);
+        const d = inlineData[id];
+        const delNo = await genDeliveryNo(ind.indent_number);
+        return {
+          indent_id: id,
+          indent_number: ind.indent_number,
+          delivery_number: delNo,
+          product_name: ind.product_name,
+          godown_name: d.godown_name || ind.godown_name,
+          transporter_name: d.transporter_name,
+          received_qty_kg: parseFloat(d.received_qty_kg),
+          received_qty_bags: parseInt(d.received_qty_bags) || 0,
+          delivery_date: d.delivery_date,
+          lr_number: d.lr_number,
+          vehicle_number: d.vehicle_number,
+          remarks: d.remarks,
+          arrival_status: 'In Transit'
+        };
+      }));
 
-      // Insert this delivery
-      const { error } = await supabase.from('purchase_delivery').insert({
-        indent_id: selectedIndent.id,
-        indent_number: selectedIndent.indent_number,
-        delivery_number: deliveryNo,
-        product_name: selectedIndent.product_name,
-        vendor_name: selectedIndent.vendor_name,
-        planned_qty_kg: totalQty - alreadyDelivered,
-        received_qty_kg: receivedNow,
-        received_qty_bags: parseInt(form.received_qty_bags) || null,
-        delivery_date: form.delivery_date || null,
-        lr_number: form.lr_number || null,
-        vehicle_number: form.vehicle_number || null,
-        remarks: form.remarks || null,
-        delivery_status: 'Received',
-        arrival_status: 'Not Arrived',
-        created_by: user?.name || user?.full_name || 'System',
-      });
+      const { error } = await supabase.from('purchase_delivery').insert(payload);
       if (error) throw error;
 
-      // If remaining qty > 0, auto-create a pending split
-      if (remaining > 0) {
-        const nextNo = `DLV-${String(parseInt(deliveryNo.split('-').pop()) + 1).padStart(3, '0')}`;
-        await supabase.from('purchase_delivery').insert({
-          indent_id: selectedIndent.id,
-          indent_number: selectedIndent.indent_number,
-          delivery_number: nextNo,
-          product_name: selectedIndent.product_name,
-          vendor_name: selectedIndent.vendor_name,
-          planned_qty_kg: remaining,
-          received_qty_kg: 0,
-          delivery_status: 'Pending',
-          arrival_status: 'Not Arrived',
-          created_by: user?.name || user?.full_name || 'System',
-        });
-        toast.success(`Delivery saved! Pending split created for ${remaining} kg remaining.`);
-      } else {
-        toast.success('Delivery fully recorded!');
-      }
-
-      setIsOpen(false);
+      toast.success('Deliveries generated successfully!');
       fetchAll(true);
-    } catch (e) { toast.error(e.message); }
-    finally { setSaving(false); }
+    } catch (e) {
+      toast.error('Generation failed: ' + e.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const cancelDelivery = async (del) => {
-    if (!window.confirm('Cancel this delivery record?')) return;
-    try {
-      await supabase.from('purchase_delivery').update({ delivery_status: 'Cancelled' }).eq('id', del.id);
-      const remaining = parseFloat(del.received_qty_kg) || 0;
-      if (remaining > 0) {
-        const nextNo = await genDeliveryNo(del.indent_number);
-        await supabase.from('purchase_delivery').insert({
-          indent_id: del.indent_id,
-          indent_number: del.indent_number,
-          delivery_number: nextNo,
-          product_name: del.product_name,
-          vendor_name: del.vendor_name,
-          planned_qty_kg: remaining,
-          received_qty_kg: 0,
-          delivery_status: 'Pending',
-          arrival_status: 'Not Arrived',
-          created_by: user?.name || user?.full_name || 'System',
-        });
-        toast.success(`Cancelled. New pending split created for ${remaining} kg.`);
-      } else {
-        toast.success('Cancelled.');
-      }
-      fetchAll(true);
-    } catch (e) { toast.error(e.message); }
+  const handleCancelBagsChange = (bags) => {
+    const product = products.find(p => p.name === cancellingIndent?.product_name);
+    const mux = product?.mux || 0;
+    const kg = bags * mux;
+    setCancelForm(prev => ({
+      ...prev,
+      cancelled_qty_bags: bags,
+      cancelled_qty_kg: kg > 0 ? kg.toFixed(2) : ''
+    }));
   };
 
-  // ── INDENT CANCEL ──────────────────────────────────────────────
-  const openCancel = (indent) => {
-    setCancellingIndent(indent);
-    const delivered = deliveredMap[indent.id] || 0;
-    const remaining = (parseFloat(indent.qty_kg) || 0) - delivered;
-    setCancelForm({
-      cancelled_qty_kg: remaining > 0 ? String(remaining) : String(indent.qty_kg || ''),
-      cancelled_qty_bags: indent.qty_bags || '',
-      reason: '',
-    });
-    setIsCancelOpen(true);
-  };
-
-  const handleCancelSubmit = async () => {
-    if (!cancelForm.reason.trim()) { toast.error('Please enter a reason'); return; }
-    if (!cancelForm.cancelled_qty_bags) { toast.error('Enter cancelled bags'); return; }
+  const handleCancel = async () => {
+    if (!cancellingIndent || !cancelForm.cancelled_qty_kg) return;
     setCancelSaving(true);
     try {
       const { error } = await supabase.from('purchase_indent_cancellations').insert({
         indent_number: cancellingIndent.indent_number,
         product_name: cancellingIndent.product_name,
-        vendor_name: cancellingIndent.vendor_name || null,
-        original_qty_kg: parseFloat(cancellingIndent.qty_kg) || null,
-        original_qty_bags: parseInt(cancellingIndent.qty_bags) || null,
-        cancelled_qty_kg: parseFloat(cancelForm.cancelled_qty_kg) || 0,
-        cancelled_qty_bags: parseInt(cancelForm.cancelled_qty_bags) || 0,
-        rate: parseFloat(cancellingIndent.rate) || null,
-        vendor_approval: cancellingIndent.vendor_approval || false,
+        vendor_name: cancellingIndent.vendor_name,
+        original_qty_kg: parseFloat(cancellingIndent.qty_kg),
+        original_qty_bags: parseInt(cancellingIndent.qty_bags),
+        cancelled_qty_kg: parseFloat(cancelForm.cancelled_qty_kg),
+        cancelled_qty_bags: parseInt(cancelForm.cancelled_qty_bags || 0),
+        rate: cancellingIndent.rate,
+        vendor_approval: cancellingIndent.vendor_approval,
         reason: cancelForm.reason,
-        created_by: cancellingIndent.created_by || null,
-        created_at: cancellingIndent.created_at || null,
-        cancelled_by: user?.name || user?.full_name || 'System',
-        cancelled_at: new Date().toISOString(),
+        created_by: user?.email,
+        cancelled_by: user?.email
       });
+
       if (error) throw error;
-      toast.success('Cancellation recorded!');
+      toast.success('Quantity cancelled successfully');
       setIsCancelOpen(false);
+      setCancellingIndent(null);
+      setCancelForm({ cancelled_qty_kg: '', cancelled_qty_bags: '', reason: '' });
       fetchAll(true);
-    } catch (e) { toast.error(e.message); }
+    } catch (err) { toast.error('Cancel failed: ' + err.message); }
     finally { setCancelSaving(false); }
   };
 
-  const statusBadge = (s) => {
-    if (s === 'Received') return 'bg-green-100 text-green-700';
-    if (s === 'Cancelled') return 'bg-red-100 text-red-500';
-    return 'bg-yellow-100 text-yellow-700';
-  };
+  const filteredIndents = useMemo(() => {
+    return indents.filter(i => {
+      const matchSearch = Object.values(i).some(v => String(v).toLowerCase().includes(searchTerm.toLowerCase()));
+      const delivered = deliveredMap[i.id] || 0;
+      const cancelled = cancelledMap[i.indent_number] || 0;
+      const isDone = (delivered + cancelled) >= (parseFloat(i.qty_kg) || 0);
+      return matchSearch && !isDone;
+    });
+  }, [indents, searchTerm, deliveredMap, cancelledMap]);
+
+  const filteredDeliveries = useMemo(() => {
+    return deliveries.filter(d => 
+      Object.values(d).some(v => String(v).toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+  }, [deliveries, searchTerm]);
 
   return (
-    <div className="max-w-[1200px] mx-auto space-y-4">
+    <div className="max-w-[1600px] mx-auto space-y-4">
+      {/* ── Tabs ── */}
+      <div className="flex gap-2">
+        <button onClick={() => setActiveTab('indents')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-black transition-all border ${activeTab === 'indents' ? 'bg-orange-600 text-white border-orange-600 shadow-lg shadow-orange-100' : 'bg-white text-gray-500 border-gray-100 hover:bg-gray-50'}`}>
+          <Clock size={16} /> Pending Delivery
+        </button>
+        <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-black transition-all border ${activeTab === 'history' ? 'bg-orange-600 text-white border-orange-600 shadow-lg shadow-orange-100' : 'bg-white text-gray-500 border-gray-100 hover:bg-gray-50'}`}>
+          <History size={16} /> Delivery History
+        </button>
+      </div>
 
-      {/* Header */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <h2 className="text-lg font-black text-gray-800">Delivery</h2>
-          <div className="flex flex-wrap items-center gap-2">
+          <div>
+            <h2 className="text-xl font-black text-gray-800 tracking-tight">{activeTab === 'indents' ? 'Delivery Planning' : 'Delivery History'}</h2>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">Manage shipments and transporter assignments</p>
+          </div>
+          <div className="flex items-center gap-3">
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input type="text" placeholder="Search..." value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-                className="pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300" />
+              <input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 w-64 transition-all" />
             </div>
-            <button onClick={() => fetchAll(true)} disabled={refreshing}
-              className="flex items-center gap-1.5 px-3 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm font-bold hover:bg-gray-200 border border-gray-200">
+            <button onClick={() => fetchAll(true)} disabled={refreshing} className="flex items-center gap-1.5 px-4 py-2 bg-gray-50 text-gray-600 rounded-lg text-sm font-bold hover:bg-gray-100 border border-gray-200 transition-all">
               <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> Refresh
             </button>
+            {activeTab === 'indents' && (
+              <button onClick={handleBulkSubmit} disabled={saving} className="flex items-center gap-2 px-6 py-2 bg-orange-600 text-white rounded-lg text-sm font-black shadow-md shadow-orange-200 hover:bg-orange-700 transition-all disabled:opacity-50">
+                {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+                {saving ? 'Create Deliveries' : 'Submit Selected'}
+              </button>
+            )}
           </div>
-        </div>
-
-        {/* Sub Tabs */}
-        <div className="flex gap-0 mt-4 border-b border-gray-100 -mb-4">
-          {[{ id: 'indents', label: 'Indents' }, { id: 'deliveries', label: 'Delivery Records' }].map(t => (
-            <button key={t.id} onClick={() => setActiveTab(t.id)}
-              className={`px-5 py-2.5 text-sm font-bold border-b-2 transition-all ${activeTab === t.id ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-400 hover:text-gray-700'}`}>
-              {t.label}
-            </button>
-          ))}
         </div>
       </div>
 
-      {/* INDENTS TAB */}
-      {activeTab === 'indents' && (
+      {activeTab === 'indents' ? (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
-            <table className="w-full text-left border-collapse min-w-[850px]">
+          <div className="overflow-x-auto max-h-[600px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200">
+            <table className="w-full text-left border-collapse min-w-[1800px]">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200 text-[11px] uppercase font-black text-gray-500 sticky top-0 z-10">
-                  {[
-                    { k: 'indent_number', l: 'Indent No' },
-                    { k: 'product_name', l: 'Product' },
-                    { k: 'vendor_name', l: 'Vendor' },
-                    { k: 'qty_kg', l: 'Total Qty (kg)', a: 'right' },
-                    { k: 'qty_bags', l: 'Bags', a: 'right' },
-                    { k: 'rate', l: 'Rate', a: 'right' },
-                    { k: 'vendor_approval', l: 'V.Approved', a: 'center' },
-                  ].map(col => (
-                    <th key={col.k} onClick={() => reqSort(col.k)}
-                      className={`px-4 py-3.5 cursor-pointer hover:bg-gray-100 ${col.a === 'right' ? 'text-right' : col.a === 'center' ? 'text-center' : ''}`}>
-                      <div className={`flex items-center gap-1 ${col.a === 'right' ? 'justify-end' : col.a === 'center' ? 'justify-center' : ''}`}>
-                        {col.l}<SI k={col.k} />
-                      </div>
-                    </th>
-                  ))}
-                  <th className="px-4 py-3.5 text-right">Delivered (kg)</th>
-                  <th className="px-4 py-3.5 text-right">Action</th>
+                  <th className="px-4 py-4 text-center w-12">
+                    <input type="checkbox" className="w-4 h-4 accent-orange-600 rounded cursor-pointer" 
+                      onChange={e => {
+                        const checked = e.target.checked;
+                        const next = { ...inlineData };
+                        filteredIndents.forEach(r => { if (next[r.id]) next[r.id].checked = checked; });
+                        setInlineData(next);
+                      }} />
+                  </th>
+                  <th className="px-4 py-4">Indent No</th>
+                  <th className="px-4 py-4">Product & Godown</th>
+                  <th className="px-4 py-4">Vendor</th>
+                  <th className="px-4 py-4 text-right">Indent Qty</th>
+                  <th className="px-4 py-4 text-right">Delivered</th>
+                  <th className="px-4 py-4 text-right text-red-500">Cancelled</th>
+                  <th className="px-4 py-4 text-right">Remaining</th>
+                  <th className="px-2 py-4">Del. Qty (kg)</th>
+                  <th className="px-2 py-4">Bags</th>
+                  <th className="px-2 py-4">Transporter</th>
+                  <th className="px-2 py-4">LR Number</th>
+                  <th className="px-2 py-4">Vehicle Number</th>
+                  <th className="px-2 py-4">Date</th>
+                  <th className="px-4 py-4 text-center">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50 text-sm">
-                {loading ? <TS cols={9} /> : filteredIndents.length === 0 ? (
-                  <tr><td colSpan={9} className="py-16 text-center">
-                    <AlertCircle size={28} className="mx-auto text-gray-200 mb-2" />
-                    <p className="text-sm text-gray-400 font-semibold">No indents found.</p>
-                  </td></tr>
+              <tbody className="divide-y divide-gray-50 text-sm font-bold">
+                {loading ? <TS cols={15} /> : filteredIndents.length === 0 ? (
+                  <tr><td colSpan={15} className="py-24 text-center text-gray-400 font-bold">No pending deliveries found.</td></tr>
                 ) : filteredIndents.map(r => {
                   const delivered = deliveredMap[r.id] || 0;
-                  const remaining = (parseFloat(r.qty_kg) || 0) - delivered;
-                  const isDone = remaining <= 0;
+                  const cancelled = cancelledMap[r.indent_number] || 0;
+                  const remaining = (parseFloat(r.qty_kg) || 0) - delivered - cancelled;
+                  const row = inlineData[r.id] || {};
                   return (
-                    <tr key={r.id} className="hover:bg-orange-50/20 transition-colors">
-                      <td className="px-4 py-3.5 font-bold text-gray-900">{r.indent_number}</td>
-                      <td className="px-4 py-3.5 text-gray-700">{r.product_name}</td>
-                      <td className="px-4 py-3.5 text-gray-500">{r.vendor_name || '—'}</td>
-                      <td className="px-4 py-3.5 text-right font-bold text-gray-800">{r.qty_kg ?? '—'}</td>
-                      <td className="px-4 py-3.5 text-right text-gray-500">{r.qty_bags ?? '—'}</td>
-                      <td className="px-4 py-3.5 text-right text-gray-500">{r.rate ? `₹${r.rate}` : '—'}</td>
-                      <td className="px-4 py-3.5 text-center">
-                        {r.vendor_approval
-                          ? <span className="text-[10px] font-black px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Yes</span>
-                          : <span className="text-[10px] font-black px-2 py-0.5 bg-gray-100 text-gray-400 rounded-full">No</span>}
+                    <tr key={r.id} className={`hover:bg-orange-50/10 transition-colors ${row.checked ? 'bg-orange-50/40' : ''}`}>
+                      <td className="px-4 py-4 text-center">
+                        <input type="checkbox" checked={row.checked} onChange={e => updateInline(r.id, 'checked', e.target.checked)} className="w-4 h-4 accent-orange-600 rounded cursor-pointer" />
                       </td>
-                      <td className="px-4 py-3.5 text-right">
-                        <span className={`text-xs font-bold ${isDone ? 'text-green-600' : 'text-orange-600'}`}>
-                          {delivered} {!isDone && <span className="text-gray-400 font-normal">/ {remaining} rem</span>}
-                          {isDone && ' ✓'}
-                        </span>
+                      <td className="px-4 py-4 font-black text-gray-900 leading-tight">{r.indent_number}</td>
+                      <td className="px-4 py-4">
+                        <div className="font-bold text-gray-800 leading-tight">{r.product_name}</div>
+                        <div className="text-[10px] font-black text-blue-600 uppercase mt-0.5 tracking-wider">@ {r.godown_name}</div>
                       </td>
-                      <td className="px-4 py-3.5 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {!isDone ? (
-                            <button onClick={() => openDelivery(r)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 text-white rounded-lg text-xs font-bold hover:bg-orange-600 shadow-sm">
-                              <Truck size={12} /> Deliver
-                            </button>
-                          ) : (
-                            <span className="text-[10px] font-black px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Done</span>
-                          )}
-                          <button onClick={() => openCancel(r)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-500 rounded-lg text-xs font-bold hover:bg-red-100 border border-red-100">
-                            <XCircle size={12} /> Cancel
-                          </button>
-                        </div>
+                      <td className="px-4 py-4 text-gray-600">{r.vendor_name || '—'}</td>
+                      <td className="px-4 py-4 text-right font-black text-gray-400">{r.qty_kg?.toLocaleString()}</td>
+                      <td className="px-4 py-4 text-right font-black text-green-600">{delivered.toLocaleString()}</td>
+                      <td className="px-4 py-4 text-right font-black text-red-400">{cancelled.toLocaleString()}</td>
+                      <td className="px-4 py-4 text-right font-black text-orange-600">{remaining.toLocaleString()}</td>
+                      
+                      <td className="px-1 py-4">
+                        <input type="number" step="0.01" value={row.received_qty_kg || ''} onChange={e => updateInline(r.id, 'received_qty_kg', e.target.value)} disabled={!row.checked}
+                          className="w-24 px-2 py-1.5 border border-gray-200 rounded text-xs font-black text-blue-600 focus:ring-2 focus:ring-blue-300 outline-none text-right disabled:bg-gray-50" placeholder="0.00" />
+                      </td>
+                      <td className="px-1 py-4">
+                        <input type="number" value={row.received_qty_bags || ''} onChange={e => updateInline(r.id, 'received_qty_bags', e.target.value)} disabled={!row.checked}
+                          className="w-16 px-2 py-1.5 border border-gray-200 rounded text-xs font-black text-orange-600 focus:ring-2 focus:ring-orange-300 outline-none text-right disabled:bg-gray-50" placeholder="0" />
+                      </td>
+                      <td className="px-1 py-4">
+                        <select value={row.transporter_name || ''} onChange={e => updateInline(r.id, 'transporter_name', e.target.value)} disabled={!row.checked}
+                          className="w-32 px-2 py-1.5 border border-gray-200 rounded text-xs focus:ring-2 focus:ring-orange-300 outline-none disabled:bg-gray-50">
+                          <option value="">Select TPT</option>
+                          {transporters.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-1 py-4">
+                        <input type="text" value={row.lr_number || ''} onChange={e => updateInline(r.id, 'lr_number', e.target.value)} disabled={!row.checked}
+                          className="w-24 px-2 py-1.5 border border-gray-200 rounded text-[10px] focus:ring-2 focus:ring-orange-300 outline-none disabled:bg-gray-50 uppercase font-bold" placeholder="LR #" />
+                      </td>
+                      <td className="px-1 py-4">
+                        <input type="text" value={row.vehicle_number || ''} onChange={e => updateInline(r.id, 'vehicle_number', e.target.value)} disabled={!row.checked}
+                          className="w-24 px-2 py-1.5 border border-gray-200 rounded text-[10px] focus:ring-2 focus:ring-orange-300 outline-none disabled:bg-gray-50 font-bold" placeholder="Veh #" />
+                      </td>
+                      <td className="px-1 py-4">
+                        <input type="date" value={row.delivery_date || ''} onChange={e => updateInline(r.id, 'delivery_date', e.target.value)} disabled={!row.checked}
+                          className="w-[120px] px-2 py-1.5 border border-gray-200 rounded text-[10px] focus:ring-2 focus:ring-orange-300 outline-none disabled:bg-gray-50" />
+                      </td>
+                      <td className="px-4 py-4 text-center">
+                        <button onClick={() => { setCancellingIndent(r); setIsCancelOpen(true); }} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Cancel Remaining">
+                          <Ban size={16} />
+                        </button>
                       </td>
                     </tr>
                   );
@@ -357,55 +361,40 @@ const PurDelivery = () => {
             </table>
           </div>
         </div>
-      )}
-
-      {/* DELIVERY RECORDS TAB */}
-      {activeTab === 'deliveries' && (
+      ) : (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
-            <table className="w-full text-left border-collapse min-w-[900px]">
+          <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+            <table className="w-full text-left border-collapse min-w-[1200px]">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200 text-[11px] uppercase font-black text-gray-500 sticky top-0 z-10">
-                  <th className="px-4 py-3.5">Indent No</th>
-                  <th className="px-4 py-3.5">Delivery No</th>
-                  <th className="px-4 py-3.5">Product</th>
-                  <th className="px-4 py-3.5 text-right">Planned (kg)</th>
-                  <th className="px-4 py-3.5 text-right">Received (kg)</th>
-                  <th className="px-4 py-3.5 text-right">Bags</th>
-                  <th className="px-4 py-3.5">Date</th>
-                  <th className="px-4 py-3.5">LR No</th>
-                  <th className="px-4 py-3.5 text-center">Status</th>
-                  <th className="px-4 py-3.5 text-right">Action</th>
+                  <th className="px-4 py-4">Lifting No</th>
+                  <th className="px-4 py-4">Indent No</th>
+                  <th className="px-4 py-4">Product</th>
+                  <th className="px-4 py-4">Transporter</th>
+                  <th className="px-4 py-4 text-right">Qty (kg)</th>
+                  <th className="px-4 py-4 text-right">Bags</th>
+                  <th className="px-4 py-4">Date</th>
+                  <th className="px-4 py-4 text-center">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50 text-sm">
-                {loading ? <TS cols={10} /> : filteredDeliveries.length === 0 ? (
-                  <tr><td colSpan={10} className="py-16 text-center">
-                    <AlertCircle size={28} className="mx-auto text-gray-200 mb-2" />
-                    <p className="text-sm text-gray-400 font-semibold">No delivery records yet.</p>
-                  </td></tr>
+              <tbody className="divide-y divide-gray-50 text-sm font-bold">
+                {loading ? <TS cols={8} /> : filteredDeliveries.length === 0 ? (
+                  <tr><td colSpan={8} className="py-24 text-center text-gray-400 font-bold">No delivery history found.</td></tr>
                 ) : filteredDeliveries.map(d => (
-                  <tr key={d.id} className="hover:bg-orange-50/20 transition-colors">
-                    <td className="px-4 py-3.5 font-bold text-gray-900">{d.indent_number}</td>
-                    <td className="px-4 py-3.5 font-bold text-orange-600">{d.delivery_number}</td>
-                    <td className="px-4 py-3.5 text-gray-700">{d.product_name}</td>
-                    <td className="px-4 py-3.5 text-right text-gray-500">{d.planned_qty_kg ?? '—'}</td>
-                    <td className="px-4 py-3.5 text-right font-bold text-gray-800">{d.received_qty_kg ?? '—'}</td>
-                    <td className="px-4 py-3.5 text-right text-gray-500">{d.received_qty_bags ?? '—'}</td>
-                    <td className="px-4 py-3.5 text-gray-500 text-xs">{d.delivery_date || '—'}</td>
-                    <td className="px-4 py-3.5 text-gray-500 text-xs">{d.lr_number || '—'}</td>
-                    <td className="px-4 py-3.5 text-center">
-                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${statusBadge(d.delivery_status)}`}>
-                        {d.delivery_status}
+                  <tr key={d.id} className="hover:bg-gray-50/50 transition-colors">
+                    <td className="px-4 py-4 font-black text-orange-600">{d.delivery_number}</td>
+                    <td className="px-4 py-4 font-black text-gray-400 text-xs">{d.indent_number}</td>
+                    <td className="px-4 py-4 font-bold text-gray-800">{d.product_name}</td>
+                    <td className="px-4 py-4 text-gray-600">{d.transporter_name}</td>
+                    <td className="px-4 py-4 text-right font-black text-gray-700">{d.received_qty_kg?.toLocaleString()}</td>
+                    <td className="px-4 py-4 text-right font-bold text-gray-500">{d.received_qty_bags}</td>
+                    <td className="px-4 py-4 text-gray-400 text-xs uppercase font-black">{d.delivery_date}</td>
+                    <td className="px-4 py-4 text-center">
+                      <span className={`text-[10px] font-black px-3 py-1 rounded-full border shadow-sm ${
+                        d.arrival_status === 'Arrived' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-blue-50 text-blue-700 border-blue-100'
+                      }`}>
+                        {d.arrival_status?.toUpperCase()}
                       </span>
-                    </td>
-                    <td className="px-4 py-3.5 text-right">
-                      {d.delivery_status !== 'Cancelled' && (
-                        <button onClick={() => cancelDelivery(d)}
-                          className="text-[10px] font-black px-2 py-1 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 border border-red-100">
-                          Cancel
-                        </button>
-                      )}
                     </td>
                   </tr>
                 ))}
@@ -415,160 +404,103 @@ const PurDelivery = () => {
         </div>
       )}
 
-      {/* DELIVERY MODAL */}
-      {isOpen && selectedIndent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
-            <div className="flex items-center justify-between p-5 border-b border-gray-100">
-              <div>
-                <h3 className="font-black text-gray-800">Record Delivery</h3>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  <span className="font-bold text-orange-600">{selectedIndent.indent_number}</span>
-                  {' · '}{selectedIndent.product_name}
-                  {selectedIndent.vendor_name && ` · ${selectedIndent.vendor_name}`}
-                </p>
+      {/* Cancel Modal */}
+      {isCancelOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 border border-red-50">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-red-600 to-red-700 px-8 py-6 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/20 rounded-xl backdrop-blur-sm">
+                  <Ban size={20} className="text-white" />
+                </div>
+                <div>
+                  <h3 className="text-white font-black text-lg uppercase tracking-tight">Quantity Cancellation</h3>
+                  <p className="text-red-100 text-[10px] font-bold uppercase tracking-widest">Audit Ref: {cancellingIndent?.indent_number}</p>
+                </div>
               </div>
-              <button onClick={() => setIsOpen(false)} className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg">
-                <X size={18} />
+              <button onClick={() => setIsCancelOpen(false)} className="p-2 hover:bg-white/10 rounded-full text-white transition-colors group">
+                <X size={24} className="group-hover:rotate-90 transition-transform duration-300" />
               </button>
             </div>
 
-            {/* Indent summary */}
-            <div className="mx-5 mt-4 p-3 bg-orange-50 rounded-lg border border-orange-100 grid grid-cols-3 gap-3 text-center text-xs">
-              <div>
-                <p className="text-gray-400 font-bold uppercase">Total Qty</p>
-                <p className="font-black text-gray-800 text-base">{selectedIndent.qty_kg ?? 0} kg</p>
+            {/* Modal Body */}
+            <div className="p-8 space-y-6">
+              {/* Product Info Banner */}
+              <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-orange-100 rounded-lg text-orange-600"><Package size={20} /></div>
+                  <div>
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">Product</p>
+                    <p className="text-sm font-black text-gray-800">{cancellingIndent?.product_name}</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">Original Qty</p>
+                  <p className="text-sm font-black text-orange-600">{cancellingIndent?.qty_kg?.toLocaleString()} KG</p>
+                </div>
               </div>
-              <div>
-                <p className="text-gray-400 font-bold uppercase">Delivered</p>
-                <p className="font-black text-green-600 text-base">{deliveredMap[selectedIndent.id] || 0} kg</p>
-              </div>
-              <div>
-                <p className="text-gray-400 font-bold uppercase">Remaining</p>
-                <p className="font-black text-orange-600 text-base">
-                  {((parseFloat(selectedIndent.qty_kg) || 0) - (deliveredMap[selectedIndent.id] || 0)).toFixed(2)} kg
-                </p>
-              </div>
-            </div>
 
-            <div className="p-5 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-gray-500 uppercase">Received Qty (kg) *</label>
-                  <input type="number" step="0.01" value={form.received_qty_kg}
-                    onChange={e => setForm(p => ({ ...p, received_qty_kg: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-                    placeholder="0.00" />
+              {/* Input Grid */}
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-[11px] font-black text-gray-500 uppercase ml-1">
+                    <Package size={14} className="text-red-400" /> Cancel Bags
+                  </label>
+                  <div className="relative group">
+                    <input 
+                      type="number" 
+                      value={cancelForm.cancelled_qty_bags} 
+                      onChange={e => handleCancelBagsChange(e.target.value)}
+                      className="w-full pl-5 pr-4 py-4 bg-gray-50 border border-gray-200 rounded-2xl text-lg font-black text-red-700 focus:ring-4 focus:ring-red-500/10 focus:border-red-400 outline-none transition-all placeholder:text-gray-300" 
+                      placeholder="0" 
+                    />
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-gray-500 uppercase">Received Bags</label>
-                  <input type="number" step="1" value={form.received_qty_bags}
-                    onChange={e => setForm(p => ({ ...p, received_qty_bags: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-                    placeholder="0" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-gray-500 uppercase">Delivery Date</label>
-                  <input type="date" value={form.delivery_date}
-                    onChange={e => setForm(p => ({ ...p, delivery_date: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-gray-500 uppercase">LR Number</label>
-                  <input type="text" value={form.lr_number}
-                    onChange={e => setForm(p => ({ ...p, lr_number: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-                    placeholder="LR-..." />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-gray-500 uppercase">Vehicle No</label>
-                  <input type="text" value={form.vehicle_number}
-                    onChange={e => setForm(p => ({ ...p, vehicle_number: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-                    placeholder="GJ-01..." />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-gray-500 uppercase">Remarks</label>
-                  <input type="text" value={form.remarks}
-                    onChange={e => setForm(p => ({ ...p, remarks: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-                    placeholder="Optional..." />
-                </div>
-              </div>
-            </div>
 
-            <div className="p-5 border-t border-gray-100 flex justify-end gap-3">
-              <button onClick={() => setIsOpen(false)} className="px-4 py-2 text-gray-500 font-bold text-sm hover:underline">Cancel</button>
-              <button onClick={handleSubmit} disabled={saving}
-                className="flex items-center gap-2 px-6 py-2 bg-orange-500 text-white rounded-lg font-bold text-sm hover:bg-orange-600 shadow-md disabled:opacity-50">
-                {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
-                {saving ? 'Saving...' : 'Record Delivery'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-[11px] font-black text-gray-500 uppercase ml-1">
+                    <Weight size={14} className="text-red-400" /> Auto-Calc (Kg)
+                  </label>
+                  <div className="relative group">
+                    <input 
+                      type="number" 
+                      step="0.01" 
+                      value={cancelForm.cancelled_qty_kg} 
+                      onChange={e => setCancelForm(p => ({ ...p, cancelled_qty_kg: e.target.value }))}
+                      className="w-full pl-5 pr-4 py-4 bg-red-50/50 border border-red-100 rounded-2xl text-lg font-black text-red-800 focus:ring-4 focus:ring-red-500/10 focus:border-red-400 outline-none transition-all" 
+                      placeholder="0.00" 
+                    />
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-red-300 uppercase bg-white px-2 py-1 rounded-md border border-red-50 shadow-sm">Auto</div>
+                  </div>
+                </div>
+              </div>
 
-      {/* ── CANCEL MODAL ── */}
-      {isCancelOpen && cancellingIndent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-            <div className="flex items-center justify-between p-5 border-b border-gray-100">
-              <div>
-                <h3 className="font-black text-red-600">Cancel Indent</h3>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  <span className="font-bold text-orange-600">{cancellingIndent.indent_number}</span>
-                  {' · '}{cancellingIndent.product_name}
-                </p>
-              </div>
-              <button onClick={() => setIsCancelOpen(false)} className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg">
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Summary */}
-            <div className="mx-5 mt-4 p-3 bg-red-50 rounded-lg border border-red-100 grid grid-cols-3 gap-3 text-center text-xs">
-              <div>
-                <p className="text-gray-400 font-bold uppercase">Original Qty</p>
-                <p className="font-black text-gray-800 text-base">{cancellingIndent.qty_kg ?? 0} kg</p>
-              </div>
-              <div>
-                <p className="text-gray-400 font-bold uppercase">Delivered</p>
-                <p className="font-black text-green-600 text-base">{deliveredMap[cancellingIndent.id] || 0} kg</p>
-              </div>
-              <div>
-                <p className="text-gray-400 font-bold uppercase">Remaining</p>
-                <p className="font-black text-red-500 text-base">
-                  {((parseFloat(cancellingIndent.qty_kg) || 0) - (deliveredMap[cancellingIndent.id] || 0)).toFixed(2)} kg
-                </p>
-              </div>
-            </div>
-
-            <div className="p-5 space-y-3">
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-gray-500 uppercase">Cancelled Bags *</label>
-                <input type="number" step="1" value={cancelForm.cancelled_qty_bags}
-                  onChange={e => setCancelForm(p => ({ ...p, cancelled_qty_bags: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
-                  placeholder="0" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-black text-gray-500 uppercase">Reason *</label>
-                <textarea value={cancelForm.reason}
-                  onChange={e => setCancelForm(p => ({ ...p, reason: e.target.value }))}
+              {/* Reason Field */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-black text-gray-500 uppercase ml-1">Reason for Cancellation</label>
+                <textarea 
+                  value={cancelForm.reason} 
+                  onChange={e => setCancelForm(p => ({ ...p, reason: e.target.value }))} 
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-300 resize-none"
-                  placeholder="Enter reason for cancellation..." />
+                  className="w-full px-5 py-4 bg-gray-50 border border-gray-200 rounded-2xl text-sm font-bold text-gray-700 focus:ring-4 focus:ring-red-500/10 focus:border-red-400 outline-none resize-none transition-all" 
+                  placeholder="Provide a detailed reason for audit purposes..." 
+                />
               </div>
-            </div>
 
-            <div className="p-5 border-t border-gray-100 flex justify-end gap-3">
-              <button onClick={() => setIsCancelOpen(false)} className="px-4 py-2 text-gray-500 font-bold text-sm hover:underline">Back</button>
-              <button onClick={handleCancelSubmit} disabled={cancelSaving}
-                className="flex items-center gap-2 px-6 py-2 bg-red-500 text-white rounded-lg font-bold text-sm hover:bg-red-600 shadow-md disabled:opacity-50">
-                {cancelSaving ? <RefreshCw size={14} className="animate-spin" /> : <XCircle size={14} />}
-                {cancelSaving ? 'Saving...' : 'Confirm Cancel'}
-              </button>
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setIsCancelOpen(false)} className="flex-1 py-4 bg-gray-100 text-gray-500 rounded-2xl text-sm font-black hover:bg-gray-200 transition-all">
+                  Dismiss
+                </button>
+                <button 
+                  onClick={handleCancel} 
+                  disabled={cancelSaving || !cancelForm.cancelled_qty_kg}
+                  className="flex-[2] py-4 bg-red-600 text-white rounded-2xl text-sm font-black shadow-xl shadow-red-200 hover:bg-red-700 hover:-translate-y-0.5 active:translate-y-0 transition-all disabled:opacity-50 disabled:translate-y-0"
+                >
+                  {cancelSaving ? <RefreshCw size={20} className="animate-spin mx-auto" /> : 'Confirm Cancellation'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

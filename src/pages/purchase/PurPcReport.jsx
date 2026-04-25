@@ -1,22 +1,20 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, Search, ChevronUp, ChevronDown, AlertCircle } from 'lucide-react';
+import { RefreshCw, Search, ChevronUp, ChevronDown, AlertCircle, Package } from 'lucide-react';
 import { supabase } from '../../supabase';
 import toast from 'react-hot-toast';
 
-const TS = () => <>{[...Array(6)].map((_, i) => <tr key={i} className="border-b border-gray-50">{[...Array(6)].map((_, j) => <td key={j} className="px-4 py-4"><div className="h-4 bg-gray-100 rounded relative overflow-hidden"><div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent animate-shimmer" /></div></td>)}</tr>)}</>;
+const TS = () => <>{[...Array(6)].map((_, i) => <tr key={i} className="border-b border-gray-50">{[...Array(12)].map((_, j) => <td key={j} className="px-4 py-4"><div className="h-4 bg-gray-100 rounded relative overflow-hidden"><div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent animate-shimmer" /></div></td>)}</tr>)}</>;
 
 const STEPS = [
-  { key: 'indent', label: 'Indent (Not Yet in Vendor Selection)', color: 'bg-orange-400' },
+  { key: 'indent', label: 'Indent (Pending VS)', color: 'bg-orange-400' },
   { key: 'vendor_selection', label: 'Vendor Selection (Pending Approval)', color: 'bg-blue-400' },
-  { key: 'vendor_approval', label: 'Vendor Approval (Pending Delivery)', color: 'bg-yellow-400' },
-  { key: 'delivery', label: 'Delivery Pending', color: 'bg-red-400' },
-  { key: 'completed', label: 'Completed', color: 'bg-green-500' },
+  { key: 'vendor_approval', label: 'Approved (Pending Delivery)', color: 'bg-yellow-400' },
+  { key: 'delivery', label: 'Delivery (In Transit)', color: 'bg-red-400' },
+  { key: 'completed', label: 'Arrived (Completed)', color: 'bg-green-500' },
 ];
 
 const PurPcReport = () => {
   const [indents, setIndents] = useState([]);
-  const [vendorSelections, setVendorSelections] = useState([]);
-  const [vendorApprovals, setVendorApprovals] = useState([]);
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -27,16 +25,12 @@ const PurPcReport = () => {
   const fetchAll = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
-      const [indRes, vsRes, vaRes, delRes] = await Promise.all([
-        supabase.from('purchase_indents').select('*').neq('status', 'Canceled'),
-        supabase.from('purchase_vendor_selections').select('indent_id, vendor_name, rate, actual_date'),
-        supabase.from('purchase_vendor_approvals').select('indent_id, approved_status, approved_vendor, approved_rate, actual_date'),
-        supabase.from('purchase_deliveries').select('indent_id, delivery_qty, actual_date'),
+      const [indRes, delRes] = await Promise.all([
+        supabase.from('purchase_indent').select('*'),
+        supabase.from('purchase_delivery').select('*'),
       ]);
       if (indRes.error) throw indRes.error;
       setIndents(indRes.data || []);
-      setVendorSelections(vsRes.data || []);
-      setVendorApprovals(vaRes.data || []);
       setDeliveries(delRes.data || []);
     } catch (err) { toast.error('Load failed: ' + err.message); }
     finally { setLoading(false); setRefreshing(false); }
@@ -46,55 +40,84 @@ const PurPcReport = () => {
 
   // Build pipeline report rows
   const reportRows = useMemo(() => {
-    const vsMap = {};
-    vendorSelections.forEach(v => { if (!vsMap[v.indent_id]) vsMap[v.indent_id] = v; });
-    const vaMap = {};
-    vendorApprovals.forEach(v => { if (!vaMap[v.indent_id]) vaMap[v.indent_id] = v; });
+    // Group deliveries by indent
     const delMap = {};
-    deliveries.forEach(d => { if (!delMap[d.indent_id]) delMap[d.indent_id] = d; });
+    deliveries.forEach(d => {
+      if (!delMap[d.indent_id]) {
+        delMap[d.indent_id] = { 
+          total_qty: 0, 
+          last_no: d.delivery_number,
+          last_trans: d.transporter_name,
+          last_godown: d.godown_name,
+          last_status: d.arrival_status,
+          last_date: d.delivery_date || d.created_at,
+          created_at: d.created_at
+        };
+      }
+      delMap[d.indent_id].total_qty += parseFloat(d.received_qty_kg) || 0;
+      if (d.created_at > (delMap[d.indent_id].created_at || '')) {
+        delMap[d.indent_id].last_no = d.delivery_number;
+        delMap[d.indent_id].last_trans = d.transporter_name;
+        delMap[d.indent_id].last_godown = d.godown_name;
+        delMap[d.indent_id].last_status = d.arrival_status;
+        delMap[d.indent_id].last_date = d.delivery_date || d.created_at;
+        delMap[d.indent_id].created_at = d.created_at;
+      }
+    });
 
     return indents.map(ind => {
-      const vs = vsMap[ind.id];
-      const va = vaMap[ind.id];
       const del = delMap[ind.id];
+
+      const delivered = del ? del.total_qty : 0;
+      const total = parseFloat(ind.qty_kg) || 0;
+      const remaining = total - delivered;
 
       let step, stepLabel, stepColor;
 
-      if (del?.actual_date) {
-        step = 'completed'; stepLabel = 'Completed'; stepColor = 'bg-green-100 text-green-700';
-      } else if (va?.approved_status === 'Approved') {
-        step = 'delivery'; stepLabel = 'Delivery Pending'; stepColor = 'bg-red-100 text-red-600';
-      } else if (vs) {
-        step = 'vendor_approval'; stepLabel = 'Vendor Approval Pending'; stepColor = 'bg-yellow-100 text-yellow-700';
+      if (ind.indent_type === 'Rejected') {
+        step = 'rejected'; stepLabel = 'Rejected'; stepColor = 'bg-gray-100 text-gray-500';
+      } else if (del?.last_status === 'Arrived' && remaining <= 0) {
+        step = 'completed'; stepLabel = 'Arrived (Completed)'; stepColor = 'bg-green-100 text-green-700';
+      } else if (delivered > 0) {
+        step = 'delivery'; stepLabel = del.last_status || 'In Transit'; stepColor = 'bg-blue-100 text-blue-700';
+      } else if (ind.vendor_approval === true || ind.indent_type === 'Direct') {
+        step = 'vendor_approval'; stepLabel = 'Approved (Pending DLV)'; stepColor = 'bg-yellow-100 text-yellow-700';
+      } else if (ind.vendor_name) {
+        step = 'vendor_selection'; stepLabel = 'VS Done (Pending App)'; stepColor = 'bg-indigo-100 text-indigo-700';
       } else {
-        step = 'indent'; stepLabel = 'Vendor Selection Pending'; stepColor = 'bg-orange-100 text-orange-600';
+        step = 'indent'; stepLabel = 'Indent Pending'; stepColor = 'bg-orange-100 text-orange-600';
       }
 
       return {
         id: ind.id,
         indent_number: ind.indent_number,
         product_name: ind.product_name,
-        qty: ind.qty,
-        delivered_qty: ind.delivered_qty || 0,
-        pending_qty: (ind.qty || 0) - (ind.delivered_qty || 0),
-        vendor_name: vs?.vendor_name || va?.approved_vendor || '—',
-        rate: va?.approved_rate || vs?.rate || '—',
-        vs_date: vs?.actual_date || '—',
-        va_date: va?.actual_date || '—',
-        del_date: del?.actual_date || '—',
+        qty: total,
+        delivered_qty: delivered.toFixed(2),
+        pending_qty: remaining.toFixed(2),
+        vendor_name: ind.vendor_name || '—',
+        rate: ind.rate || '—',
+        lifting_no: del?.last_no || '—',
+        transporter: del?.last_trans || '—',
+        godown: del?.last_godown || ind.godown_name || '—',
+        del_date: del?.last_date ? new Date(del.last_date).toLocaleDateString() : '—',
         step,
         stepLabel,
         stepColor,
-        status: ind.status,
       };
     });
-  }, [indents, vendorSelections, vendorApprovals, deliveries]);
+  }, [indents, deliveries]);
 
   const filtered = useMemo(() => {
-    let r = reportRows.filter(row =>
-      Object.values(row).some(v => String(v).toLowerCase().includes(searchTerm.toLowerCase())) &&
-      (!stepFilter || row.step === stepFilter)
-    );
+    let r = reportRows.filter(row => {
+      // Don't show rejected indents in any tab
+      if (row.step === 'rejected') return false; 
+      
+      const matchSearch = Object.values(row).some(v => String(v).toLowerCase().includes(searchTerm.toLowerCase()));
+      const matchStep = !stepFilter || row.step === stepFilter;
+      return matchSearch && matchStep;
+    });
+
     if (sortConfig.key) {
       r = [...r].sort((a, b) => {
         const av = a[sortConfig.key] ?? '', bv = b[sortConfig.key] ?? '';
@@ -118,50 +141,59 @@ const PurPcReport = () => {
   const COLS = [
     { key: 'indent_number', label: 'Indent No' },
     { key: 'product_name', label: 'Product' },
-    { key: 'qty', label: 'Qty', align: 'right' },
-    { key: 'delivered_qty', label: 'Delivered', align: 'right' },
-    { key: 'pending_qty', label: 'Pending', align: 'right' },
+    { key: 'qty', label: 'Qty(kg)', align: 'right' },
+    { key: 'delivered_qty', label: 'Recv(kg)', align: 'right' },
+    { key: 'pending_qty', label: 'Rem(kg)', align: 'right' },
     { key: 'vendor_name', label: 'Vendor' },
     { key: 'rate', label: 'Rate', align: 'right' },
-    { key: 'vs_date', label: 'VS Date', align: 'center' },
-    { key: 'va_date', label: 'VA Date', align: 'center' },
-    { key: 'del_date', label: 'Del. Date', align: 'center' },
-    { key: 'stepLabel', label: 'Current Stage', align: 'center' },
+    { key: 'lifting_no', label: 'Lifting No' },
+    { key: 'transporter', label: 'Transporter' },
+    { key: 'godown', label: 'Godown' },
+    { key: 'del_date', label: 'Last Activity', align: 'center' },
+    { key: 'stepLabel', label: 'Status', align: 'center' },
   ];
 
   return (
-    <div className="max-w-[1400px] mx-auto">
+    <div className="max-w-[1600px] mx-auto space-y-4">
       {/* Pipeline Summary Pills */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        <button onClick={() => setStepFilter('')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold border transition-all ${!stepFilter ? 'bg-orange-500 text-white border-orange-500 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
-          All <span className="text-xs font-black px-1.5 py-0.5 bg-white/20 rounded">{reportRows.length}</span>
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => setStepFilter('')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border transition-all ${!stepFilter ? 'bg-orange-600 text-white border-orange-600 shadow-lg shadow-orange-100' : 'bg-white text-gray-600 border-gray-100 hover:bg-gray-50 shadow-sm'}`}>
+          All Records <span className="text-xs font-black px-2 py-0.5 bg-white/20 rounded-full ml-1">{reportRows.length}</span>
         </button>
         {STEPS.map(s => (
-          <button key={s.key} onClick={() => setStepFilter(stepFilter === s.key ? '' : s.key)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold border transition-all ${stepFilter === s.key ? 'bg-orange-500 text-white border-orange-500 shadow-md' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
-            <span className={`w-2 h-2 rounded-full ${s.color}`} />{s.label.split('(')[0].trim()} <span className="text-xs font-black px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">{stepCounts[s.key] || 0}</span>
+          <button key={s.key} onClick={() => setStepFilter(stepFilter === s.key ? '' : s.key)} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border transition-all ${stepFilter === s.key ? 'bg-orange-600 text-white border-orange-600 shadow-lg shadow-orange-100' : 'bg-white text-gray-600 border-gray-100 hover:bg-gray-50 shadow-sm'}`}>
+            <span className={`w-2 h-2 rounded-full ${s.color}`} />{s.label.split('(')[0].trim()} <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 ml-1">{stepCounts[s.key] || 0}</span>
           </button>
         ))}
       </div>
 
-      {/* Header */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 mb-4">
+      {/* Header Card */}
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <h2 className="text-lg font-black text-gray-800">PC Report — Purchase Pipeline</h2>
-          <div className="flex items-center gap-2">
-            <div className="relative"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" /><input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300" /></div>
-            <button onClick={() => fetchAll(true)} disabled={refreshing} className="flex items-center gap-1.5 px-3 py-2 bg-gray-100 text-gray-600 rounded-lg text-sm font-bold hover:bg-gray-200 border border-gray-200"><RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> Refresh</button>
+          <div>
+            <h2 className="text-xl font-black text-gray-800 tracking-tight text-orange-600">PC Report</h2>
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">End-to-End Purchase Analytics</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input type="text" placeholder="Search pipeline..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 transition-all w-64" />
+            </div>
+            <button onClick={() => fetchAll(true)} disabled={refreshing} className="flex items-center gap-1.5 px-4 py-2 bg-gray-50 text-gray-600 rounded-lg text-sm font-bold hover:bg-gray-100 border border-gray-200 transition-all">
+              <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> Refresh
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Table */}
+      {/* Main Table */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto max-h-[560px] overflow-y-auto">
-          <table className="w-full text-left border-collapse min-w-[1200px]">
+        <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+          <table className="w-full text-left border-collapse min-w-[1500px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200 text-[11px] uppercase font-black text-gray-500 sticky top-0 z-10">
                 {COLS.map(col => (
-                  <th key={col.key} className={`px-4 py-3.5 cursor-pointer hover:bg-gray-100 transition-colors ${col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : ''}`} onClick={() => reqSort(col.key)}>
+                  <th key={col.key} className={`px-4 py-4 cursor-pointer hover:bg-gray-100 transition-colors ${col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : ''}`} onClick={() => reqSort(col.key)}>
                     <div className={`flex items-center gap-1 ${col.align === 'right' ? 'justify-end' : col.align === 'center' ? 'justify-center' : ''}`}>{col.label}<SI k={col.key} /></div>
                   </th>
                 ))}
@@ -169,34 +201,55 @@ const PurPcReport = () => {
             </thead>
             <tbody className="divide-y divide-gray-50 text-sm">
               {loading ? <TS /> : filtered.length === 0 ? (
-                <tr><td colSpan={COLS.length} className="py-16 text-center">
-                  <AlertCircle size={28} className="mx-auto text-gray-200 mb-2" />
-                  <p className="text-sm text-gray-400 font-semibold">No pipeline data found.</p>
+                <tr><td colSpan={COLS.length} className="py-24 text-center">
+                  <div className="flex flex-col items-center gap-2">
+                    <AlertCircle size={32} className="text-gray-200" />
+                    <p className="text-sm text-gray-400 font-bold">No matching purchase records found.</p>
+                  </div>
                 </td></tr>
               ) : filtered.map(row => (
-                <tr key={row.id} className="hover:bg-orange-50/20 transition-colors">
-                  <td className="px-4 py-3 font-bold text-gray-900">{row.indent_number}</td>
-                  <td className="px-4 py-3 text-gray-700 max-w-[180px] truncate">{row.product_name}</td>
-                  <td className="px-4 py-3 text-right font-bold text-orange-600">{row.qty}</td>
-                  <td className="px-4 py-3 text-right text-green-600 font-semibold">{row.delivered_qty}</td>
-                  <td className="px-4 py-3 text-right">
-                    <span className={`font-bold ${row.pending_qty > 0 ? 'text-red-500' : 'text-green-500'}`}>{row.pending_qty}</span>
+                <tr key={row.id} className="hover:bg-orange-50/20 transition-colors group">
+                  <td className="px-4 py-4 font-black text-gray-900 leading-tight">{row.indent_number}</td>
+                  <td className="px-4 py-4">
+                    <div className="font-bold text-gray-800 leading-tight">{row.product_name}</div>
                   </td>
-                  <td className="px-4 py-3 text-gray-600 truncate max-w-[150px]">{row.vendor_name}</td>
-                  <td className="px-4 py-3 text-right text-gray-600">{row.rate !== '—' ? `₹${row.rate}` : '—'}</td>
-                  <td className="px-4 py-3 text-center text-gray-500 text-xs">{row.vs_date}</td>
-                  <td className="px-4 py-3 text-center text-gray-500 text-xs">{row.va_date}</td>
-                  <td className="px-4 py-3 text-center text-gray-500 text-xs">{row.del_date}</td>
-                  <td className="px-4 py-3 text-center">
-                    <span className={`text-[10px] font-black px-2.5 py-1 rounded-full ${row.stepColor}`}>{row.stepLabel}</span>
+                  <td className="px-4 py-4 text-right font-black text-gray-700">{row.qty.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-right text-green-600 font-black">{row.delivered_qty}</td>
+                  <td className="px-4 py-3 text-right">
+                    <span className={`font-black ${row.pending_qty > 0 ? 'text-red-500' : 'text-green-500'}`}>{row.pending_qty}</span>
+                  </td>
+                  <td className="px-4 py-4">
+                    <div className="font-bold text-gray-600 leading-tight truncate max-w-[150px]">{row.vendor_name}</div>
+                  </td>
+                  <td className="px-4 py-4 text-right text-gray-700 font-bold">{row.rate !== '—' ? `₹${row.rate}` : '—'}</td>
+                  <td className="px-4 py-4">
+                    <div className={`text-[11px] font-black tracking-tighter ${row.lifting_no !== '—' ? 'text-orange-600' : 'text-gray-300'}`}>{row.lifting_no}</div>
+                  </td>
+                  <td className="px-4 py-4 text-gray-500 font-semibold truncate max-w-[120px]">{row.transporter}</td>
+                  <td className="px-4 py-4 text-gray-500 font-semibold">{row.godown}</td>
+                  <td className="px-4 py-4 text-center text-gray-500 font-bold text-xs">{row.del_date}</td>
+                  <td className="px-4 py-4 text-center">
+                    <span className={`text-[10px] font-black px-3 py-1 rounded-full border shadow-sm ${row.stepColor}`}>
+                      {row.stepLabel}
+                    </span>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <div className="px-4 py-2 border-t border-gray-50 text-xs text-gray-400 font-semibold">
-          Showing {filtered.length} of {reportRows.length} indents
+        <div className="px-6 py-4 bg-gray-50/50 border-t border-gray-100 flex items-center justify-between">
+          <div className="text-[10px] text-gray-400 font-black uppercase tracking-widest">
+            Showing {filtered.length} of {reportRows.length} Total Indents
+          </div>
+          <div className="flex items-center gap-4">
+             {STEPS.map(s => (
+               <div key={s.key} className="flex items-center gap-1.5">
+                 <div className={`w-2 h-2 rounded-full ${s.color}`} />
+                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">{s.label.split('(')[0]}</span>
+               </div>
+             ))}
+          </div>
         </div>
       </div>
     </div>

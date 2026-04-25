@@ -18,19 +18,26 @@ const TS = () => <>{[...Array(5)].map((_, i) => (
 ))}</>;
 
 const EMPTY_ITEM = { product_name: '', qty_kg: '', qty_bags: '', rate: '' };
-const EMPTY_HEADER = { indent_date: new Date().toISOString().split('T')[0], vendor_name: '', vendor_approval: false, remarks: '' };
+const EMPTY_HEADER = { indent_type: 'Direct', indent_date: new Date().toISOString().split('T')[0], vendor_name: '', godown_name: '', vendor_approval: false, remarks: '' };
 
 const genIndentNo = async () => {
   const { data } = await supabase
     .from('purchase_indent')
     .select('indent_number')
     .order('created_at', { ascending: false })
-    .limit(1);
-  const last = data?.[0]?.indent_number;
-  if (!last || !last.startsWith('IND-')) return 'IND-101';
-  const lastNum = parseInt(last.replace('IND-', ''), 10);
-  if (isNaN(lastNum)) return 'IND-101';
-  return `IND-${lastNum + 1}`;
+    .limit(10); // Check recent few to find a matching pattern
+
+  const recent = data || [];
+  const lastMatch = recent.find(i => {
+    const num = i.indent_number.replace('IND-', '');
+    return i.indent_number.startsWith('IND-') && num.length <= 4 && !isNaN(parseInt(num));
+  });
+
+  if (!lastMatch) return 'IND-001';
+  
+  const lastNum = parseInt(lastMatch.indent_number.replace('IND-', ''), 10);
+  const nextNum = (lastNum + 1).toString().padStart(3, '0');
+  return `IND-${nextNum}`;
 };
 
 const PurIndent = () => {
@@ -50,6 +57,7 @@ const PurIndent = () => {
   
   const [products, setProducts] = useState([]);
   const [vendors, setVendors] = useState([]);
+  const [godowns, setGodowns] = useState([]);
 
   const fetchRecords = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
@@ -63,13 +71,32 @@ const PurIndent = () => {
 
   const fetchMasters = useCallback(async () => {
     try {
-      const [p, v] = await Promise.all([
-        supabase.from('products').select('name'),
-        supabase.from('master_vendors').select('vendor_name'),
+      const [p, v, g] = await Promise.all([
+        supabase.from('products').select('name, mux').eq('is_active', true).order('name'),
+        supabase.from('master_vendors').select('vendor_name').order('vendor_name'),
+        supabase.from('godowns').select('godown_id, name').eq('is_active', true).order('name'),
       ]);
-      setProducts(p.data?.map(i => i.name) || []);
+      
+      if (p.error) throw p.error;
+      if (v.error) throw v.error;
+      if (g.error) throw g.error;
+
+      const rawProds = p.data || [];
+      const unique = [];
+      const seen = new Set();
+      rawProds.forEach(item => {
+        if (item.name && !seen.has(item.name)) {
+          seen.add(item.name);
+          unique.push(item);
+        }
+      });
+      setProducts(unique);
       setVendors(v.data?.map(i => i.vendor_name) || []);
-    } catch (_) {}
+      setGodowns(g.data || []);
+    } catch (err) {
+      console.error('fetchMasters error:', err);
+      toast.error('Failed to load products/vendors: ' + err.message);
+    }
   }, []);
 
   useEffect(() => { fetchRecords(); fetchMasters(); }, [fetchRecords, fetchMasters]);
@@ -89,7 +116,19 @@ const PurIndent = () => {
     <ChevronDown size={9} className={sort.key === k && sort.dir === 'desc' ? 'text-orange-500' : 'text-gray-300'} />
   </span>;
 
-  const updateItem = (i, f, v) => { const n = [...items]; n[i] = { ...n[i], [f]: v }; setItems(n); };
+  const updateItem = (i, f, v) => { 
+    const n = [...items]; 
+    n[i] = { ...n[i], [f]: v }; 
+    if (f === 'qty_bags' || f === 'product_name') {
+      const p = products.find(prod => prod.name === n[i].product_name);
+      const mux = parseFloat(p?.mux) || 0;
+      const bags = parseFloat(n[i].qty_bags) || 0;
+      if (mux > 0 && bags > 0) {
+        n[i].qty_kg = (bags * mux).toFixed(2);
+      }
+    }
+    setItems(n); 
+  };
 
   const openAdd = async () => { 
     setEditId(null); 
@@ -103,8 +142,10 @@ const PurIndent = () => {
     setEditId(r.id);
     setIndentNo(r.indent_number);
     setHeader({
+      indent_type: r.indent_type || 'Direct',
       indent_date: r.indent_date || new Date().toISOString().split('T')[0],
       vendor_name: r.vendor_name || '',
+      godown_name: r.godown_name || '',
       vendor_approval: r.vendor_approval || false,
       remarks: r.remarks || ''
     });
@@ -126,27 +167,30 @@ const PurIndent = () => {
         const i = valid[0];
         const { error } = await supabase.from('purchase_indent').update({
           indent_number: indentNo, 
+          indent_type: header.indent_type,
           indent_date: header.indent_date || null,
-          vendor_name: header.vendor_name || null,
-          vendor_approval: header.vendor_approval,
-          remarks: header.remarks || null,
+          vendor_name: header.indent_type === 'Process' ? null : (header.vendor_name || null),
+          vendor_approval: header.indent_type === 'Direct',
+          remarks: header.indent_type === 'Process' ? null : (header.remarks || null),
           product_name: i.product_name, 
           qty_kg: parseFloat(i.qty_kg) || null, 
           qty_bags: parseInt(i.qty_bags) || null,
-          rate: parseFloat(i.rate) || null,
+          rate: header.indent_type === 'Process' ? null : (parseFloat(i.rate) || null),
         }).eq('id', editId);
         if (error) throw error;
       } else {
         const payload = valid.map(i => ({
           indent_number: indentNo, 
+          indent_type: header.indent_type,
           indent_date: header.indent_date || null,
-          vendor_name: header.vendor_name || null,
-          vendor_approval: header.vendor_approval,
-          remarks: header.remarks || null,
+          vendor_name: header.indent_type === 'Process' ? null : (header.vendor_name || null),
+          godown_name: header.godown_name || null,
+          vendor_approval: header.indent_type === 'Direct',
+          remarks: header.indent_type === 'Process' ? null : (header.remarks || null),
           product_name: i.product_name, 
           qty_kg: parseFloat(i.qty_kg) || null, 
           qty_bags: parseInt(i.qty_bags) || null,
-          rate: parseFloat(i.rate) || null, 
+          rate: header.indent_type === 'Process' ? null : (parseFloat(i.rate) || null), 
           created_by: user?.name || user?.full_name || 'System',
         }));
         const { error } = await supabase.from('purchase_indent').insert(payload);
@@ -167,6 +211,7 @@ const PurIndent = () => {
 
   const COLS = [
     { key: 'indent_number', label: 'Indent No' },
+    { key: 'indent_type', label: 'Type' },
     { key: 'indent_date', label: 'Date', align: 'center' },
     { key: 'product_name', label: 'Product' },
     { key: 'vendor_name', label: 'Vendor' },
@@ -227,9 +272,10 @@ const PurIndent = () => {
               ) : filtered.map(r => (
                 <tr key={r.id} className="hover:bg-orange-50/20 transition-colors">
                   <td className="px-4 py-3.5 font-bold text-gray-900">{r.indent_number}</td>
+                  <td className="px-4 py-3.5 text-gray-700 font-semibold">{r.indent_type || 'Direct'}</td>
                   <td className="px-4 py-3.5 text-center text-gray-500 text-xs">{r.indent_date || '—'}</td>
                   <td className="px-4 py-3.5 text-gray-700">{r.product_name}</td>
-                  <td className="px-4 py-3.5 text-gray-500">{r.vendor_name || '—'}</td>
+                  <td className="px-4 py-3.5 font-semibold text-gray-700">{r.vendor_name || '—'}</td>
                   <td className="px-4 py-3.5 text-right font-bold text-orange-600">{r.qty_kg ?? '—'}</td>
                   <td className="px-4 py-3.5 text-right text-gray-600">{r.qty_bags ?? '—'}</td>
                   <td className="px-4 py-3.5 text-right text-gray-600">{r.rate ? `₹${r.rate}` : '—'}</td>
@@ -270,38 +316,51 @@ const PurIndent = () => {
               
               {/* Header Details */}
               <div className="p-4 border border-gray-100 rounded-xl bg-gray-50/40">
-                <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Indent Info</h4>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Indent Info</h4>
+                  <div className="flex bg-gray-200/50 p-1 rounded-lg">
+                    <button type="button" onClick={() => setHeader({ ...header, indent_type: 'Direct' })} className={`px-4 py-1 text-xs font-bold rounded-md transition-all ${header.indent_type === 'Direct' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Direct</button>
+                    <button type="button" onClick={() => setHeader({ ...header, indent_type: 'Process' })} className={`px-4 py-1 text-xs font-bold rounded-md transition-all ${header.indent_type === 'Process' ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Process</button>
+                  </div>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-gray-500 uppercase">Indent Date *</label>
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-tighter">Indent Date *</label>
                     <input type="date" value={header.indent_date} onChange={e => setHeader({...header, indent_date: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300" />
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300" />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-gray-500 uppercase">Vendor Name</label>
-                    <SearchableDropdown options={vendors} value={header.vendor_name}
-                      onChange={v => setHeader({...header, vendor_name: v})} placeholder="Select vendor..." showAll={false} />
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-tighter">Godown Name *</label>
+                    <SearchableDropdown options={godowns.map(g => g.name)} value={header.godown_name}
+                      onChange={v => setHeader({...header, godown_name: v})} placeholder="Select godown..." showAll={false} />
                   </div>
-                  <div className="space-y-1 md:col-span-2">
-                    <label className="text-[10px] font-black text-gray-500 uppercase">Remarks</label>
+                  {header.indent_type === 'Direct' ? (
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-tighter">Vendor Name</label>
+                      <SearchableDropdown options={vendors} value={header.vendor_name}
+                        onChange={v => setHeader({...header, vendor_name: v})} placeholder="Select vendor..." showAll={false} />
+                    </div>
+                  ) : (
+                    <div className="hidden md:block" /> // Empty space for balance
+                  )}
+                  <div className="md:col-span-2 space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-tighter">Remarks</label>
                     <input type="text" value={header.remarks} onChange={e => setHeader({...header, remarks: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300" placeholder="Optional remarks..." />
-                  </div>
-                  <div className="flex items-center gap-2 md:col-span-2 pt-2">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" checked={header.vendor_approval}
-                        onChange={e => setHeader({...header, vendor_approval: e.target.checked})}
-                        className="w-4 h-4 accent-orange-500" />
-                      <span className="text-sm font-semibold text-gray-700">Vendor Approved</span>
-                    </label>
+                      className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300" placeholder="Optional remarks..." />
                   </div>
                 </div>
               </div>
 
+              {/* Items Section */}
+
               {/* Product Details */}
               <div className="space-y-4">
                 <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Product Details</h4>
-                {items.map((item, idx) => (
+                {items.map((item, idx) => {
+                  const availableProducts = products.filter(p => 
+                    !items.some((it, i) => i !== idx && it.product_name === p.name)
+                  );
+                  return (
                   <div key={idx} className="p-4 border border-gray-100 rounded-xl bg-gray-50/40 relative">
                     {items.length > 1 && !editId && (
                       <button onClick={() => setItems(p => p.filter((_, i) => i !== idx))}
@@ -309,40 +368,42 @@ const PurIndent = () => {
                         <X size={14} />
                       </button>
                     )}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className={`grid grid-cols-1 ${header.indent_type === 'Direct' ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-3`}>
                       {/* Product */}
-                      <div className="space-y-1 md:col-span-2">
-                        <label className="text-[10px] font-black text-gray-500 uppercase">Product Name *</label>
-                        <SearchableDropdown options={products} value={item.product_name}
-                          onChange={v => updateItem(idx, 'product_name', v)} placeholder="Select product..." showAll={false} />
+                      <div className="md:col-span-2 space-y-1">
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-tighter">Product Name *</label>
+                        <SearchableDropdown options={availableProducts.map(p => p.name)} value={item.product_name}
+                          onChange={v => updateItem(idx, 'product_name', v)} placeholder="Search product..." showAll={false} />
                       </div>
-                      {/* Qty KG */}
+                      
                       <div className="space-y-1">
-                        <label className="text-[10px] font-black text-gray-500 uppercase">Qty (kg)</label>
-                        <input type="number" step="0.01" value={item.qty_kg}
-                          onChange={e => updateItem(idx, 'qty_kg', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-                          placeholder="0.00" />
-                      </div>
-                      {/* Qty Bags */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-black text-gray-500 uppercase">Qty (Bags)</label>
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-tighter">Bags *</label>
                         <input type="number" step="1" value={item.qty_bags}
                           onChange={e => updateItem(idx, 'qty_bags', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                          className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 shadow-sm"
                           placeholder="0" />
                       </div>
-                      {/* Rate */}
-                      <div className="space-y-1 md:col-span-2">
-                        <label className="text-[10px] font-black text-gray-500 uppercase">Rate (₹)</label>
-                        <input type="number" step="0.01" value={item.rate}
-                          onChange={e => updateItem(idx, 'rate', e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-tighter">Weight (kg) *</label>
+                        <input type="number" step="0.01" value={item.qty_kg}
+                          onChange={e => updateItem(idx, 'qty_kg', e.target.value)}
+                          className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 shadow-sm bg-gray-50/50"
                           placeholder="0.00" />
                       </div>
+
+                      {header.indent_type === 'Direct' && (
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black text-gray-500 uppercase tracking-tighter">Rate (₹)</label>
+                          <input type="number" step="0.01" value={item.rate}
+                            onChange={e => updateItem(idx, 'rate', e.target.value)}
+                            className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 bg-orange-50/20"
+                            placeholder="0.00" />
+                        </div>
+                      )}
                     </div>
                   </div>
-                ))}
+                );
+              })}
 
                 {!editId && (
                   <button onClick={() => setItems(p => [...p, { ...EMPTY_ITEM }])} type="button"

@@ -311,6 +311,35 @@ const OtdDispatchDone = () => {
                     updated_at: now
                   }).eq('product_id', pData.product_id)
                 );
+
+                // Record 'Out' transaction for Live Stock Dashboard
+                const entryId = `STK-SAL-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`.toUpperCase();
+                updates.push(
+                  supabase.from('stock_management').insert([{
+                    entry_id: entryId,
+                    godown_id: gData.godown_id,
+                    product_id: pData.product_id,
+                    transaction_type: 'out',
+                    quantity: finalQty,
+                    opening_stock: currentStock,
+                    closing_stock: newStock,
+                    reference_number: item.dispatchNo,
+                    date: now.split('T')[0],
+                    notes: `Sales Dispatch: ${item.dispatchNo} for ${item.clientName}`,
+                  }])
+                );
+
+                // Create Stock Notification
+                updates.push(
+                  supabase.from('stock_notifications').insert([{
+                    notification_type: 'stock_out',
+                    title: 'Stock OUT (Sales)',
+                    message: `${finalQty} units dispatched to ${item.clientName} from ${finalGodown}`,
+                    product_id: pData.product_id,
+                    godown_id: gData.godown_id,
+                    related_id: entryId
+                  }])
+                );
               }
             }
           }
