@@ -213,7 +213,7 @@ const PurDelivery = () => {
 
   const handleCancelSubmit = async () => {
     if (!cancelForm.reason.trim()) { toast.error('Please enter a reason'); return; }
-    if (!cancelForm.cancelled_qty_kg) { toast.error('Enter cancelled quantity'); return; }
+    if (!cancelForm.cancelled_qty_bags) { toast.error('Enter cancelled bags'); return; }
     setCancelSaving(true);
     try {
       const { error } = await supabase.from('purchase_indent_cancellations').insert({
@@ -245,10 +245,6 @@ const PurDelivery = () => {
     if (s === 'Cancelled') return 'bg-red-100 text-red-500';
     return 'bg-yellow-100 text-yellow-700';
   };
-
-  const arrivalBadge = (s) => s === 'Arrived'
-    ? 'bg-blue-100 text-blue-700'
-    : 'bg-gray-100 text-gray-500';
 
   return (
     <div className="max-w-[1200px] mx-auto space-y-4">
@@ -379,13 +375,12 @@ const PurDelivery = () => {
                   <th className="px-4 py-3.5">Date</th>
                   <th className="px-4 py-3.5">LR No</th>
                   <th className="px-4 py-3.5 text-center">Status</th>
-                  <th className="px-4 py-3.5 text-center">Arrival</th>
                   <th className="px-4 py-3.5 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 text-sm">
-                {loading ? <TS cols={11} /> : filteredDeliveries.length === 0 ? (
-                  <tr><td colSpan={11} className="py-16 text-center">
+                {loading ? <TS cols={10} /> : filteredDeliveries.length === 0 ? (
+                  <tr><td colSpan={10} className="py-16 text-center">
                     <AlertCircle size={28} className="mx-auto text-gray-200 mb-2" />
                     <p className="text-sm text-gray-400 font-semibold">No delivery records yet.</p>
                   </td></tr>
@@ -403,17 +398,6 @@ const PurDelivery = () => {
                       <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${statusBadge(d.delivery_status)}`}>
                         {d.delivery_status}
                       </span>
-                    </td>
-                    <td className="px-4 py-3.5 text-center">
-                      <button
-                        onClick={async () => {
-                          const newStatus = d.arrival_status === 'Arrived' ? 'Not Arrived' : 'Arrived';
-                          await supabase.from('purchase_delivery').update({ arrival_status: newStatus }).eq('id', d.id);
-                          fetchAll(true);
-                        }}
-                        className={`text-[10px] font-black px-2 py-0.5 rounded-full cursor-pointer border ${arrivalBadge(d.arrival_status)}`}>
-                        {d.arrival_status}
-                      </button>
                     </td>
                     <td className="px-4 py-3.5 text-right">
                       {d.delivery_status !== 'Cancelled' && (
@@ -561,21 +545,12 @@ const PurDelivery = () => {
             </div>
 
             <div className="p-5 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-gray-500 uppercase">Cancelled Qty (kg) *</label>
-                  <input type="number" step="0.01" value={cancelForm.cancelled_qty_kg}
-                    onChange={e => setCancelForm(p => ({ ...p, cancelled_qty_kg: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
-                    placeholder="0.00" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-black text-gray-500 uppercase">Cancelled Bags</label>
-                  <input type="number" step="1" value={cancelForm.cancelled_qty_bags}
-                    onChange={e => setCancelForm(p => ({ ...p, cancelled_qty_bags: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
-                    placeholder="0" />
-                </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-gray-500 uppercase">Cancelled Bags *</label>
+                <input type="number" step="1" value={cancelForm.cancelled_qty_bags}
+                  onChange={e => setCancelForm(p => ({ ...p, cancelled_qty_bags: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+                  placeholder="0" />
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-gray-500 uppercase">Reason *</label>

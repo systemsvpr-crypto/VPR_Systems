@@ -292,6 +292,28 @@ const OtdDispatchDone = () => {
               submitted_by: user?.name || user?.full_name || user?.username || 'System',
             }).eq('id', item.id)
           );
+
+          // Stock Integration: Reduce quantity from godown
+          if (finalGodown && finalProduct && finalQty > 0) {
+            const { data: gData } = await supabase.from('godowns').select('godown_id').eq('name', finalGodown).single();
+            if (gData?.godown_id) {
+              const { data: pData } = await supabase.from('products').select('*').eq('name', finalProduct).eq('godown_id', gData.godown_id).single();
+              if (pData) {
+                const currentStock = parseFloat(pData.closing_quantity) || 0;
+                const newStock = currentStock - finalQty;
+                const mux = parseFloat(pData.mux) || 0;
+                
+                // Update products table
+                updates.push(
+                  supabase.from('products').update({
+                    closing_quantity: newStock,
+                    quantity: (newStock * mux).toFixed(3),
+                    updated_at: now
+                  }).eq('product_id', pData.product_id)
+                );
+              }
+            }
+          }
         }
       }
 

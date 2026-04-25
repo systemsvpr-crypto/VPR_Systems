@@ -7,7 +7,7 @@ import SearchableDropdown from '../../components/SearchableDropdown';
 
 const TS = () => <>{[...Array(5)].map((_, i) => (
   <tr key={i} className="border-b border-gray-50">
-    {[...Array(8)].map((_, j) => (
+    {[...Array(9)].map((_, j) => (
       <td key={j} className="px-4 py-4">
         <div className="h-4 bg-gray-100 rounded relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent animate-shimmer" />
@@ -17,12 +17,20 @@ const TS = () => <>{[...Array(5)].map((_, i) => (
   </tr>
 ))}</>;
 
-const EMPTY = { product_name: '', vendor_name: '', qty_kg: '', qty_bags: '', rate: '', vendor_approval: false };
+const EMPTY_ITEM = { product_name: '', qty_kg: '', qty_bags: '', rate: '' };
+const EMPTY_HEADER = { indent_date: new Date().toISOString().split('T')[0], vendor_name: '', vendor_approval: false, remarks: '' };
 
-const genIndentNo = () => {
-  const d = new Date();
-  const ymd = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
-  return `IND-${ymd}-${String(Math.floor(Math.random()*9000)+1000)}`;
+const genIndentNo = async () => {
+  const { data } = await supabase
+    .from('purchase_indent')
+    .select('indent_number')
+    .order('created_at', { ascending: false })
+    .limit(1);
+  const last = data?.[0]?.indent_number;
+  if (!last || !last.startsWith('IND-')) return 'IND-101';
+  const lastNum = parseInt(last.replace('IND-', ''), 10);
+  if (isNaN(lastNum)) return 'IND-101';
+  return `IND-${lastNum + 1}`;
 };
 
 const PurIndent = () => {
@@ -36,7 +44,10 @@ const PurIndent = () => {
   const [saving, setSaving] = useState(false);
   const [editId, setEditId] = useState(null);
   const [indentNo, setIndentNo] = useState('');
-  const [items, setItems] = useState([{ ...EMPTY }]);
+  
+  const [header, setHeader] = useState({ ...EMPTY_HEADER });
+  const [items, setItems] = useState([{ ...EMPTY_ITEM }]);
+  
   const [products, setProducts] = useState([]);
   const [vendors, setVendors] = useState([]);
 
@@ -80,12 +91,29 @@ const PurIndent = () => {
 
   const updateItem = (i, f, v) => { const n = [...items]; n[i] = { ...n[i], [f]: v }; setItems(n); };
 
-  const openAdd = () => { setEditId(null); setIndentNo(genIndentNo()); setItems([{ ...EMPTY }]); setIsOpen(true); };
+  const openAdd = async () => { 
+    setEditId(null); 
+    setIndentNo(await genIndentNo()); 
+    setHeader({ ...EMPTY_HEADER });
+    setItems([{ ...EMPTY_ITEM }]); 
+    setIsOpen(true); 
+  };
 
   const openEdit = r => {
     setEditId(r.id);
     setIndentNo(r.indent_number);
-    setItems([{ product_name: r.product_name || '', vendor_name: r.vendor_name || '', qty_kg: r.qty_kg ?? '', qty_bags: r.qty_bags ?? '', rate: r.rate ?? '', vendor_approval: r.vendor_approval || false }]);
+    setHeader({
+      indent_date: r.indent_date || new Date().toISOString().split('T')[0],
+      vendor_name: r.vendor_name || '',
+      vendor_approval: r.vendor_approval || false,
+      remarks: r.remarks || ''
+    });
+    setItems([{ 
+      product_name: r.product_name || '', 
+      qty_kg: r.qty_kg ?? '', 
+      qty_bags: r.qty_bags ?? '', 
+      rate: r.rate ?? '' 
+    }]);
     setIsOpen(true);
   };
 
@@ -97,16 +125,28 @@ const PurIndent = () => {
       if (editId) {
         const i = valid[0];
         const { error } = await supabase.from('purchase_indent').update({
-          indent_number: indentNo, product_name: i.product_name, vendor_name: i.vendor_name || null,
-          qty_kg: parseFloat(i.qty_kg) || null, qty_bags: parseInt(i.qty_bags) || null,
-          rate: parseFloat(i.rate) || null, vendor_approval: i.vendor_approval,
+          indent_number: indentNo, 
+          indent_date: header.indent_date || null,
+          vendor_name: header.vendor_name || null,
+          vendor_approval: header.vendor_approval,
+          remarks: header.remarks || null,
+          product_name: i.product_name, 
+          qty_kg: parseFloat(i.qty_kg) || null, 
+          qty_bags: parseInt(i.qty_bags) || null,
+          rate: parseFloat(i.rate) || null,
         }).eq('id', editId);
         if (error) throw error;
       } else {
         const payload = valid.map(i => ({
-          indent_number: indentNo, product_name: i.product_name, vendor_name: i.vendor_name || null,
-          qty_kg: parseFloat(i.qty_kg) || null, qty_bags: parseInt(i.qty_bags) || null,
-          rate: parseFloat(i.rate) || null, vendor_approval: i.vendor_approval,
+          indent_number: indentNo, 
+          indent_date: header.indent_date || null,
+          vendor_name: header.vendor_name || null,
+          vendor_approval: header.vendor_approval,
+          remarks: header.remarks || null,
+          product_name: i.product_name, 
+          qty_kg: parseFloat(i.qty_kg) || null, 
+          qty_bags: parseInt(i.qty_bags) || null,
+          rate: parseFloat(i.rate) || null, 
           created_by: user?.name || user?.full_name || 'System',
         }));
         const { error } = await supabase.from('purchase_indent').insert(payload);
@@ -127,6 +167,7 @@ const PurIndent = () => {
 
   const COLS = [
     { key: 'indent_number', label: 'Indent No' },
+    { key: 'indent_date', label: 'Date', align: 'center' },
     { key: 'product_name', label: 'Product' },
     { key: 'vendor_name', label: 'Vendor' },
     { key: 'qty_kg', label: 'Qty (kg)', align: 'right' },
@@ -163,7 +204,7 @@ const PurIndent = () => {
       {/* Table */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
-          <table className="w-full text-left border-collapse min-w-[900px]">
+          <table className="w-full text-left border-collapse min-w-[1000px]">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200 text-[11px] uppercase font-black text-gray-500 sticky top-0 z-10">
                 {COLS.map(col => (
@@ -186,6 +227,7 @@ const PurIndent = () => {
               ) : filtered.map(r => (
                 <tr key={r.id} className="hover:bg-orange-50/20 transition-colors">
                   <td className="px-4 py-3.5 font-bold text-gray-900">{r.indent_number}</td>
+                  <td className="px-4 py-3.5 text-center text-gray-500 text-xs">{r.indent_date || '—'}</td>
                   <td className="px-4 py-3.5 text-gray-700">{r.product_name}</td>
                   <td className="px-4 py-3.5 text-gray-500">{r.vendor_name || '—'}</td>
                   <td className="px-4 py-3.5 text-right font-bold text-orange-600">{r.qty_kg ?? '—'}</td>
@@ -213,7 +255,7 @@ const PurIndent = () => {
       {/* Modal */}
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between p-5 border-b border-gray-100">
               <div>
                 <h3 className="font-black text-gray-800">{editId ? 'Edit' : 'New'} Purchase Indent</h3>
@@ -224,71 +266,91 @@ const PurIndent = () => {
               <button onClick={() => setIsOpen(false)} className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg"><X size={18} /></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-5 space-y-4">
-              {items.map((item, idx) => (
-                <div key={idx} className="p-4 border border-gray-100 rounded-xl bg-gray-50/40 relative">
-                  {items.length > 1 && !editId && (
-                    <button onClick={() => setItems(p => p.filter((_, i) => i !== idx))}
-                      className="absolute top-3 right-3 p-1 text-gray-300 hover:text-red-500 rounded">
-                      <X size={14} />
-                    </button>
-                  )}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {/* Product */}
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-gray-500 uppercase">Product Name *</label>
-                      <SearchableDropdown options={products} value={item.product_name}
-                        onChange={v => updateItem(idx, 'product_name', v)} placeholder="Select product..." showAll={false} />
-                    </div>
-                    {/* Vendor */}
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-gray-500 uppercase">Vendor Name</label>
-                      <SearchableDropdown options={vendors} value={item.vendor_name}
-                        onChange={v => updateItem(idx, 'vendor_name', v)} placeholder="Select vendor..." showAll={false} />
-                    </div>
-                    {/* Qty KG */}
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-gray-500 uppercase">Qty (kg)</label>
-                      <input type="number" step="0.01" value={item.qty_kg}
-                        onChange={e => updateItem(idx, 'qty_kg', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-                        placeholder="0.00" />
-                    </div>
-                    {/* Qty Bags */}
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-gray-500 uppercase">Qty (Bags)</label>
-                      <input type="number" step="1" value={item.qty_bags}
-                        onChange={e => updateItem(idx, 'qty_bags', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-                        placeholder="0" />
-                    </div>
-                    {/* Rate */}
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black text-gray-500 uppercase">Rate (₹)</label>
-                      <input type="number" step="0.01" value={item.rate}
-                        onChange={e => updateItem(idx, 'rate', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
-                        placeholder="0.00" />
-                    </div>
-                    {/* Vendor Approval */}
-                    <div className="flex items-center gap-2 pt-6">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" checked={item.vendor_approval}
-                          onChange={e => updateItem(idx, 'vendor_approval', e.target.checked)}
-                          className="w-4 h-4 accent-orange-500" />
-                        <span className="text-sm font-semibold text-gray-700">Vendor Approved</span>
-                      </label>
-                    </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-6">
+              
+              {/* Header Details */}
+              <div className="p-4 border border-gray-100 rounded-xl bg-gray-50/40">
+                <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Indent Info</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase">Indent Date *</label>
+                    <input type="date" value={header.indent_date} onChange={e => setHeader({...header, indent_date: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-gray-500 uppercase">Vendor Name</label>
+                    <SearchableDropdown options={vendors} value={header.vendor_name}
+                      onChange={v => setHeader({...header, vendor_name: v})} placeholder="Select vendor..." showAll={false} />
+                  </div>
+                  <div className="space-y-1 md:col-span-2">
+                    <label className="text-[10px] font-black text-gray-500 uppercase">Remarks</label>
+                    <input type="text" value={header.remarks} onChange={e => setHeader({...header, remarks: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300" placeholder="Optional remarks..." />
+                  </div>
+                  <div className="flex items-center gap-2 md:col-span-2 pt-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={header.vendor_approval}
+                        onChange={e => setHeader({...header, vendor_approval: e.target.checked})}
+                        className="w-4 h-4 accent-orange-500" />
+                      <span className="text-sm font-semibold text-gray-700">Vendor Approved</span>
+                    </label>
                   </div>
                 </div>
-              ))}
+              </div>
 
-              {!editId && (
-                <button onClick={() => setItems(p => [...p, { ...EMPTY }])} type="button"
-                  className="w-full py-3 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center gap-2 text-gray-400 hover:text-orange-500 hover:border-orange-300 hover:bg-orange-50/30 transition-all text-xs font-bold uppercase tracking-widest">
-                  <Plus size={15} /> Add Another Product
-                </button>
-              )}
+              {/* Product Details */}
+              <div className="space-y-4">
+                <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Product Details</h4>
+                {items.map((item, idx) => (
+                  <div key={idx} className="p-4 border border-gray-100 rounded-xl bg-gray-50/40 relative">
+                    {items.length > 1 && !editId && (
+                      <button onClick={() => setItems(p => p.filter((_, i) => i !== idx))}
+                        className="absolute top-3 right-3 p-1 text-gray-400 hover:text-red-500 rounded bg-white border border-gray-200 shadow-sm">
+                        <X size={14} />
+                      </button>
+                    )}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {/* Product */}
+                      <div className="space-y-1 md:col-span-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase">Product Name *</label>
+                        <SearchableDropdown options={products} value={item.product_name}
+                          onChange={v => updateItem(idx, 'product_name', v)} placeholder="Select product..." showAll={false} />
+                      </div>
+                      {/* Qty KG */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-gray-500 uppercase">Qty (kg)</label>
+                        <input type="number" step="0.01" value={item.qty_kg}
+                          onChange={e => updateItem(idx, 'qty_kg', e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                          placeholder="0.00" />
+                      </div>
+                      {/* Qty Bags */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-gray-500 uppercase">Qty (Bags)</label>
+                        <input type="number" step="1" value={item.qty_bags}
+                          onChange={e => updateItem(idx, 'qty_bags', e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                          placeholder="0" />
+                      </div>
+                      {/* Rate */}
+                      <div className="space-y-1 md:col-span-2">
+                        <label className="text-[10px] font-black text-gray-500 uppercase">Rate (₹)</label>
+                        <input type="number" step="0.01" value={item.rate}
+                          onChange={e => updateItem(idx, 'rate', e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                          placeholder="0.00" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                {!editId && (
+                  <button onClick={() => setItems(p => [...p, { ...EMPTY_ITEM }])} type="button"
+                    className="w-full py-3 border-2 border-dashed border-gray-200 rounded-xl flex items-center justify-center gap-2 text-gray-400 hover:text-orange-500 hover:border-orange-300 hover:bg-orange-50/30 transition-all text-xs font-bold uppercase tracking-widest">
+                    <Plus size={15} /> Add Another Product
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="p-5 border-t border-gray-100 flex justify-end gap-3">

@@ -6,6 +6,7 @@ import {
   CheckSquare,
   Truck,
   FileText,
+  PackageCheck,
 } from 'lucide-react';
 import useAuthStore from '../store/authStore';
 
@@ -15,6 +16,7 @@ const PurIndent           = lazy(() => import('./purchase/PurIndent'));
 const PurVendorSelection  = lazy(() => import('./purchase/PurVendorSelection'));
 const PurVendorApprove    = lazy(() => import('./purchase/PurVendorApprove'));
 const PurDelivery         = lazy(() => import('./purchase/PurDelivery'));
+const PurArrival          = lazy(() => import('./purchase/PurArrival'));
 const PurPcReport         = lazy(() => import('./purchase/PurPcReport'));
 
 const TABS = [
@@ -23,6 +25,7 @@ const TABS = [
   { id: 'pur-vendor-selection',  label: 'Vendor Selection',  icon: Users,           component: PurVendorSelection,  accessKey: 'purchase-vendor-selection' },
   { id: 'pur-vendor-approve',    label: 'Vendor Approval',   icon: CheckSquare,     component: PurVendorApprove,    accessKey: 'purchase-vendor-approve' },
   { id: 'pur-delivery',          label: 'Delivery',          icon: Truck,           component: PurDelivery,         accessKey: 'purchase-delivery' },
+  { id: 'pur-arrival',           label: 'Material Arrival',  icon: PackageCheck,    component: PurArrival,          accessKey: 'purchase-arrival' },
   { id: 'pur-pc-report',         label: 'PC Report',         icon: FileText,        component: PurPcReport,         accessKey: 'purchase-pc-report' },
 ];
 
