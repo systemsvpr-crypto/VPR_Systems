@@ -98,7 +98,9 @@ const PurDelivery = () => {
   const deliveredMap = useMemo(() => {
     const map = {};
     deliveries.forEach(d => {
-      map[d.indent_id] = (map[d.indent_id] || 0) + (parseFloat(d.received_qty_kg) || 0);
+      if (!map[d.indent_id]) map[d.indent_id] = { kg: 0, bags: 0 };
+      map[d.indent_id].kg += (parseFloat(d.received_qty_kg) || 0);
+      map[d.indent_id].bags += (parseInt(d.received_qty_bags) || 0);
     });
     return map;
   }, [deliveries]);
@@ -106,7 +108,9 @@ const PurDelivery = () => {
   const cancelledMap = useMemo(() => {
     const map = {};
     cancellations.forEach(c => {
-      map[c.indent_number] = (map[c.indent_number] || 0) + (parseFloat(c.cancelled_qty_kg) || 0);
+      if (!map[c.indent_number]) map[c.indent_number] = { kg: 0, bags: 0 };
+      map[c.indent_number].kg += (parseFloat(c.cancelled_qty_kg) || 0);
+      map[c.indent_number].bags += (parseInt(c.cancelled_qty_bags) || 0);
     });
     return map;
   }, [cancellations]);
@@ -115,13 +119,17 @@ const PurDelivery = () => {
     setInlineData(prev => {
       const newData = { ...prev[id], [field]: value };
       
-      // Auto-calculate KG if Bags changed
+      const ind = indents.find(i => i.id == id);
+      const product = products.find(p => p.name === ind?.product_name);
+      const mux = parseFloat(product?.mux) || 0;
+
+      // Sync KG and Bags
       if (field === 'received_qty_bags') {
-        const ind = indents.find(i => i.id == id);
-        const product = products.find(p => p.name === ind?.product_name);
-        const mux = parseFloat(product?.mux) || 0;
         const bags = parseFloat(value) || 0;
         newData.received_qty_kg = bags * mux > 0 ? (bags * mux).toFixed(2) : '';
+      } else if (field === 'received_qty_kg') {
+        const kg = parseFloat(value) || 0;
+        newData.received_qty_bags = mux > 0 ? Math.round(kg / mux) : '';
       }
       
       return { ...prev, [id]: newData };
@@ -186,6 +194,17 @@ const PurDelivery = () => {
     }));
   };
 
+  const handleCancelKgChange = (kg) => {
+    const product = products.find(p => p.name === cancellingIndent?.product_name);
+    const mux = product?.mux || 0;
+    const bags = mux > 0 ? Math.round(kg / mux) : 0;
+    setCancelForm(prev => ({
+      ...prev,
+      cancelled_qty_kg: kg,
+      cancelled_qty_bags: bags > 0 ? bags : ''
+    }));
+  };
+
   const handleCancel = async () => {
     if (!cancellingIndent || !cancelForm.cancelled_qty_kg) return;
     setCancelSaving(true);
@@ -218,9 +237,9 @@ const PurDelivery = () => {
   const filteredIndents = useMemo(() => {
     return indents.filter(i => {
       const matchSearch = Object.values(i).some(v => String(v).toLowerCase().includes(searchTerm.toLowerCase()));
-      const delivered = deliveredMap[i.id] || 0;
-      const cancelled = cancelledMap[i.indent_number] || 0;
-      const isDone = (delivered + cancelled) >= (parseFloat(i.qty_kg) || 0);
+      const del = deliveredMap[i.id] || { kg: 0, bags: 0 };
+      const can = cancelledMap[i.indent_number] || { kg: 0, bags: 0 };
+      const isDone = (del.kg + can.kg) >= (parseFloat(i.qty_kg) || 0);
       return matchSearch && !isDone;
     });
   }, [indents, searchTerm, deliveredMap, cancelledMap]);
@@ -270,7 +289,7 @@ const PurDelivery = () => {
       {activeTab === 'indents' ? (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="overflow-x-auto max-h-[600px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200">
-            <table className="w-full text-left border-collapse min-w-[1800px]">
+            <table className="w-full text-left border-collapse min-w-[2400px]">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200 text-[11px] uppercase font-black text-gray-500 sticky top-0 z-10">
                   <th className="px-4 py-4 text-center w-12">
@@ -283,14 +302,17 @@ const PurDelivery = () => {
                       }} />
                   </th>
                   <th className="px-4 py-4">Indent No</th>
-                  <th className="px-4 py-4">Product & Godown</th>
+                  <th className="px-4 py-4">Product</th>
+                  <th className="px-4 py-4">Godown</th>
                   <th className="px-4 py-4">Vendor</th>
-                  <th className="px-4 py-4 text-right">Indent Qty</th>
-                  <th className="px-4 py-4 text-right">Delivered</th>
-                  <th className="px-4 py-4 text-right text-red-500">Cancelled</th>
-                  <th className="px-4 py-4 text-right">Remaining</th>
-                  <th className="px-2 py-4">Del. Qty (kg)</th>
-                  <th className="px-2 py-4">Bags</th>
+                  <th className="px-4 py-4 text-right">Indent KG</th>
+                  <th className="px-4 py-4 text-right">Indent Bags</th>
+                  <th className="px-4 py-4 text-right text-green-600">Delivered Bags</th>
+                  <th className="px-4 py-4 text-right text-red-500">Cancelled Bags</th>
+                  <th className="px-4 py-4 text-right text-orange-600">Remaining KG</th>
+                  <th className="px-4 py-4 text-right text-orange-600">Remaining Bags</th>
+                  <th className="px-2 py-4">Lifting Qty (kg)</th>
+                  <th className="px-2 py-4">Lifting Bags</th>
                   <th className="px-2 py-4">Transporter</th>
                   <th className="px-2 py-4">LR Number</th>
                   <th className="px-2 py-4">Vehicle Number</th>
@@ -299,28 +321,29 @@ const PurDelivery = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 text-sm font-bold">
-                {loading ? <TS cols={15} /> : filteredIndents.length === 0 ? (
-                  <tr><td colSpan={15} className="py-24 text-center text-gray-400 font-bold">No pending deliveries found.</td></tr>
+                {loading ? <TS cols={18} /> : filteredIndents.length === 0 ? (
+                  <tr><td colSpan={18} className="py-24 text-center text-gray-400 font-bold">No pending deliveries found.</td></tr>
                 ) : filteredIndents.map(r => {
-                  const delivered = deliveredMap[r.id] || 0;
-                  const cancelled = cancelledMap[r.indent_number] || 0;
-                  const remaining = (parseFloat(r.qty_kg) || 0) - delivered - cancelled;
-                  const row = inlineData[r.id] || {};
+                  const del = deliveredMap[r.id] || { kg: 0, bags: 0 };
+                  const can = cancelledMap[r.indent_number] || { kg: 0, bags: 0 };
+                  const row = inlineData[r.id] || { checked: false };
+                  const remKg = Math.max(0, (parseFloat(r.qty_kg) || 0) - del.kg - can.kg);
+                  const remBags = Math.max(0, (parseInt(r.qty_bags) || 0) - del.bags - can.bags);
                   return (
                     <tr key={r.id} className={`hover:bg-orange-50/10 transition-colors ${row.checked ? 'bg-orange-50/40' : ''}`}>
                       <td className="px-4 py-4 text-center">
-                        <input type="checkbox" checked={row.checked} onChange={e => updateInline(r.id, 'checked', e.target.checked)} className="w-4 h-4 accent-orange-600 rounded cursor-pointer" />
+                        <input type="checkbox" checked={!!row.checked} onChange={e => setInlineData(prev => ({ ...prev, [r.id]: { ...prev[r.id], checked: e.target.checked } }))} className="w-4 h-4 accent-orange-600 rounded cursor-pointer" />
                       </td>
-                      <td className="px-4 py-4 font-black text-gray-900 leading-tight">{r.indent_number}</td>
-                      <td className="px-4 py-4">
-                        <div className="font-bold text-gray-800 leading-tight">{r.product_name}</div>
-                        <div className="text-[10px] font-black text-blue-600 uppercase mt-0.5 tracking-wider">@ {r.godown_name}</div>
-                      </td>
-                      <td className="px-4 py-4 text-gray-600">{r.vendor_name || '—'}</td>
+                      <td className="px-4 py-4 font-black text-gray-800">{r.indent_number}</td>
+                      <td className="px-4 py-4 font-black text-gray-700">{r.product_name}</td>
+                      <td className="px-4 py-4 text-[10px] text-blue-600 font-black uppercase">{r.godown_name}</td>
+                      <td className="px-4 py-4 text-gray-600 text-xs">{r.vendor_name || '—'}</td>
                       <td className="px-4 py-4 text-right font-black text-gray-400">{r.qty_kg?.toLocaleString()}</td>
-                      <td className="px-4 py-4 text-right font-black text-green-600">{delivered.toLocaleString()}</td>
-                      <td className="px-4 py-4 text-right font-black text-red-400">{cancelled.toLocaleString()}</td>
-                      <td className="px-4 py-4 text-right font-black text-orange-600">{remaining.toLocaleString()}</td>
+                      <td className="px-4 py-4 text-right font-bold text-gray-300">{r.qty_bags}</td>
+                      <td className="px-4 py-4 text-right font-bold text-green-400">{del.bags}</td>
+                      <td className="px-4 py-4 text-right font-bold text-red-300">{can.bags}</td>
+                      <td className="px-4 py-4 text-right font-black text-orange-600">{remKg.toLocaleString()}</td>
+                      <td className="px-4 py-4 text-right font-bold text-orange-400">{remBags}</td>
                       
                       <td className="px-1 py-4">
                         <input type="number" step="0.01" value={row.received_qty_kg || ''} onChange={e => updateInline(r.id, 'received_qty_kg', e.target.value)} disabled={!row.checked}
@@ -370,6 +393,7 @@ const PurDelivery = () => {
                   <th className="px-4 py-4">Lifting No</th>
                   <th className="px-4 py-4">Indent No</th>
                   <th className="px-4 py-4">Product</th>
+                  <th className="px-4 py-4">Godown</th>
                   <th className="px-4 py-4">Transporter</th>
                   <th className="px-4 py-4 text-right">Qty (kg)</th>
                   <th className="px-4 py-4 text-right">Bags</th>
@@ -378,13 +402,14 @@ const PurDelivery = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 text-sm font-bold">
-                {loading ? <TS cols={8} /> : filteredDeliveries.length === 0 ? (
-                  <tr><td colSpan={8} className="py-24 text-center text-gray-400 font-bold">No delivery history found.</td></tr>
+                {loading ? <TS cols={9} /> : filteredDeliveries.length === 0 ? (
+                  <tr><td colSpan={9} className="py-24 text-center text-gray-400 font-bold">No delivery history found.</td></tr>
                 ) : filteredDeliveries.map(d => (
                   <tr key={d.id} className="hover:bg-gray-50/50 transition-colors">
                     <td className="px-4 py-4 font-black text-orange-600">{d.delivery_number}</td>
                     <td className="px-4 py-4 font-black text-gray-400 text-xs">{d.indent_number}</td>
                     <td className="px-4 py-4 font-bold text-gray-800">{d.product_name}</td>
+                    <td className="px-4 py-4 text-[10px] text-blue-600 font-black uppercase">{d.godown_name}</td>
                     <td className="px-4 py-4 text-gray-600">{d.transporter_name}</td>
                     <td className="px-4 py-4 text-right font-black text-gray-700">{d.received_qty_kg?.toLocaleString()}</td>
                     <td className="px-4 py-4 text-right font-bold text-gray-500">{d.received_qty_bags}</td>
@@ -467,11 +492,11 @@ const PurDelivery = () => {
                       type="number" 
                       step="0.01" 
                       value={cancelForm.cancelled_qty_kg} 
-                      onChange={e => setCancelForm(p => ({ ...p, cancelled_qty_kg: e.target.value }))}
+                      onChange={e => handleCancelKgChange(e.target.value)}
                       className="w-full pl-5 pr-4 py-4 bg-red-50/50 border border-red-100 rounded-2xl text-lg font-black text-red-800 focus:ring-4 focus:ring-red-500/10 focus:border-red-400 outline-none transition-all" 
                       placeholder="0.00" 
                     />
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-red-300 uppercase bg-white px-2 py-1 rounded-md border border-red-50 shadow-sm">Auto</div>
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-red-300 uppercase bg-white px-2 py-1 rounded-md border border-red-50 shadow-sm">KG</div>
                   </div>
                 </div>
               </div>

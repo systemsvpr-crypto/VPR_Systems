@@ -37,18 +37,21 @@ const PurArrival = () => {
 
   // Editable rows state
   const [editData, setEditData] = useState({});
+  const [products, setProducts] = useState([]);
 
   const fetchAll = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
-      const [delRes, godRes] = await Promise.all([
+      const [delRes, godRes, prodRes] = await Promise.all([
         supabase.from('purchase_delivery').select('*, purchase_indent(qty_kg)').order('created_at', { ascending: false }),
-        supabase.from('godowns').select('id, name').eq('is_active', true).order('name')
+        supabase.from('godowns').select('id, godown_id, name').eq('is_active', true).order('name'),
+        supabase.from('products').select('name, mux')
       ]);
       
       if (delRes.error) throw delRes.error;
       setDeliveries(delRes.data || []);
       setGodowns(godRes.data || []);
+      setProducts(prodRes.data || []);
 
       const initialEdit = {};
       delRes.data?.forEach(d => {
@@ -99,6 +102,36 @@ const PurArrival = () => {
     }));
   };
 
+  const handleBagsChange = (id, bags) => {
+    const delivery = deliveries.find(d => d.id == id);
+    const product = products.find(p => p.name === delivery?.product_name);
+    const mux = parseFloat(product?.mux) || 0;
+    const kg = bags * mux;
+    setEditData(prev => ({
+      ...prev,
+      [id]: { 
+        ...prev[id], 
+        received_qty_bags: bags,
+        received_qty_kg: kg > 0 ? kg.toFixed(2) : ''
+      }
+    }));
+  };
+
+  const handleKgChange = (id, kg) => {
+    const delivery = deliveries.find(d => d.id == id);
+    const product = products.find(p => p.name === delivery?.product_name);
+    const mux = parseFloat(product?.mux) || 0;
+    const bags = mux > 0 ? Math.round(kg / mux) : 0;
+    setEditData(prev => ({
+      ...prev,
+      [id]: { 
+        ...prev[id], 
+        received_qty_kg: kg,
+        received_qty_bags: bags > 0 ? bags : ''
+      }
+    }));
+  };
+
   const handleBulkSubmit = async () => {
     const selectedIds = Object.keys(editData).filter(id => editData[id].checked);
     if (selectedIds.length === 0) {
@@ -112,6 +145,122 @@ const PurArrival = () => {
         const row = editData[id];
         const original = deliveries.find(d => d.id == id);
         
+        // STOCK SYNCHRONIZATION LOGIC
+        if (row.arrival_status === 'Arrived' && original.arrival_status !== 'Arrived') {
+          const targetGodown = godowns.find(g => g.name === row.godown_name);
+          if (!targetGodown) {
+            toast.error(`Godown ${row.godown_name} not found for delivery ${original.delivery_number}`);
+            continue;
+          }
+
+          // 1. Try to find product in target godown
+          let { data: product, error: prodError } = await supabase
+            .from('products')
+            .select('*')
+            .eq('name', original.product_name)
+            .eq('godown_id', targetGodown.godown_id)
+            .maybeSingle();
+
+          // 2. Fallback: Search global products to auto-create entry
+          if (!product || prodError) {
+            const { data: globalProd } = await supabase
+              .from('products')
+              .select('*')
+              .eq('name', original.product_name)
+              .limit(1)
+              .maybeSingle();
+            
+            if (globalProd) {
+              // Generate a new unique product_id for this godown entry
+              let newId;
+              try {
+                const { data: rpcId } = await supabase.rpc('generate_product_id');
+                newId = rpcId;
+              } catch (e) {
+                newId = `PROD-${Date.now().toString().slice(-6)}`;
+              }
+
+              // Auto-create product entry for target godown
+              const { data: newProd, error: createError } = await supabase
+                .from('products')
+                .insert([{
+                  product_id: newId,
+                  name: globalProd.name,
+                  description: globalProd.description,
+                  unit: globalProd.unit,
+                  mux: globalProd.mux,
+                  godown_id: targetGodown.godown_id,
+                  opening_quantity: 0,
+                  closing_quantity: 0,
+                  quantity: 0,
+                  is_active: true
+                }])
+                .select().single();
+              
+              if (!createError) product = newProd;
+              else console.error('Product creation failed', createError);
+            }
+          }
+
+          if (product) {
+            const addBags = parseInt(row.received_qty_bags) || 0;
+            const addWeight = parseFloat(row.received_qty_kg) || 0;
+            const currentStockBags = parseFloat(product.closing_quantity) || 0;
+            const currentWeightKg = parseFloat(product.quantity) || 0;
+            const newClosingQty = currentStockBags + addBags;
+            const newTotalWeight = currentWeightKg + addWeight;
+
+            // Generate unique entry ID
+            const entryId = `ARR-${original.delivery_number}`;
+
+            // CHECK FOR EXISTING RECORD TO AVOID 409 CONFLICT
+            const { data: existing } = await supabase.from('stock_management').select('id').eq('entry_id', entryId).maybeSingle();
+            if (existing) {
+              console.log('Stock record already exists for', entryId);
+              // If it exists, we just proceed to update the delivery status
+            } else {
+              // 3. Update Product Master (Live Stock)
+              const { error: stockUpError } = await supabase.from('products').update({
+                closing_quantity: newClosingQty,
+                quantity: newTotalWeight,
+                updated_at: new Date().toISOString()
+              }).eq('id', product.id);
+              if (stockUpError) throw new Error(`Stock Update Failed: ${stockUpError.message}`);
+
+              // 4. Insert Stock Management Record
+              const { error: smError } = await supabase.from('stock_management').insert({
+                entry_id: entryId,
+                product_id: product.product_id,
+                godown_id: targetGodown.godown_id,
+                transaction_type: 'in',
+                quantity: addBags,
+                opening_stock: currentStockBags,
+                closing_stock: newClosingQty,
+                date: new Date().toISOString().split('T')[0],
+                reference_number: original.delivery_number,
+                notes: `Purchase Arrival: ${original.indent_number} via ${original.transporter_name}`,
+                created_by: user?.email,
+                from_location: null, // Schema foreign key requires valid godown_id, VENDOR is not one.
+                lr_number: row.lr_number
+              });
+              if (smError) throw new Error(`Stock Management Insert Failed: ${smError.message}`);
+
+              // 5. Add Notification
+              await supabase.from('stock_notifications').insert([{
+                notification_type: 'stock_in',
+                title: 'Purchase Arrival',
+                message: `${addBags} units of ${product.name} arrived at ${targetGodown.name}`,
+                product_id: product.product_id,
+                godown_id: targetGodown.godown_id,
+                related_id: entryId
+              }]);
+            }
+          } else {
+            throw new Error(`Product ${original.product_name} not found in master list.`);
+          }
+        }
+
+        // 6. FINALLY UPDATE DELIVERY STATUS (Only if we reached here)
         const { error: updateError } = await supabase.from('purchase_delivery').update({
           vehicle_number: row.vehicle_number,
           delivery_date: row.delivery_date,
@@ -122,56 +271,9 @@ const PurArrival = () => {
           arrival_status: row.arrival_status,
           driver_phone: row.driver_phone,
           lr_number: row.lr_number
-        }).eq('id', id);
+        }).eq('id', parseInt(id));
 
         if (updateError) throw updateError;
-
-        // STOCK SYNCHRONIZATION LOGIC
-        if (row.arrival_status === 'Arrived' && original.arrival_status !== 'Arrived') {
-          const targetGodown = godowns.find(g => g.name === row.godown_name);
-          if (targetGodown) {
-            const { data: product, error: prodError } = await supabase
-              .from('products')
-              .select('*')
-              .eq('name', original.product_name)
-              .eq('godown_id', targetGodown.id)
-              .single();
-
-            if (!prodError && product) {
-              const currentStockBags = parseFloat(product.closing_quantity) || 0;
-              const currentWeightKg = parseFloat(product.quantity) || 0;
-              const addBags = parseInt(row.received_qty_bags) || 0;
-              const addWeight = parseFloat(row.received_qty_kg) || 0;
-
-              const newClosingQty = currentStockBags + addBags;
-              const newTotalWeight = currentWeightKg + addWeight;
-              
-              // 1. Update Product Master Table (Live Stock)
-              await supabase.from('products').update({
-                closing_quantity: newClosingQty,
-                quantity: newTotalWeight,
-                updated_at: new Date().toISOString()
-              }).eq('id', product.id);
-
-              // 2. Insert Stock Management Record (Audit Log for In/Out Dashboards)
-              await supabase.from('stock_management').insert({
-                product_id: product.product_id, // String code (e.g. PRD001)
-                product_name: product.name,
-                godown_id: targetGodown.id,
-                transaction_type: 'in',
-                quantity: addBags,
-                weight: addWeight,
-                opening_stock: currentStockBags,
-                closing_stock: newClosingQty,
-                date: new Date().toISOString().split('T')[0],
-                reference_no: original.delivery_number,
-                remarks: `Purchase Arrival: ${original.indent_number} via ${original.transporter_name}`,
-                created_by: user?.email,
-                from_location: 'VENDOR' // Identifying source
-              });
-            }
-          }
-        }
       }
 
       toast.success('Logistics & Stock synchronized successfully!');
@@ -242,7 +344,7 @@ const PurArrival = () => {
             <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Transporter</label>
             <select value={filterTrans} onChange={e => setFilterTrans(e.target.value)} className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-xs font-bold focus:ring-2 focus:ring-orange-500/20 outline-none">
               <option value="">All Transporters</option>
-              {uniqueTransporters.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
+              {uniqueTransporters.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div className="space-y-1">
@@ -329,11 +431,11 @@ const PurArrival = () => {
                         className={`w-[120px] px-2 py-1.5 border border-gray-200 rounded font-bold text-gray-700 text-xs focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all ${isDisabled ? 'bg-gray-50 border-transparent opacity-60' : 'bg-white'}`} />
                     </td>
                     <td className="px-1 py-4 text-right">
-                      <input type="number" step="0.01" value={row.received_qty_kg || ''} onChange={e => updateEditRow(d.id, 'received_qty_kg', e.target.value)} disabled={isDisabled}
+                      <input type="number" step="0.01" value={row.received_qty_kg || ''} onChange={e => handleKgChange(d.id, e.target.value)} disabled={isDisabled}
                         className={`w-24 px-2 py-1.5 border border-gray-200 rounded font-black text-gray-700 text-xs focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all text-right ${isDisabled ? 'bg-gray-50 border-transparent opacity-60' : 'bg-white text-green-600'}`} placeholder="0.00" />
                     </td>
                     <td className="px-1 py-4 text-right">
-                      <input type="number" value={row.received_qty_bags || ''} onChange={e => updateEditRow(d.id, 'received_qty_bags', e.target.value)} disabled={isDisabled}
+                      <input type="number" value={row.received_qty_bags || ''} onChange={e => handleBagsChange(d.id, e.target.value)} disabled={isDisabled}
                         className={`w-20 px-2 py-1.5 border border-gray-200 rounded font-black text-gray-700 text-xs focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all text-right ${isDisabled ? 'bg-gray-50 border-transparent opacity-60' : 'bg-white text-green-600'}`} placeholder="0" />
                     </td>
                     <td className="px-1 py-4">
