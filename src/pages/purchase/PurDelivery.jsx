@@ -76,10 +76,26 @@ const PurDelivery = () => {
 
       const initialInline = {};
       validIndents.forEach(ind => {
+        // Calculate remaining
+        const del = (delRes.data || []).filter(d => d.indent_id === ind.id)
+          .reduce((acc, d) => ({ 
+            kg: acc.kg + (parseFloat(d.received_qty_kg) || 0), 
+            bags: acc.bags + (parseInt(d.received_qty_bags) || 0) 
+          }), { kg: 0, bags: 0 });
+        
+        const can = (canRes.data || []).filter(c => c.indent_number === ind.indent_number)
+          .reduce((acc, c) => ({ 
+            kg: acc.kg + (parseFloat(c.cancelled_qty_kg) || 0), 
+            bags: acc.bags + (parseInt(c.cancelled_qty_bags) || 0) 
+          }), { kg: 0, bags: 0 });
+
+        const remKg = Math.max(0, (parseFloat(ind.qty_kg) || 0) - del.kg - can.kg);
+        const remBags = Math.max(0, (parseInt(ind.qty_bags) || 0) - del.bags - can.bags);
+
         initialInline[ind.id] = {
           checked: false,
-          received_qty_kg: '',
-          received_qty_bags: '',
+          received_qty_kg: remKg > 0 ? remKg.toFixed(2) : '',
+          received_qty_bags: remBags > 0 ? remBags : '',
           transporter_name: '',
           delivery_date: new Date().toISOString().split('T')[0],
           lr_number: '',
@@ -346,8 +362,8 @@ const PurDelivery = () => {
                       <td className="px-4 py-4 text-right font-bold text-orange-400">{remBags}</td>
                       
                       <td className="px-1 py-4">
-                        <input type="number" step="0.01" value={row.received_qty_kg || ''} onChange={e => updateInline(r.id, 'received_qty_kg', e.target.value)} disabled={!row.checked}
-                          className="w-24 px-2 py-1.5 border border-gray-200 rounded text-xs font-black text-blue-600 focus:ring-2 focus:ring-blue-300 outline-none text-right disabled:bg-gray-50" placeholder="0.00" />
+                        <input type="number" step="0.01" value={row.received_qty_kg || ''} readOnly
+                          className="w-24 px-2 py-1.5 border border-gray-200 rounded text-xs font-black text-blue-600 bg-gray-50 outline-none text-right" placeholder="0.00" />
                       </td>
                       <td className="px-1 py-4">
                         <input type="number" value={row.received_qty_bags || ''} onChange={e => updateInline(r.id, 'received_qty_bags', e.target.value)} disabled={!row.checked}

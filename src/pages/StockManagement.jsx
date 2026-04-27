@@ -194,6 +194,32 @@ const StockManagement = () => {
             toast.error('Please enter a valid quantity');
             return;
         }
+
+        const selectedProdData = products.find(p => p.product_id === selectedProduct);
+        if (!selectedProdData) return;
+
+        // Stock Validation
+        let sourceGodownId = null;
+        if (formData.transaction_type === 'out') {
+            sourceGodownId = formData.godown_id;
+        } else if (formData.transaction_type === 'in' && formData.from_location) {
+            // Check if from_location is a godown
+            const isGodown = godowns.some(g => g.godown_id === formData.from_location);
+            if (isGodown) sourceGodownId = formData.from_location;
+        }
+
+        if (sourceGodownId) {
+            // Find the stock of this product in the source godown
+            // We match by name since product_id is unique per godown
+            const sourceStock = products.find(p => p.name === selectedProdData.name && p.godown_id === sourceGodownId);
+            const availableQty = parseFloat(sourceStock?.closing_quantity) || 0;
+            
+            if (availableQty < selectedQty) {
+                toast.error(`Insufficient stock in ${godowns.find(g => g.godown_id === sourceGodownId)?.name || 'source godown'}. Available: ${availableQty}`);
+                return;
+            }
+        }
+
         if (formData.productItems.some(item => item.product_id === selectedProduct)) {
             toast.error('Product already added');
             return;
@@ -214,10 +240,32 @@ const StockManagement = () => {
     };
 
     const updateProductQty = (productId, qty) => {
+        const qtyNum = parseInt(qty) || 0;
+        const selectedProdData = products.find(p => p.product_id === productId);
+        
+        // Stock Validation
+        let sourceGodownId = null;
+        if (formData.transaction_type === 'out') {
+            sourceGodownId = formData.godown_id;
+        } else if (formData.transaction_type === 'in' && formData.from_location) {
+            const isGodown = godowns.some(g => g.godown_id === formData.from_location);
+            if (isGodown) sourceGodownId = formData.from_location;
+        }
+
+        if (sourceGodownId && selectedProdData) {
+            const sourceStock = products.find(p => p.name === selectedProdData.name && p.godown_id === sourceGodownId);
+            const availableQty = parseFloat(sourceStock?.closing_quantity) || 0;
+            
+            if (availableQty < qtyNum) {
+                toast.error(`Insufficient stock. Available: ${availableQty}`);
+                return;
+            }
+        }
+
         setFormData(prev => ({
             ...prev,
             productItems: prev.productItems.map(item =>
-                item.product_id === productId ? { ...item, quantity: parseInt(qty) } : item
+                item.product_id === productId ? { ...item, quantity: qtyNum } : item
             )
         }));
     };
@@ -430,7 +478,13 @@ const StockManagement = () => {
         return filteredEntries.slice(start, start + ITEMS_PER_PAGE);
     }, [filteredEntries, currentPage]);
 
-    const availableProducts = products.filter(p => !formData.productItems.some(item => item.product_id === p.product_id));
+    const availableProducts = useMemo(() => {
+        if (!formData.godown_id) return [];
+        return products.filter(p => 
+            p.godown_id === formData.godown_id && 
+            !formData.productItems.some(item => item.product_id === p.product_id)
+        );
+    }, [products, formData.godown_id, formData.productItems]);
 
     return (
         <div className="flex flex-col gap-4 pb-6">

@@ -41,9 +41,20 @@ const LiveStockDashboard = () => {
                 supabase.from('daily_stock_summary').select('*').eq('date', summaryDate)
             ]);
             
-            setProducts(productsRes.data || []);
+            const fetchedProducts = productsRes.data || [];
+            
+            // Flatten the transaction product name using the products list
+            const flattenedTransactions = (transactionsRes.data || []).map(t => {
+                const prod = fetchedProducts.find(p => p.product_id === t.product_id);
+                return {
+                    ...t,
+                    product_name: prod?.name || 'Unknown Product'
+                };
+            });
+
+            setProducts(fetchedProducts);
             setGodowns(godownsRes.data || []);
-            setDayTransactions(transactionsRes.data || []);
+            setDayTransactions(flattenedTransactions);
             setDailySnapshots(snapshotsRes.data || []);
         } catch (error) {
             console.error('Error fetching data:', error);
@@ -85,21 +96,41 @@ const LiveStockDashboard = () => {
     // Dynamic Master Summary Logic
     const dynamicSummary = useMemo(() => {
         return products.map(p => {
-            const pTransactions = dayTransactions.filter(t => t.product_id === p.product_id && t.godown_id === p.godown_id);
-            const in_stock = pTransactions.filter(t => t.transaction_type === 'in').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
-            const out_stock = pTransactions.filter(t => t.transaction_type === 'out').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
-            
-            // If date is today, closing is current stock.
-            // Opening = current - in + out
             const isToday = summaryDate === new Date().toISOString().split('T')[0];
             
-            // Try to find snapshot for this product + godown
+            // 1. Try to find the snapshot for this specific date
             const snapshot = dailySnapshots.find(s => s.product_id === p.product_id && s.godown_id === p.godown_id);
+            
+            // 2. Real-time calculations for Today (if snapshot isn't available or for live feel)
+            const pTransactions = dayTransactions.filter(t => 
+                (t.godown_id === p.godown_id && t.product_id === p.product_id) ||
+                (t.from_location === p.godown_id && t.product_name === p.name)
+            ).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
-            const closing_stock = isToday ? (p.closing_quantity || 0) : (snapshot ? snapshot.closing_stock : 0);
-            const opening_stock = isToday ? (closing_stock - in_stock + out_stock) : (snapshot ? snapshot.opening_stock : 0);
+            const in_stock = pTransactions.filter(t => t.godown_id === p.godown_id && t.transaction_type === 'in').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
+            const out_stock = pTransactions.filter(t => t.transaction_type === 'out' && t.godown_id === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0) + 
+                              pTransactions.filter(t => t.from_location === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
+
+            let opening_stock = snapshot ? snapshot.opening_stock : '-';
+            let closing_stock = snapshot ? snapshot.closing_stock : '-';
+            let display_in = snapshot ? snapshot.in_stock : in_stock;
+            let display_out = snapshot ? snapshot.out_stock : out_stock;
+
+            // Priority logic for Today
+            if (isToday) {
+                if (pTransactions.length > 0) {
+                    opening_stock = pTransactions[0].opening_stock;
+                    closing_stock = pTransactions[pTransactions.length - 1].closing_stock;
+                } else {
+                    opening_stock = p.closing_quantity;
+                    closing_stock = p.closing_quantity;
+                }
+                display_in = in_stock;
+                display_out = out_stock;
+            }
 
             const godown = getGodownDetails(p.godown_id);
+            const pTransfers = pTransactions.filter(t => t.from_location || (t.godown_id === p.godown_id && t.from_location));
 
             return {
                 product_id: p.product_id,
@@ -107,19 +138,18 @@ const LiveStockDashboard = () => {
                 godown_id: p.godown_id,
                 godown_name: godown.name || p.godown_id,
                 mux: p.mux || '',
-                opening_stock: isToday || snapshot ? opening_stock : '-', 
-                in_stock,
-                out_stock,
-                transfers: dayTransactions.filter(t => t.product_id === p.product_id && (t.godown_id === p.godown_id ? t.from_location : t.from_location === p.godown_id)).length > 0
-                    ? (dayTransactions.filter(t => t.product_id === p.product_id && t.godown_id === p.godown_id && t.from_location).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0) +
-                       dayTransactions.filter(t => t.product_id === p.product_id && t.from_location === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0))
+                opening_stock: opening_stock ?? '-', 
+                in_stock: display_in,
+                out_stock: display_out,
+                transfers: pTransfers.length > 0
+                    ? pTransfers.reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0)
                     : 0,
-                closing_stock: isToday || snapshot ? closing_stock : '-',
+                closing_stock: closing_stock ?? '-',
                 opening_quantity: p.opening_quantity || 0,
                 closing_quantity: p.closing_quantity || 0,
             };
         });
-    }, [products, dayTransactions, summaryDate, godowns]);
+    }, [products, dayTransactions, summaryDate, godowns, dailySnapshots]);
 
     const filteredSummary = useMemo(() => {
         return dynamicSummary.filter(s => {
@@ -288,10 +318,16 @@ const LiveStockDashboard = () => {
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
                                     {godowns.map(godown => {
-                                        const gTransactions = dayTransactions.filter(t => t.godown_id === godown.godown_id);
-                                        const totalIn = gTransactions.filter(t => t.transaction_type === 'in').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
-                                        const totalOut = gTransactions.filter(t => t.transaction_type === 'out').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
+                                        // Total IN = Direct In + Incoming Transfers
+                                        const directIn = dayTransactions.filter(t => t.godown_id === godown.godown_id && t.transaction_type === 'in').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
                                         
+                                        // Total OUT = Direct Out + Outgoing Transfers
+                                        const directOut = dayTransactions.filter(t => t.godown_id === godown.godown_id && t.transaction_type === 'out').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
+                                        const outgoingTransfers = dayTransactions.filter(t => t.from_location === godown.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
+                                        
+                                        const totalIn = directIn; // Direct In already includes transfers (since they are 'in' at godown_id)
+                                        const totalOut = directOut + outgoingTransfers;
+
                                         const gProducts = products.filter(p => p.godown_id === godown.godown_id);
                                         const totalClosing = gProducts.reduce((sum, p) => sum + (parseFloat(p.closing_quantity) || 0), 0);
                                         const totalOpening = totalClosing - totalIn + totalOut;
@@ -611,10 +647,11 @@ const TransferModal = ({ details, transactions, godowns, products, onClose }) =>
     const getProductName = (id) => products.find(p => p.product_id === id)?.name || id;
 
     const filteredTransfers = useMemo(() => {
+        // Match by NAME for product transfers to catch all legs of the transfer
         if (details.type === 'godown') {
             return transactions.filter(t => t.from_location === details.id || (t.godown_id === details.id && t.from_location));
         } else {
-            return transactions.filter(t => t.product_id === details.id && (t.from_location === details.godown_id || (t.godown_id === details.godown_id && t.from_location)));
+            return transactions.filter(t => t.product_name === details.name && (t.from_location === details.godown_id || (t.godown_id === details.godown_id && t.from_location)));
         }
     }, [details, transactions]);
 
@@ -660,7 +697,7 @@ const TransferModal = ({ details, transactions, godowns, products, onClose }) =>
                                         return (
                                             <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
                                                 <td className="px-4 py-3">
-                                                    <p className="text-sm font-bold text-slate-900">{getProductName(t.product_id)}</p>
+                                                    <p className="text-sm font-bold text-slate-900">{t.product_name}</p>
                                                     <p className="text-[10px] text-slate-400 font-mono">{t.product_id}</p>
                                                 </td>
                                                 <td className="px-4 py-3 text-sm text-slate-600 font-medium">
