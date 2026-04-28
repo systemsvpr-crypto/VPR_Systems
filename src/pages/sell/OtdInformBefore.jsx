@@ -4,6 +4,7 @@ import SearchableDropdown from '../../components/SearchableDropdown';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
 import { supabase } from '../../supabase';
+import { whatsappService } from '../../services/whatsappService';
 
 const OtdInformBefore = () => {
     const { user } = useAuthStore();
@@ -192,7 +193,12 @@ const OtdInformBefore = () => {
         return getSortedItems(filtered);
     }, [historyItems, searchTerm, clientFilter, godownFilter, getSortedItems]);
 
+    useEffect(() => {
+        console.log(`Active Tab: ${activeTab}, Selected Rows Count: ${Object.keys(selectedRows).length}`);
+    }, [activeTab, selectedRows]);
+
     const handleCheckboxToggle = (id) => {
+        console.log('Toggling checkbox for ID:', id);
         setSelectedRows(prev => {
             const newSelected = { ...prev };
             if (newSelected[id]) delete newSelected[id];
@@ -207,26 +213,67 @@ const OtdInformBefore = () => {
 
     const handleSave = async () => {
         const selectedIds = Object.keys(selectedRows);
-        if (selectedIds.length === 0) return;
+        console.log('handleSave triggered with selectedIds:', selectedIds);
+        if (selectedIds.length === 0) {
+            console.log('No rows selected, exiting handleSave');
+            return;
+        }
 
         setIsSaving(true);
         try {
-            const { error } = await supabase
-                .from('dispatch_plans')
-                .update({
-                    informed_before_dispatch: true,
-                    informed_at: new Date().toISOString(),
-                    submitted_by: user?.name || user?.full_name || user?.username || 'System'
-                })
-                .in('id', selectedIds);
+            // Group selected items by client for bulk notification
+            const selectedItemsDetails = pendingItems.filter(item => selectedIds.includes(String(item.id)));
+            const groupedByClient = selectedItemsDetails.reduce((acc, item) => {
+                const client = item.clientName;
+                if (!acc[client]) acc[client] = [];
+                acc[client].push(item);
+                return acc;
+            }, {});
 
-            if (error) throw error;
-            toast.success('Notification status updated successfully!');
+            const successfulIds = [];
+            
+            // 1. Send WhatsApp Notifications First
+            for (const clientName in groupedByClient) {
+                const items = groupedByClient[clientName];
+                try {
+                    console.log(`Attempting WhatsApp for ${clientName}`);
+                    await whatsappService.sendBulkDispatchNotification('9691207533', {
+                        customerName: clientName,
+                        orderNumbers: items.map(i => i.orderNo),
+                        productNames: items.map(i => `${i.itemName} (${i.dispatchQty})`),
+                        dispatchDates: items.map(i => formatDisplayDate(i.dispatchDate))
+                    });
+                    // If successful, add these items to the list to be updated in DB
+                    items.forEach(it => successfulIds.push(it.id));
+                } catch (wsError) {
+                    console.error(`WhatsApp failed for ${clientName}:`, wsError);
+                    const errorMsg = wsError.response?.data?.error?.message || wsError.message || 'Unknown error';
+                    toast.error(`WhatsApp failed for ${clientName}: ${errorMsg}`);
+                }
+            }
+
+            // 2. Only update database for items where WhatsApp was successful
+            if (successfulIds.length > 0) {
+                const { error: dbError } = await supabase
+                    .from('dispatch_plans')
+                    .update({
+                        informed_before_dispatch: true,
+                        informed_at: new Date().toISOString(),
+                        submitted_by: user?.name || user?.full_name || user?.username || 'System'
+                    })
+                    .in('id', successfulIds);
+
+                if (dbError) throw dbError;
+                toast.success(`${successfulIds.length} notifications confirmed and recorded.`);
+            } else {
+                toast.error('No notifications were sent. Database not updated.');
+            }
+
             setSelectedRows({});
             await fetchInformData(true);
         } catch (error) {
-            console.error('Submission failed:', error);
-            toast.error('Submission failed: ' + error.message);
+            console.error('Operation failed:', error);
+            toast.error('Operation failed: ' + error.message);
         } finally {
             setIsSaving(false);
         }

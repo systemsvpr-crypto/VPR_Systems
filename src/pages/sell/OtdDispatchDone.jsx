@@ -4,6 +4,7 @@ import SearchableDropdown from '../../components/SearchableDropdown';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
 import { supabase } from '../../supabase';
+import { whatsappService } from '../../services/whatsappService';
 
 // --- Format date for display (e.g., 25-Feb-2026) ---
 const formatDisplayDate = (dateStr) => {
@@ -250,116 +251,152 @@ const OtdDispatchDone = () => {
     setIsSaving(true);
     try {
       const now = new Date().toISOString();
+      const selectedIds = Object.keys(selectedRows).filter(id => selectedRows[id]);
+      
+      // Group selected items by client for bulk notification
+      const selectedItemsDetails = orders.filter(o => selectedIds.includes(String(o.id)));
+      const groupedByClient = selectedItemsDetails.reduce((acc, item) => {
+        const client = item.clientName;
+        if (!acc[client]) acc[client] = [];
+        acc[client].push(item);
+        return acc;
+      }, {});
+
+      const successfulItems = [];
+
+      // 1. Send WhatsApp Notifications First
+      for (const clientName in groupedByClient) {
+        const items = groupedByClient[clientName];
+        try {
+          const productDetails = items.map(i => {
+            const qty = editData[i.id]?.dispatchQty !== undefined ? editData[i.id].dispatchQty : i.dispatchQty;
+            const name = editData[i.id]?.product || i.itemName;
+            return `${name} (${qty})`;
+          });
+          console.log(`OtdDispatchDone sending notification to ${clientName} for ${items.length} items`);
+          
+          await whatsappService.sendBulkDispatchNotification('9691207533', {
+            customerName: clientName,
+            orderNumbers: items.map(i => i.orderNumber),
+            productNames: productDetails,
+            dispatchDates: items.map(i => formatDisplayDate(new Date().toISOString()))
+          });
+          
+          // Add these items to successful list
+          successfulItems.push(...items);
+        } catch (wsError) {
+          console.error(`WhatsApp failed for ${clientName}:`, wsError);
+          toast.error(`WhatsApp failed for ${clientName}: ${wsError.message}`, { duration: 5000 });
+        }
+      }
+
+      if (successfulItems.length === 0) {
+        toast.error('No WhatsApp notifications could be sent. No changes made to database.');
+        setIsSaving(false);
+        return;
+      }
+
+      // 2. Process DB updates ONLY for successful items
       const rowsToLog = [];
       const updates = [];
 
-      for (const id of selectedIds) {
-        const item = orders.find(o => String(o.id) === String(id));
-        if (item) {
-          const finalQty = editData[id]?.dispatchQty !== undefined
-            ? parseFloat(editData[id].dispatchQty)
-            : parseFloat(item.dispatchQty);
-          const finalGodown = editData[id]?.godown || item.godownName;
-          // Item name edit on this page → dispatch_plans.product_name ONLY
-          const finalProduct = editData[id]?.product || item.itemName;
+      for (const item of successfulItems) {
+        const id = item.id;
+        const finalQty = editData[id]?.dispatchQty !== undefined
+          ? parseFloat(editData[id].dispatchQty)
+          : parseFloat(item.dispatchQty);
+        const finalGodown = editData[id]?.godown || item.godownName;
+        const finalProduct = editData[id]?.product || item.itemName;
 
-          // Log entry — (matching exact schema to prevent 400 Bad Request)
-          rowsToLog.push({
-            dispatch_id: item.id,
-            dispatch_number: item.dispatchNo,
-            dispatch_date: item.dispatchDate,
-            complete_date: now.split('T')[0],
-            client_name: item.clientName,
-            product_name: finalProduct,
+        rowsToLog.push({
+          dispatch_id: item.id,
+          dispatch_number: item.dispatchNo,
+          dispatch_date: item.dispatchDate,
+          complete_date: now.split('T')[0],
+          client_name: item.clientName,
+          product_name: finalProduct,
+          godown_name: finalGodown,
+          order_qty: parseFloat(item.qty) || 0,
+          dispatch_qty: finalQty,
+          crm_name: item.crmName,
+          status: 'Completed',
+          order_no: item.orderNumber,
+          is_skip: false
+        });
+
+        updates.push(
+          supabase.from('dispatch_plans').update({
+            planned_qty: finalQty,
             godown_name: finalGodown,
-            order_qty: parseFloat(item.qty) || 0,
-            dispatch_qty: finalQty,
-            crm_name: item.crmName,
+            product_name: finalProduct,
+            dispatch_completed: true,
+            completed_at: now,
             status: 'Completed',
-            order_no: item.orderNumber,
-            is_skip: false
-          });
+            submitted_by: user?.name || user?.full_name || user?.username || 'System',
+          }).eq('id', item.id)
+        );
 
-          // Update dispatch_plans — item name goes to product_name here, NOT app_orders
-          updates.push(
-            supabase.from('dispatch_plans').update({
-              planned_qty: finalQty,
-              godown_name: finalGodown,
-              product_name: finalProduct,       // ← dispatch_plans only
-              dispatch_completed: true,
-              completed_at: now,
-              status: 'Completed',
-              submitted_by: user?.name || user?.full_name || user?.username || 'System',
-            }).eq('id', item.id)
-          );
+        // Stock Integration
+        if (finalGodown && finalProduct && finalQty > 0) {
+          const { data: gData } = await supabase.from('godowns').select('godown_id').eq('name', finalGodown).single();
+          if (gData?.godown_id) {
+            const { data: pData } = await supabase.from('products').select('*').eq('name', finalProduct).eq('godown_id', gData.godown_id).single();
+            if (pData) {
+              const currentStock = parseFloat(pData.closing_quantity) || 0;
+              const newStock = currentStock - finalQty;
+              const mux = parseFloat(pData.mux) || 0;
+              
+              updates.push(
+                supabase.from('products').update({
+                  closing_quantity: newStock,
+                  quantity: (newStock * mux).toFixed(3),
+                  updated_at: now
+                }).eq('product_id', pData.product_id)
+              );
 
-          // Stock Integration: Reduce quantity from godown
-          if (finalGodown && finalProduct && finalQty > 0) {
-            const { data: gData } = await supabase.from('godowns').select('godown_id').eq('name', finalGodown).single();
-            if (gData?.godown_id) {
-              const { data: pData } = await supabase.from('products').select('*').eq('name', finalProduct).eq('godown_id', gData.godown_id).single();
-              if (pData) {
-                const currentStock = parseFloat(pData.closing_quantity) || 0;
-                const newStock = currentStock - finalQty;
-                const mux = parseFloat(pData.mux) || 0;
-                
-                // Update products table
-                updates.push(
-                  supabase.from('products').update({
-                    closing_quantity: newStock,
-                    quantity: (newStock * mux).toFixed(3),
-                    updated_at: now
-                  }).eq('product_id', pData.product_id)
-                );
+              const entryId = `STK-SAL-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`.toUpperCase();
+              updates.push(
+                supabase.from('stock_management').insert([{
+                  entry_id: entryId,
+                  godown_id: gData.godown_id,
+                  product_id: pData.product_id,
+                  transaction_type: 'out',
+                  quantity: finalQty,
+                  opening_stock: currentStock,
+                  closing_stock: newStock,
+                  reference_number: item.dispatchNo,
+                  date: now.split('T')[0],
+                  notes: `Sales Dispatch: ${item.dispatchNo} for ${item.clientName}`,
+                }])
+              );
 
-                // Record 'Out' transaction for Live Stock Dashboard
-                const entryId = `STK-SAL-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`.toUpperCase();
-                updates.push(
-                  supabase.from('stock_management').insert([{
-                    entry_id: entryId,
-                    godown_id: gData.godown_id,
-                    product_id: pData.product_id,
-                    transaction_type: 'out',
-                    quantity: finalQty,
-                    opening_stock: currentStock,
-                    closing_stock: newStock,
-                    reference_number: item.dispatchNo,
-                    date: now.split('T')[0],
-                    notes: `Sales Dispatch: ${item.dispatchNo} for ${item.clientName}`,
-                  }])
-                );
-
-                // Create Stock Notification
-                updates.push(
-                  supabase.from('stock_notifications').insert([{
-                    notification_type: 'stock_out',
-                    title: 'Stock OUT (Sales)',
-                    message: `${finalQty} units dispatched to ${item.clientName} from ${finalGodown}`,
-                    product_id: pData.product_id,
-                    godown_id: gData.godown_id,
-                    related_id: entryId
-                  }])
-                );
-              }
+              updates.push(
+                supabase.from('stock_notifications').insert([{
+                  notification_type: 'stock_out',
+                  title: 'Stock OUT (Sales)',
+                  message: `${finalQty} units dispatched to ${item.clientName} from ${finalGodown}`,
+                  product_id: pData.product_id,
+                  godown_id: gData.godown_id,
+                  related_id: entryId
+                }])
+              );
             }
           }
         }
       }
 
-      // 1. Insert log first (safety lock)
       if (rowsToLog.length > 0) {
         const logResult = await supabase.from('dispatch_completed_log').insert(rowsToLog);
         if (logResult.error) throw logResult.error;
       }
 
-      // 2. Then update plans
       if (updates.length > 0) {
         const results = await Promise.all(updates);
         const errorRes = results.find(r => r.error);
         if (errorRes) throw errorRes.error;
       }
 
-      toast.success('Dispatch marked as completed!');
+      toast.success(`${successfulItems.length} dispatches completed and WhatsApp sent!`);
       setSelectedRows({});
       setEditData({});
       await fetchPendingOrders(true);

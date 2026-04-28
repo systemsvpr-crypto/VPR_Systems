@@ -4,6 +4,7 @@ import SearchableDropdown from '../../components/SearchableDropdown';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
 import { supabase } from '../../supabase';
+import { whatsappService } from '../../services/whatsappService';
 
 // --- Format date for display ---
 const formatDisplayDate = (dateStr) => {
@@ -145,8 +146,13 @@ const OtdInformAfter = () => {
     return getSortedItems(filtered);
   }, [pendingItems, historyItems, activeTab, searchTerm, clientFilter, godownFilter, getSortedItems]);
 
+  useEffect(() => {
+    console.log(`InformAfter - Active Tab: ${activeTab}, Selected Rows Count: ${Object.keys(selectedRows).length}`);
+  }, [activeTab, selectedRows]);
+
   // --- Actions ---
   const handleCheckboxToggle = (id) => {
+    console.log('InformAfter - Toggling checkbox for ID:', id);
     setSelectedRows(prev => {
       const next = { ...prev };
       if (next[id]) delete next[id];
@@ -157,22 +163,58 @@ const OtdInformAfter = () => {
 
   const handleSave = async () => {
     const selectedIds = Object.keys(selectedRows).filter(id => selectedRows[id]);
+    console.log('OtdInformAfter handleSave triggered with:', selectedIds);
     if (selectedIds.length === 0) return;
 
     setIsSaving(true);
     try {
-      const { error } = await supabase
-        .from('dispatch_plans')
-        .update({
-          informed_after_dispatch: true,
-          informed_after: new Date().toISOString(),
-          submitted_by: user?.name || user?.full_name || user?.username || 'System'
-        })
-        .in('id', selectedIds);
+      // Group selected items by client for bulk notification
+      const selectedItemsDetails = pendingItems.filter(item => selectedIds.includes(String(item.id)));
+      const groupedByClient = selectedItemsDetails.reduce((acc, item) => {
+        const client = item.customerName;
+        if (!acc[client]) acc[client] = [];
+        acc[client].push(item);
+        return acc;
+      }, {});
 
-      if (error) throw error;
+      const successfulIds = [];
 
-      toast.success('Notifications confirmed successfully!');
+      // 1. Send WhatsApp Notifications First
+      for (const clientName in groupedByClient) {
+        const items = groupedByClient[clientName];
+        try {
+          console.log(`Attempting WhatsApp After for ${clientName}`);
+          await whatsappService.sendBulkDispatchNotification('9691207533', {
+            customerName: clientName,
+            orderNumbers: items.map(i => i.orderNo),
+            productNames: items.map(i => `${i.productName} (${i.dispatchQty})`),
+            dispatchDates: items.map(i => formatDisplayDate(i.dispatchDate))
+          });
+          // Add to successful list
+          items.forEach(it => successfulIds.push(it.id));
+        } catch (wsError) {
+          console.error(`WhatsApp failed for ${clientName}:`, wsError);
+          toast.error(`WhatsApp failed for ${clientName}: ${wsError.message}`, { duration: 5000 });
+        }
+      }
+
+      // 2. Only update database for items where WhatsApp was successful
+      if (successfulIds.length > 0) {
+        const { error: dbError } = await supabase
+          .from('dispatch_plans')
+          .update({
+            informed_after_dispatch: true,
+            informed_after: new Date().toISOString(),
+            submitted_by: user?.name || user?.full_name || user?.username || 'System'
+          })
+          .in('id', successfulIds);
+
+        if (dbError) throw dbError;
+        toast.success(`${successfulIds.length} after-dispatch notifications confirmed.`);
+      } else {
+        toast.error('No notifications were sent. Database not updated.');
+      }
+
       setSelectedRows({});
       fetchData(true);
     } catch (error) {

@@ -24,7 +24,14 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    strictPort: true
+    strictPort: true,
+    proxy: {
+      '/api-meta': {
+        target: 'https://graph.facebook.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api-meta/, ''),
+      },
+    }
   },
   preview: {
     host: '0.0.0.0',
