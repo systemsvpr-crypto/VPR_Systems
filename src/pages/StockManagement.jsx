@@ -479,12 +479,11 @@ const StockManagement = () => {
     }, [filteredEntries, currentPage]);
 
     const availableProducts = useMemo(() => {
-        if (!formData.godown_id) return [];
+        // Return all products not already added to the form
         return products.filter(p => 
-            p.godown_id === formData.godown_id && 
             !formData.productItems.some(item => item.product_id === p.product_id)
         );
-    }, [products, formData.godown_id, formData.productItems]);
+    }, [products, formData.productItems]);
 
     return (
         <div className="flex flex-col gap-4 pb-6">
