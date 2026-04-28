@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
 import { cn } from '@/lib/utils';
 
-const ITEMS_PER_PAGE = 8;
+const PAGE_SIZE = 50;
 
 const LiveStockDashboard = () => {
     const [activeTab, setActiveTab] = useState('master');
@@ -17,52 +17,113 @@ const LiveStockDashboard = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [filterGodown, setFilterGodown] = useState('');
     const [viewMode, setViewMode] = useState('grid');
-    const [currentPage, setCurrentPage] = useState(1);
+    const [page, setPage] = useState(0);
+    const [hasMore, setHasMore] = useState(true);
+    const [totalProducts, setTotalProducts] = useState(0);
+    const [loadingMore, setLoadingMore] = useState(false);
+    
     const [summaryDate, setSummaryDate] = useState(new Date().toISOString().split('T')[0]);
     const [dayTransactions, setDayTransactions] = useState([]);
     const [dailySnapshots, setDailySnapshots] = useState([]);
     const [selectedTransfer, setSelectedTransfer] = useState(null);
 
-    useEffect(() => {
-        fetchData();
-    }, []);
-
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [searchTerm, filterGodown]);
-
-    const fetchData = async () => {
-        setLoading(true);
+    const fetchGodownsAndTransactions = async () => {
         try {
-            const [productsRes, godownsRes, transactionsRes, snapshotsRes] = await Promise.all([
-                supabase.from('products').select('*').eq('is_active', true).order('name', { ascending: true }),
+            const [godownsRes, transactionsRes, snapshotsRes, prodNamesRes] = await Promise.all([
                 supabase.from('godowns').select('*').eq('is_active', true).order('name', { ascending: true }),
                 supabase.from('stock_management').select('*').eq('date', summaryDate),
-                supabase.from('daily_stock_summary').select('*').eq('date', summaryDate)
+                supabase.from('daily_stock_summary').select('*').eq('date', summaryDate),
+                supabase.from('products').select('product_id, name').eq('is_active', true)
             ]);
-            
-            const fetchedProducts = productsRes.data || [];
-            
-            // Flatten the transaction product name using the products list
+
+            const godownsData = godownsRes.data || [];
+            setGodowns(godownsData);
+            setDailySnapshots(snapshotsRes.data || []);
+
+            const lookupProducts = prodNamesRes.data || [];
             const flattenedTransactions = (transactionsRes.data || []).map(t => {
-                const prod = fetchedProducts.find(p => p.product_id === t.product_id);
+                const prod = lookupProducts.find(p => p.product_id === t.product_id);
                 return {
                     ...t,
-                    product_name: prod?.name || 'Unknown Product'
+                    product_name: prod?.name || t.product_name || 'Unknown Product'
                 };
             });
-
-            setProducts(fetchedProducts);
-            setGodowns(godownsRes.data || []);
             setDayTransactions(flattenedTransactions);
-            setDailySnapshots(snapshotsRes.data || []);
         } catch (error) {
-            console.error('Error fetching data:', error);
-            toast.error('Failed to fetch stock data');
-        } finally {
-            setLoading(false);
+            console.error('Error fetching static data:', error);
+            toast.error('Failed to fetch auxiliary data');
         }
     };
+
+    const fetchProducts = async (pageNumber, reset = false) => {
+        if (reset) {
+            setLoading(true);
+        } else {
+            setLoadingMore(true);
+        }
+
+        try {
+            let query = supabase.from('products').select('*', { count: 'exact' }).eq('is_active', true);
+            
+            if (searchTerm) {
+                query = query.or(`name.ilike.%${searchTerm}%,product_id.ilike.%${searchTerm}%`);
+            }
+            if (filterGodown) {
+                query = query.eq('godown_id', filterGodown);
+            }
+
+            const { data, count, error } = await query
+                .order('name', { ascending: true })
+                .range(pageNumber * PAGE_SIZE, (pageNumber + 1) * PAGE_SIZE - 1);
+
+            if (error) throw error;
+
+            if (reset) {
+                setProducts(data || []);
+            } else {
+                setProducts(prev => {
+                    const newItems = data || [];
+                    const existingIds = new Set(prev.map(p => p.product_id));
+                    const uniqueNewItems = newItems.filter(item => !existingIds.has(item.product_id));
+                    return [...prev, ...uniqueNewItems];
+                });
+            }
+            setTotalProducts(count || 0);
+            setHasMore((data || []).length === PAGE_SIZE && (pageNumber + 1) * PAGE_SIZE < count);
+            setPage(pageNumber);
+        } catch (error) {
+            console.error('Error fetching products:', error);
+            toast.error('Failed to fetch products');
+        } finally {
+            setLoading(false);
+            setLoadingMore(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchGodownsAndTransactions();
+    }, [summaryDate]);
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            fetchProducts(0, true);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [searchTerm, filterGodown, summaryDate]);
+
+    // Handle Infinite Scroll
+    useEffect(() => {
+        const handleScroll = () => {
+            if (window.innerHeight + document.documentElement.scrollTop >= document.documentElement.offsetHeight - 100) {
+                if (hasMore && !loadingMore && !loading) {
+                    fetchProducts(page + 1, false);
+                }
+            }
+        };
+
+        window.addEventListener('scroll', handleScroll);
+        return () => window.removeEventListener('scroll', handleScroll);
+    }, [hasMore, loadingMore, loading, page, searchTerm, filterGodown]);
 
     const getGodownDetails = (godownId) => godowns.find(g => g.godown_id === godownId) || {};
 
@@ -82,34 +143,27 @@ const LiveStockDashboard = () => {
         });
     }, [products, godowns]);
 
-    const filteredStock = useMemo(() => {
-        return enrichedStock.filter(s => {
-            const matchesSearch =
-                s.product_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                s.product_id?.toLowerCase().includes(searchTerm.toLowerCase());
-            const matchesGodown = !filterGodown || s.godown_id === filterGodown;
-            return matchesSearch && matchesGodown;
-        });
-    }, [enrichedStock, searchTerm, filterGodown]);
+    // Since filtering is done server-side now, filteredStock is just enrichedStock
+    const filteredStock = enrichedStock;
 
 
     // Dynamic Master Summary Logic
     const dynamicSummary = useMemo(() => {
         return products.map(p => {
             const isToday = summaryDate === new Date().toISOString().split('T')[0];
-            
+
             // 1. Try to find the snapshot for this specific date
             const snapshot = dailySnapshots.find(s => s.product_id === p.product_id && s.godown_id === p.godown_id);
-            
+
             // 2. Real-time calculations for Today (if snapshot isn't available or for live feel)
-            const pTransactions = dayTransactions.filter(t => 
+            const pTransactions = dayTransactions.filter(t =>
                 (t.godown_id === p.godown_id && t.product_id === p.product_id) ||
                 (t.from_location === p.godown_id && t.product_name === p.name)
             ).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
             const in_stock = pTransactions.filter(t => t.godown_id === p.godown_id && t.transaction_type === 'in').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
-            const out_stock = pTransactions.filter(t => t.transaction_type === 'out' && t.godown_id === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0) + 
-                              pTransactions.filter(t => t.from_location === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
+            const out_stock = pTransactions.filter(t => t.transaction_type === 'out' && t.godown_id === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0) +
+                pTransactions.filter(t => t.from_location === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
 
             let opening_stock = snapshot ? snapshot.opening_stock : '-';
             let closing_stock = snapshot ? snapshot.closing_stock : '-';
@@ -138,7 +192,7 @@ const LiveStockDashboard = () => {
                 godown_id: p.godown_id,
                 godown_name: godown.name || p.godown_id,
                 mux: p.mux || '',
-                opening_stock: opening_stock ?? '-', 
+                opening_stock: opening_stock ?? '-',
                 in_stock: display_in,
                 out_stock: display_out,
                 transfers: pTransfers.length > 0
@@ -151,25 +205,10 @@ const LiveStockDashboard = () => {
         });
     }, [products, dayTransactions, summaryDate, godowns, dailySnapshots]);
 
-    const filteredSummary = useMemo(() => {
-        return dynamicSummary.filter(s => {
-            const matchesSearch =
-                s.product_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                s.product_id?.toLowerCase().includes(searchTerm.toLowerCase());
-            const matchesGodown = !filterGodown || s.godown_id === filterGodown;
-            return matchesSearch && matchesGodown;
-        });
-    }, [dynamicSummary, searchTerm, filterGodown]);
+    // Server-side filtering already applies to dynamicSummary base (which depends on products)
+    const filteredSummary = dynamicSummary;
 
-    const totalPages = Math.ceil(filteredStock.length / ITEMS_PER_PAGE);
-    const currentItems = useMemo(() => {
-        const start = (currentPage - 1) * ITEMS_PER_PAGE;
-        return filteredStock.slice(start, start + ITEMS_PER_PAGE);
-    }, [filteredStock, currentPage]);
 
-    useEffect(() => {
-        fetchData();
-    }, [summaryDate]);
 
     // Real-time subscription for relevant tables
     useEffect(() => {
@@ -178,24 +217,24 @@ const LiveStockDashboard = () => {
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'products' },
-                () => fetchData()
+                () => fetchProducts(0, true)
             )
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'godowns' },
-                () => fetchData()
+                () => fetchGodownsAndTransactions()
             )
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'stock_management' },
-                () => fetchData()
+                () => fetchGodownsAndTransactions()
             )
             .subscribe();
 
         return () => {
             supabase.removeChannel(stockChannel);
         };
-    }, [summaryDate]);
+    }, [summaryDate, searchTerm, filterGodown]);
 
     const handleExport = () => {
         const headers = ["Godown", "Product", "MUX", "Opening", "In", "Out", "Closing", "Transfers"];
@@ -213,7 +252,7 @@ const LiveStockDashboard = () => {
         const csvContent = [headers, ...rows]
             .map(row => row.map(cell => `"${(cell ?? '').toString().replace(/"/g, '""')}"`).join(","))
             .join("\n");
-            
+
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
@@ -230,7 +269,7 @@ const LiveStockDashboard = () => {
         <div className="flex flex-col gap-4 pb-6">
             <div>
                 <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Stock Dashboard</h1>
-                <p className="text-slate-500 mt-1 text-sm">Manage and view inventory.</p>
+                <p className="text-slate-500 mt-1 text-sm">Manage and view inventory. (Total: {totalProducts} products)</p>
             </div>
 
 
@@ -255,8 +294,8 @@ const LiveStockDashboard = () => {
                     {/* Date Picker */}
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                            <Button 
-                                onClick={fetchData} 
+                            <Button
+                                onClick={() => { fetchGodownsAndTransactions(); fetchProducts(0, true); }}
                                 className="bg-blue-600 hover:bg-blue-700 text-white gap-2 rounded-xl shadow-sm hover:shadow-md transition-all active:scale-95"
                             >
                                 <RefreshCcw size={16} className={cn(loading && "animate-spin")} />
@@ -268,7 +307,7 @@ const LiveStockDashboard = () => {
                             {summaryDate && summaryDate !== new Date().toISOString().split('T')[0] && (
                                 <Button
                                     variant="ghost"
-                                    onClick={() => { setSummaryDate(new Date().toISOString().split('T')[0]); fetchData(); }}
+                                    onClick={() => { setSummaryDate(new Date().toISOString().split('T')[0]); }}
                                     className="h-10 px-3 text-red-500 hover:text-red-600 hover:bg-red-50 rounded-xl"
                                 >
                                     <X size={16} />
@@ -285,14 +324,14 @@ const LiveStockDashboard = () => {
                                 />
                             </div>
 
-                            <Button 
-                                variant="outline" 
-                                onClick={handleExport} 
+                            <Button
+                                variant="outline"
+                                onClick={handleExport}
                                 disabled={!summaryDate}
                                 className={cn(
                                     "gap-2 transition-all rounded-xl border border-emerald-200",
-                                    summaryDate 
-                                        ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shadow-sm" 
+                                    summaryDate
+                                        ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shadow-sm"
                                         : "opacity-50 cursor-not-allowed bg-slate-50 text-slate-400 border-slate-200"
                                 )}
                             >
@@ -320,11 +359,11 @@ const LiveStockDashboard = () => {
                                     {godowns.map(godown => {
                                         // Total IN = Direct In + Incoming Transfers
                                         const directIn = dayTransactions.filter(t => t.godown_id === godown.godown_id && t.transaction_type === 'in').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
-                                        
+
                                         // Total OUT = Direct Out + Outgoing Transfers
                                         const directOut = dayTransactions.filter(t => t.godown_id === godown.godown_id && t.transaction_type === 'out').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
                                         const outgoingTransfers = dayTransactions.filter(t => t.from_location === godown.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
-                                        
+
                                         const totalIn = directIn; // Direct In already includes transfers (since they are 'in' at godown_id)
                                         const totalOut = directOut + outgoingTransfers;
 
@@ -349,18 +388,18 @@ const LiveStockDashboard = () => {
                                                 <td className="px-4 py-3 text-sm font-medium text-red-600">-{totalOut.toLocaleString()}</td>
                                                 <td className="px-4 py-3 text-sm font-bold">{isToday ? totalClosing.toLocaleString() : '-'}</td>
                                                 <td className="px-4 py-3">
-                                                    <button 
+                                                    <button
                                                         onClick={() => setSelectedTransfer({ type: 'godown', id: godown.godown_id, name: godown.name })}
                                                         className={cn(
                                                             "text-sm font-medium px-2 py-1 rounded-md transition-colors",
-                                                            (dayTransactions.filter(t => t.godown_id === godown.godown_id && t.from_location).length > 0 || 
-                                                             dayTransactions.filter(t => t.from_location === godown.godown_id).length > 0)
-                                                            ? "bg-blue-50 text-blue-600 hover:bg-blue-100"
-                                                            : "text-slate-400 cursor-default"
+                                                            (dayTransactions.filter(t => t.godown_id === godown.godown_id && t.from_location).length > 0 ||
+                                                                dayTransactions.filter(t => t.from_location === godown.godown_id).length > 0)
+                                                                ? "bg-blue-50 text-blue-600 hover:bg-blue-100"
+                                                                : "text-slate-400 cursor-default"
                                                         )}
                                                     >
                                                         {(dayTransactions.filter(t => t.godown_id === godown.godown_id && t.from_location).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0) +
-                                                         dayTransactions.filter(t => t.from_location === godown.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0)).toLocaleString()}
+                                                            dayTransactions.filter(t => t.from_location === godown.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0)).toLocaleString()}
                                                     </button>
                                                 </td>
                                             </tr>
@@ -407,12 +446,12 @@ const LiveStockDashboard = () => {
                                                 <td className="px-4 py-3 text-sm font-medium text-red-600">-{s.out_stock}</td>
                                                 <td className="px-4 py-3 text-sm font-bold">{s.closing_stock}</td>
                                                 <td className="px-4 py-3">
-                                                    <button 
-                                                       onClick={() => setSelectedTransfer({ type: 'product', id: s.product_id, godown_id: s.godown_id, name: s.product_name })}
-                                                       className={cn(
-                                                           "text-sm font-medium px-2 py-1 rounded-md transition-colors",
-                                                           s.transfers > 0 ? "bg-blue-50 text-blue-600 hover:bg-blue-100" : "text-slate-400 cursor-default"
-                                                       )}
+                                                    <button
+                                                        onClick={() => setSelectedTransfer({ type: 'product', id: s.product_id, godown_id: s.godown_id, name: s.product_name })}
+                                                        className={cn(
+                                                            "text-sm font-medium px-2 py-1 rounded-md transition-colors",
+                                                            s.transfers > 0 ? "bg-blue-50 text-blue-600 hover:bg-blue-100" : "text-slate-400 cursor-default"
+                                                        )}
                                                     >
                                                         {s.transfers}
                                                     </button>
@@ -488,13 +527,20 @@ const LiveStockDashboard = () => {
                     ) : filteredStock.length === 0 ? (
                         <div className="text-center py-20 text-slate-500">No stock data found.</div>
                     ) : viewMode === 'grid' ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                            {currentItems.map((stock) => (
-                                <StockCard
-                                    key={`${stock.product_id}-${stock.godown_id}`}
-                                    stock={stock}
-                                />
-                            ))}
+                        <div className="flex flex-col gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                                {filteredStock.map((stock) => (
+                                    <StockCard
+                                        key={`${stock.product_id}-${stock.godown_id}`}
+                                        stock={stock}
+                                    />
+                                ))}
+                            </div>
+                            {loadingMore && (
+                                <div className="text-center py-4 text-slate-500">
+                                    Loading more products...
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -512,7 +558,7 @@ const LiveStockDashboard = () => {
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
-                                        {currentItems.map((stock) => (
+                                        {filteredStock.map((stock) => (
                                             <tr key={`${stock.product_id}-${stock.godown_id}`} className="hover:bg-slate-50/80">
                                                 <td className="px-4 py-3">
                                                     <div className="flex items-center gap-3">
@@ -536,6 +582,11 @@ const LiveStockDashboard = () => {
                                         ))}
                                     </tbody>
                                 </table>
+                                {loadingMore && (
+                                    <div className="text-center py-4 text-slate-500">
+                                        Loading more products...
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}
@@ -562,15 +613,15 @@ export default LiveStockDashboard;
 const StockCard = ({ stock }) => {
     const stockLevel = stock.current_stock > 100 ? 'high' : stock.current_stock > 10 ? 'medium' : 'low';
 
-    const levelColors = { 
-        high: 'bg-emerald-500', 
-        medium: 'bg-amber-500', 
-        low: 'bg-rose-500' 
+    const levelColors = {
+        high: 'bg-emerald-500',
+        medium: 'bg-amber-500',
+        low: 'bg-rose-500'
     };
-    const levelBg = { 
-        high: 'bg-emerald-50 text-emerald-700 border-emerald-100', 
-        medium: 'bg-amber-50 text-amber-700 border-amber-100', 
-        low: 'bg-rose-50 text-rose-700 border-rose-100' 
+    const levelBg = {
+        high: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+        medium: 'bg-amber-50 text-amber-700 border-amber-100',
+        low: 'bg-rose-50 text-rose-700 border-rose-100'
     };
 
     return (
@@ -610,18 +661,18 @@ const StockCard = ({ stock }) => {
                         </div>
                     )}
                 </div>
-                
+
                 {/* Progress Bar Side */}
                 <div className="flex flex-col items-center gap-2">
                     <div className="h-24 w-2 bg-slate-50 rounded-full overflow-hidden flex flex-col justify-end">
-                        <div 
-                            className={cn("w-full transition-all duration-700", levelColors[stockLevel])} 
+                        <div
+                            className={cn("w-full transition-all duration-700", levelColors[stockLevel])}
                             style={{ height: `${Math.min(100, (stock.current_stock / 200) * 100)}%` }}
                         ></div>
                     </div>
                 </div>
             </div>
-            
+
             <div className="mt-4 pt-4 border-t border-slate-50 grid grid-cols-2 gap-2">
                 <div className="text-center py-1 bg-slate-50 rounded-xl">
                     <p className="text-[9px] font-black text-slate-400 uppercase mb-0.5">Opening</p>

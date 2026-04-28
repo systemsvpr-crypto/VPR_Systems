@@ -49,25 +49,63 @@ const Products = ({ isTab = false }) => {
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [itemToDelete, setItemToDelete] = useState(null);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [stats, setStats] = useState({ total: 0, active: 0 });
+    const [totalFiltered, setTotalFiltered] = useState(0);
 
     useEffect(() => {
-        fetchData();
+        fetchStats();
+        const fetchGodowns = async () => {
+            const { data } = await supabase.from('godowns').select('*').eq('is_active', true).order('name', { ascending: true });
+            setGodowns(data || []);
+        };
+        fetchGodowns();
     }, []);
 
     useEffect(() => {
         setCurrentPage(1);
     }, [searchTerm, filterStatus]);
 
-    const fetchData = async () => {
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            fetchProducts();
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [currentPage, searchTerm, filterStatus]);
+
+    const fetchStats = async () => {
+        try {
+            const [totalRes, activeRes] = await Promise.all([
+                supabase.from('products').select('product_id', { count: 'exact', head: true }),
+                supabase.from('products').select('product_id', { count: 'exact', head: true }).eq('is_active', true)
+            ]);
+            setStats({ total: totalRes.count || 0, active: activeRes.count || 0 });
+        } catch (error) {
+            console.error('Error fetching stats:', error);
+        }
+    };
+
+    const fetchProducts = async () => {
         setLoading(true);
         try {
-            const [productsRes, godownsRes] = await Promise.all([
-                supabase.from('products').select('*').order('created_at', { ascending: false }),
-                supabase.from('godowns').select('*').eq('is_active', true).order('name', { ascending: true })
-            ]);
-            if (productsRes.error) throw productsRes.error;
-            setProducts(productsRes.data || []);
-            setGodowns(godownsRes.data || []);
+            let query = supabase.from('products').select('*', { count: 'exact' });
+            
+            if (searchTerm) {
+                query = query.or(`name.ilike.%${searchTerm}%,product_id.ilike.%${searchTerm}%`);
+            }
+            if (filterStatus === 'active') {
+                query = query.eq('is_active', true);
+            } else if (filterStatus === 'inactive') {
+                query = query.eq('is_active', false);
+            }
+
+            const from = (currentPage - 1) * ITEMS_PER_PAGE;
+            const to = from + ITEMS_PER_PAGE - 1;
+
+            const { data, count, error } = await query.order('created_at', { ascending: false }).range(from, to);
+            if (error) throw error;
+
+            setProducts(data || []);
+            setTotalFiltered(count || 0);
         } catch (error) {
             console.error('Error fetching data:', error);
             toast.error('Failed to fetch products');
@@ -101,11 +139,32 @@ const Products = ({ isTab = false }) => {
 
     const generateProductId = async () => {
         try {
-            const { data, error } = await supabase.rpc('generate_product_id');
+            // Get the most recent product ID from the database
+            const { data, error } = await supabase
+                .from('products')
+                .select('product_id')
+                .order('product_id', { ascending: false })
+                .limit(1);
+
             if (error) throw error;
-            setFormData(prev => ({ ...prev, product_id: data }));
+
+            let nextCount = 1;
+            if (data && data.length > 0 && data[0].product_id) {
+                const lastId = data[0].product_id;
+                // Extract the numeric part at the end (e.g. from PROD-0001)
+                const match = lastId.match(/\d+$/);
+                if (match) {
+                    nextCount = parseInt(match[0], 10) + 1;
+                } else {
+                    nextCount = stats.total + 1;
+                }
+            }
+            
+            setFormData(prev => ({ ...prev, product_id: `PROD-${nextCount.toString().padStart(4, '0')}` }));
         } catch (error) {
-            const count = products.length + 1;
+            console.error('Error generating product ID:', error);
+            // Fallback to absolute total + 1 if query fails
+            const count = stats.total + 1;
             setFormData(prev => ({ ...prev, product_id: `PROD-${count.toString().padStart(4, '0')}` }));
         }
     };
@@ -172,7 +231,8 @@ const Products = ({ isTab = false }) => {
                 toast.success('Product created successfully');
             }
             handleCloseModal();
-            fetchData();
+            fetchProducts();
+            fetchStats();
         } catch (error) {
             console.error('Error saving product:', error);
             toast.error(`Error: ${error.message}`);
@@ -194,7 +254,8 @@ const Products = ({ isTab = false }) => {
                 .eq('product_id', itemToDelete.product_id);
             if (error) throw error;
             toast.success('Product deleted successfully');
-            fetchData();
+            fetchProducts();
+            fetchStats();
             setIsDeleteModalOpen(false);
             setItemToDelete(null);
         } catch (error) {
@@ -215,7 +276,8 @@ const Products = ({ isTab = false }) => {
                 .eq('product_id', product.product_id);
             if (error) throw error;
             toast.success(`Product ${!product.is_active ? 'enabled' : 'disabled'} successfully`);
-            fetchData();
+            fetchProducts();
+            fetchStats();
             setConfirmDisable(null);
         } catch (error) {
             console.error('Error toggling product:', error);
@@ -223,24 +285,7 @@ const Products = ({ isTab = false }) => {
         }
     };
 
-    const filteredProducts = useMemo(() => {
-        return products.filter(product => {
-            const matchesSearch = (
-                product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                product.product_id?.toLowerCase().includes(searchTerm.toLowerCase())
-            );
-            const matchesStatus = filterStatus === 'all' || 
-                (filterStatus === 'active' && product.is_active) ||
-                (filterStatus === 'inactive' && !product.is_active);
-            return matchesSearch && matchesStatus;
-        });
-    }, [products, searchTerm, filterStatus]);
-
-    const totalPages = Math.ceil(filteredProducts.length / ITEMS_PER_PAGE);
-    const currentItems = useMemo(() => {
-        const start = (currentPage - 1) * ITEMS_PER_PAGE;
-        return filteredProducts.slice(start, start + ITEMS_PER_PAGE);
-    }, [filteredProducts, currentPage]);
+    const totalPages = Math.ceil(totalFiltered / ITEMS_PER_PAGE);
 
     return (
         <div className="flex flex-col gap-4 pb-6">
@@ -254,11 +299,11 @@ const Products = ({ isTab = false }) => {
             <div className="flex flex-col gap-4">
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 shrink-0">
                     <div className="hidden xl:flex items-center gap-6">
-                        <StatItem label="Total Products" value={products.length} />
+                        <StatItem label="Total Products" value={stats.total} />
                         <div className="w-px h-8 bg-slate-200"></div>
                         <StatItem
                             label="Active"
-                            value={products.filter(p => p.is_active).length}
+                            value={stats.active}
                         />
                     </div>
 
@@ -302,10 +347,10 @@ const Products = ({ isTab = false }) => {
                 <div className="md:hidden space-y-3">
                     {loading ? (
                         <div className="text-center py-10 text-slate-500">Loading...</div>
-                    ) : currentItems.length === 0 ? (
+                    ) : products.length === 0 ? (
                         <div className="text-center py-10 text-slate-500">No products found.</div>
                     ) : (
-                        currentItems.map((product) => (
+                        products.map((product) => (
                             <MobileProductCard
                                 key={product.product_id}
                                 product={product}
@@ -339,10 +384,10 @@ const Products = ({ isTab = false }) => {
                             <tbody className="divide-y divide-slate-100">
                                 {loading ? (
                                     <EmptyRow message="Loading..." />
-                                ) : currentItems.length === 0 ? (
+                                ) : products.length === 0 ? (
                                     <EmptyRow message="No products found." />
                                 ) : (
-                                    currentItems.map((product) => (
+                                    products.map((product) => (
                                         <ProductRow
                                             key={product.product_id}
                                             product={product}
@@ -354,20 +399,20 @@ const Products = ({ isTab = false }) => {
                                         />
                                     ))
                                 )}
-                                {Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
+                                {Array.from({ length: Math.max(0, ITEMS_PER_PAGE - products.length) }).map((_, i) => (
                                     <tr key={`empty-${i}`}><td colSpan="9" className="h-16"></td></tr>
                                 ))}
                             </tbody>
                         </table>
                     </div>
 
-                    {!loading && filteredProducts.length > 0 && (
+                    {!loading && totalFiltered > 0 && (
                         <Pagination
                             currentPage={currentPage}
                             totalPages={totalPages}
-                            totalItems={filteredProducts.length}
+                            totalItems={totalFiltered}
                             startIndex={(currentPage - 1) * ITEMS_PER_PAGE + 1}
-                            endIndex={Math.min(currentPage * ITEMS_PER_PAGE, filteredProducts.length)}
+                            endIndex={Math.min(currentPage * ITEMS_PER_PAGE, totalFiltered)}
                             onPageChange={setCurrentPage}
                             className="border-t border-slate-100"
                         />
@@ -375,14 +420,14 @@ const Products = ({ isTab = false }) => {
                 </div>
 
                 {/* Mobile Pagination */}
-                {!loading && filteredProducts.length > 0 && (
+                {!loading && totalFiltered > 0 && (
                     <div className="md:hidden shrink-0 mt-auto">
                         <Pagination
                             currentPage={currentPage}
                             totalPages={totalPages}
-                            totalItems={filteredProducts.length}
+                            totalItems={totalFiltered}
                             startIndex={(currentPage - 1) * ITEMS_PER_PAGE + 1}
-                            endIndex={Math.min(currentPage * ITEMS_PER_PAGE, filteredProducts.length)}
+                            endIndex={Math.min(currentPage * ITEMS_PER_PAGE, totalFiltered)}
                             onPageChange={setCurrentPage}
                             className="bg-white border-t border-slate-200 rounded-t-xl shadow-sm"
                         />
