@@ -106,19 +106,19 @@ const Sidebar = ({ onClose }) => {
   ];
 
   // Helper: Check if user has access to a specific page ID
-  const isAdmin = user?.role?.toUpperCase() === 'ADMIN' || user?.role?.toUpperCase() === 'SUPER ADMIN' || user?.Admin === 'Yes';
+  const roleUpper = (user?.role || '').toUpperCase();
+  const isSuperAdmin = roleUpper === 'SUPER ADMIN' || roleUpper === 'SUPER_ADMIN';
 
   const hasAccess = (pageId) => {
-    // Admins always have access to everything
-    if (isAdmin) return true;
+    // SUPER ADMIN always has access
+    if (isSuperAdmin) return true;
 
-    // If no page_access defined (legacy users), fallback to basic employee pages
-    if (!user?.page_access || !Array.isArray(user?.page_access)) {
-      const DEFAULT_ACCESS = ['my-profile'];
-      return DEFAULT_ACCESS.includes(pageId);
-    }
+    // Core pages accessible to everyone logged in
+    if (pageId === 'my-profile') return true;
 
-    return user.page_access.includes(pageId);
+    // For everything else, check explicit permission
+    const allowedPages = Array.isArray(user?.page_access) ? user.page_access : [];
+    return allowedPages.includes(pageId);
   };
 
   // Filter the menu items
@@ -148,19 +148,28 @@ const Sidebar = ({ onClose }) => {
       }
     } else if (item.id === 'master') {
       // Show Master Config if user has access to any master tabs
-      const MASTER_TABS = ['products', 'godowns', 'transporters'];
+      const MASTER_TABS = ['products', 'godowns', 'transporters', 'customers', 'vendors'];
       if (MASTER_TABS.some(tabId => hasAccess(tabId))) {
         acc.push(item);
       }
     } else if (item.id === 'sell') {
-      // Show Sell if user has 'sell' in page_access OR is admin OR has any OTD page
+      // Show Sell if user has any related page access
       const SELL_TABS = ['Dashboard', 'Order', 'Dispatch Planning', 'Inform to Party Before Dispatch', 'Dispatch Completed', 'Inform to Party After Dispatch', 'Godown', 'PC Report', 'Skip Delivered', 'sell'];
-      if (user?.page_access?.some(p => SELL_TABS.includes(p)) || isAdmin) {
+      if (user?.page_access?.some(p => SELL_TABS.includes(p))) {
         acc.push(item);
       }
     } else if (item.id === 'purchase-dashboard') {
-      const PURCHASE_TABS = ['purchase-dashboard', 'purchase-orders'];
-      if (user?.page_access?.some(p => PURCHASE_TABS.includes(p)) || isAdmin) {
+      const PURCHASE_TABS = [
+        'purchase-dashboard',
+        'purchase-indent',
+        'purchase-vendor-selection',
+        'purchase-vendor-approve',
+        'purchase-delivery',
+        'purchase-arrival',
+        'purchase-cancelled',
+        'purchase-pc-report'
+      ];
+      if (user?.page_access?.some(p => PURCHASE_TABS.includes(p))) {
         acc.push(item);
       }
     }

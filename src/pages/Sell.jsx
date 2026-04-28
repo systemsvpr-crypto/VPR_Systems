@@ -51,9 +51,9 @@ import useAuthStore from '../store/authStore';
 
 const Sell = () => {
   const { user } = useAuthStore();
-  const isAdmin = user?.role?.toUpperCase() === 'ADMIN' || user?.role?.toUpperCase() === 'SUPER ADMIN' || user?.Admin === 'Yes';
-  
-  const allowedTabs = TABS.filter(t => isAdmin || (user?.page_access || []).includes(t.accessKey) || (user?.page_access || []).includes('sell'));
+  const roleUpper = user?.role?.toUpperCase() || '';
+  const isSuperAdmin = roleUpper === 'SUPER ADMIN' || roleUpper === 'SUPER_ADMIN';
+  const allowedTabs = TABS.filter(t => isSuperAdmin || (user?.page_access || []).includes(t.accessKey) || (user?.page_access || []).includes('sell'));
   
   const [activeTab, setActiveTab] = useState(allowedTabs[0]?.id || 'dashboard');
   const ActiveComponent = allowedTabs.find(t => t.id === activeTab)?.component ?? (allowedTabs[0]?.component || OtdDashboard);

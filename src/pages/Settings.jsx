@@ -170,9 +170,12 @@ const Settings = () => {
             const newState = { ...prev, [name]: newValue };
 
             // Auto-set admin pages
-            if (name === 'role' && (newValue === 'admin' || newValue === 'Admin')) {
-                const allPageIds = PAGES.flatMap(cat => cat.items.map(p => p.id));
-                newState.page_access = allPageIds;
+            if (name === 'role') {
+                const roleUpper = newValue?.toUpperCase();
+                if (roleUpper === 'ADMIN' || roleUpper === 'SUPER ADMIN') {
+                    const allPageIds = PAGES.flatMap(cat => cat.items.map(p => p.id));
+                    newState.page_access = allPageIds;
+                }
             }
             return newState;
         });

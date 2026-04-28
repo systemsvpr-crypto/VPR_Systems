@@ -172,15 +172,13 @@ const LiveStockDashboard = () => {
 
             // Priority logic for Today
             if (isToday) {
-                if (pTransactions.length > 0) {
-                    opening_stock = pTransactions[0].opening_stock;
-                    closing_stock = pTransactions[pTransactions.length - 1].closing_stock;
-                } else {
-                    opening_stock = p.closing_quantity;
-                    closing_stock = p.closing_quantity;
-                }
                 display_in = in_stock;
                 display_out = out_stock;
+                
+                // Dynamically calculate opening and closing stock for today 
+                // to perfectly reflect any edits made to the master product opening quantity
+                closing_stock = p.closing_quantity;
+                opening_stock = p.closing_quantity - in_stock + out_stock;
             }
 
             const godown = getGodownDetails(p.godown_id);
@@ -424,8 +422,8 @@ const LiveStockDashboard = () => {
                                             <HeaderCell>Godown</HeaderCell>
                                             <HeaderCell>Product</HeaderCell>
                                             <HeaderCell>MUX</HeaderCell>
-                                            <HeaderCell>Opening Quantity</HeaderCell>
-                                            <HeaderCell>Closing Quantity</HeaderCell>
+                                            <HeaderCell>Opening Quantity (KG)</HeaderCell>
+                                            <HeaderCell>Closing Quantity (KG)</HeaderCell>
                                             <HeaderCell>Opening Stock</HeaderCell>
                                             <HeaderCell>In Stock</HeaderCell>
                                             <HeaderCell>Out Stock</HeaderCell>
@@ -553,8 +551,8 @@ const LiveStockDashboard = () => {
                                             <HeaderCell>MUX</HeaderCell>
                                             <HeaderCell>Units</HeaderCell>
                                             <HeaderCell>Weight (KG)</HeaderCell>
-                                            <HeaderCell>Opening Quantity</HeaderCell>
-                                            <HeaderCell>Closing Quantity</HeaderCell>
+                                            <HeaderCell>Opening Quantity (KG)</HeaderCell>
+                                            <HeaderCell>Closing Quantity (KG)</HeaderCell>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">

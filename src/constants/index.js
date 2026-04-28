@@ -18,14 +18,16 @@ export const PAGES = [
             { id: 'products', label: 'Products' },
             { id: 'godowns', label: 'Godowns' },
             { id: 'transporters', label: 'Transporters' },
+            { id: 'customers', label: 'Customers' },
+            { id: 'vendors', label: 'Vendors' },
             { id: 'stock-notifications', label: 'Notifications' },
         ]
     },
     {
-        category: 'Sell / Dispatch',
+        category: 'Sales',
         items: [
-            { id: 'Dashboard', label: 'Sell Dashboard' },
-            { id: 'Order', label: 'Orders' },
+            { id: 'Dashboard', label: 'Sales Dashboard' },
+            { id: 'Order', label: 'Sales Orders' },
             { id: 'Dispatch Planning', label: 'Dispatch Planning' },
             { id: 'Inform to Party Before Dispatch', label: 'Inform Before Dispatch' },
             { id: 'Dispatch Completed', label: 'Dispatch Completed' },
@@ -33,14 +35,20 @@ export const PAGES = [
             { id: 'Skip Delivered', label: 'Skip Delivered' },
             { id: 'Godown', label: 'Godown' },
             { id: 'PC Report', label: 'PC Report' },
-            { id: 'sell', label: 'Main Sell Page' },
+            { id: 'sell', label: 'Main Sales Module' },
         ]
     },
     {
         category: 'Purchase',
         items: [
             { id: 'purchase-dashboard', label: 'Purchase Dashboard' },
-            { id: 'purchase-orders', label: 'Purchase Orders' },
+            { id: 'purchase-indent', label: 'Purchase Indent' },
+            { id: 'purchase-vendor-selection', label: 'Vendor Selection' },
+            { id: 'purchase-vendor-approve', label: 'Vendor Approval' },
+            { id: 'purchase-delivery', label: 'Purchase Delivery' },
+            { id: 'purchase-arrival', label: 'Aawak / Arrival' },
+            { id: 'purchase-cancelled', label: 'Cancelled Orders' },
+            { id: 'purchase-pc-report', label: 'PC Report' },
         ]
     }
 ];

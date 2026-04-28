@@ -33,10 +33,15 @@ const ProtectedRoute = ({ children }) => {
     roleUpper === 'SUPER_ADMIN' ||
     user.Admin === 'Yes';
 
-  // Admins bypass ALL permission checks — full access to everything
-  if (isAdmin) {
+  const isSuperAdmin = roleUpper === 'SUPER ADMIN' || roleUpper === 'SUPER_ADMIN';
+
+  // SUPER ADMIN bypasses ALL permission checks — full access to everything
+  if (isSuperAdmin) {
     return <>{children}</>;
   }
+
+  // Admins NO LONGER bypass permission checks — they must have specific page_access
+  // unless it's a core page like profile or the home root.
 
   // Non-admins: check page_access array
   const allowedPages = Array.isArray(user.page_access) ? user.page_access : [];
@@ -50,6 +55,12 @@ const ProtectedRoute = ({ children }) => {
     // stock-management visible if user has any sub-tab access
     (currentPath === 'stock-management' &&
       ['products', 'godowns', 'transporters'].some(p => allowedPages.includes(p))) ||
+    // master visible if user has any sub-tab access
+    (currentPath === 'master' &&
+      ['products', 'godowns', 'transporters', 'customers', 'vendors'].some(p => allowedPages.includes(p))) ||
+    // purchase visible if any purchase sub-tab access
+    (currentPath === 'purchase' &&
+      ['purchase-dashboard', 'purchase-indent', 'purchase-vendor-selection', 'purchase-vendor-approve', 'purchase-delivery', 'purchase-arrival', 'purchase-cancelled', 'purchase-pc-report'].some(p => allowedPages.includes(p))) ||
     // sell visible if explicitly granted OR if they have any of the OTD pages
     (currentPath === 'sell' && (
       allowedPages.includes('sell') || 

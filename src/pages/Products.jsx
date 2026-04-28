@@ -209,10 +209,45 @@ const Products = ({ isTab = false }) => {
 
         try {
             if (editingProduct) {
+                // Fetch all transactions for this product to correctly compute the new closing_quantity
+                const { data: txns, error: txnError } = await supabase
+                    .from('stock_management')
+                    .select('transaction_type, quantity, godown_id, from_location')
+                    .eq('product_id', editingProduct.product_id);
+
+                if (txnError) throw txnError;
+
+                let in_stock = 0;
+                let out_stock = 0;
+                const targetGodown = formData.godown_id;
+
+                txns.forEach(t => {
+                    if (t.godown_id === targetGodown && t.transaction_type === 'in') {
+                        in_stock += parseFloat(t.quantity) || 0;
+                    }
+                    if (t.godown_id === targetGodown && t.transaction_type === 'out') {
+                        out_stock += parseFloat(t.quantity) || 0;
+                    }
+                    if (t.from_location === targetGodown) {
+                        out_stock += parseFloat(t.quantity) || 0;
+                    }
+                });
+
+                const opening = parseFloat(formData.opening_quantity) || 0;
+                const mux = parseFloat(formData.mux) || 0;
+                const newClosing = opening + in_stock - out_stock;
+                const newQuantity = (newClosing * mux).toFixed(3);
+
                 const { error } = await supabase
                     .from('products')
-                    .update({ ...formData, updated_at: new Date().toISOString() })
+                    .update({ 
+                        ...formData, 
+                        closing_quantity: newClosing,
+                        quantity: newQuantity,
+                        updated_at: new Date().toISOString() 
+                    })
                     .eq('product_id', editingProduct.product_id);
+                    
                 if (error) throw error;
                 toast.success('Product updated successfully');
             } else {

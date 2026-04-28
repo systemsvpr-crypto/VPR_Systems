@@ -46,10 +46,11 @@ const TabSkeleton = () => (
 
 const Purchase = () => {
   const { user } = useAuthStore();
-  const isAdmin = user?.role?.toUpperCase() === 'ADMIN' || user?.role?.toUpperCase() === 'SUPER ADMIN' || user?.Admin === 'Yes';
+  const roleUpper = user?.role?.toUpperCase() || '';
+  const isSuperAdmin = roleUpper === 'SUPER ADMIN' || roleUpper === 'SUPER_ADMIN';
 
   const allowedTabs = TABS.filter(t =>
-    isAdmin ||
+    isSuperAdmin ||
     (user?.page_access || []).includes(t.accessKey) ||
     (user?.page_access || []).includes('purchase-dashboard')
   );
