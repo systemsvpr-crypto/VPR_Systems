@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import useAuthStore from '../store/authStore';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase';
+import logo from '../assets/logo1.png';
 import {
   LogOut as LogOutIcon,
   X,
@@ -26,6 +27,7 @@ import {
   ShoppingBag,
   HardHat,
   BadgeDollarSign,
+  Mail,
 } from 'lucide-react';
 
 const Sidebar = ({ onClose }) => {
@@ -102,6 +104,7 @@ const Sidebar = ({ onClose }) => {
     { type: 'separator', label: 'SETTINGS' },
     { path: '/master', icon: LayoutDashboard, label: 'Master Config', id: 'master' },
     { path: '/settings', icon: Settings, label: 'Settings', id: 'settings' },
+    { path: '/whatsapp-history', icon: Mail, label: 'WhatsApp Logs', id: 'whatsapp-history' },
     { path: '/my-profile', icon: User, label: 'My Profile', id: 'my-profile' },
   ];
 
@@ -250,12 +253,15 @@ const SidebarContent = ({ menuItems, onClose, isCollapsed = false, user, handleL
     {/* Header */}
     <div className={`flex items-center justify-between px-6 py-8 ${isCollapsed ? 'justify-center' : ''}`}>
       {!isCollapsed && (
-        <div className="flex items-center gap-3 w-full">
+        <div className="flex items-center gap-3 w-full group cursor-pointer" onClick={() => navigate('/live-stock-dashboard')}>
+          <div className="p-1 transition-all duration-300">
+            <img src={logo} alt="VPR" className="w-12 h-12 object-contain" />
+          </div>
           <div className="flex flex-col">
-            <h1 className="text-2xl font-extrabold tracking-tighter cursor-default">
-              <span className="text-blue-600">VPR</span>
-              <span className="text-slate-800 ml-1.5 uppercase">Systems</span>
+            <h1 className="text-xl font-black tracking-tighter text-slate-900 leading-tight">
+              VPR <span className="text-primary">SYSTEMS</span>
             </h1>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.2em] -mt-0.5">Enterprise Suite</p>
           </div>
         </div>
       )}
@@ -274,11 +280,10 @@ const SidebarContent = ({ menuItems, onClose, isCollapsed = false, user, handleL
       {menuItems.map((item) => {
         if (item.type === 'separator') {
           return (
-            <div key={item.label} className="pt-4 pb-2">
+            <div key={item.label} className="pt-6 pb-2">
               <div className="flex items-center gap-2 px-3">
-                <div className="h-px flex-1 bg-slate-200"></div>
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{item.label}</span>
-                <div className="h-px flex-1 bg-slate-200"></div>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{item.label}</span>
+                <div className="h-px flex-1 bg-slate-100"></div>
               </div>
             </div>
           );
@@ -289,16 +294,16 @@ const SidebarContent = ({ menuItems, onClose, isCollapsed = false, user, handleL
             <div key={item.label} className="mb-1">
               <button
                 onClick={item.toggle}
-                className={`flex items-center justify-between w-full py-3 px-3 rounded-xl transition-all duration-200 group ${item.isOpen
-                  ? 'bg-primary/10 text-primary font-semibold'
-                  : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+                className={`flex items-center justify-between w-full py-2.5 px-3 rounded-md transition-all duration-200 group ${item.isOpen
+                  ? 'bg-slate-50 text-primary font-bold'
+                  : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                   }`}
               >
                 <div className="flex items-center gap-3">
-                  <item.icon className={`transition-colors ${item.isOpen ? 'text-primary' : 'text-sidebar-foreground/60 group-hover:text-sidebar-foreground'}`} size={20} />
-                  {!isCollapsed && <span className="font-medium text-sm">{item.label}</span>}
+                  <item.icon className={`transition-colors ${item.isOpen ? 'text-primary' : 'text-slate-400 group-hover:text-slate-600'}`} size={18} />
+                  {!isCollapsed && <span className="font-semibold text-sm">{item.label}</span>}
                 </div>
-                {!isCollapsed && (item.isOpen ? <ChevronUp size={14} className="text-primary" /> : <ChevronDown size={14} className="text-sidebar-foreground/40 group-hover:text-sidebar-foreground" />)}
+                {!isCollapsed && (item.isOpen ? <ChevronUp size={14} className="text-primary" /> : <ChevronDown size={14} className="text-slate-400 group-hover:text-slate-600" />)}
               </button>
 
               {
@@ -309,16 +314,16 @@ const SidebarContent = ({ menuItems, onClose, isCollapsed = false, user, handleL
                         key={subItem.path}
                         to={subItem.path}
                         className={({ isActive }) =>
-                          `flex items-center py-2.5 px-3 rounded-lg transition-all duration-200 text-sm ${isActive
-                            ? 'text-primary font-semibold bg-primary/10'
-                            : 'text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/50'
+                          `flex items-center py-2 px-3 rounded-md transition-all duration-200 text-sm ${isActive
+                            ? 'text-primary font-bold bg-white shadow-sm border border-slate-100'
+                            : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
                           }`
                         }
                         onClick={() => {
                           onClose?.();
                         }}
                       >
-                        <span className="font-medium">{subItem.label}</span>
+                        <span className="font-semibold">{subItem.label}</span>
                       </NavLink>
                     ))}
                   </div>
@@ -333,9 +338,9 @@ const SidebarContent = ({ menuItems, onClose, isCollapsed = false, user, handleL
             key={item.path}
             to={item.path}
             className={({ isActive }) =>
-              `flex items-center py-3 px-3 rounded-xl transition-all duration-200 mb-1 group ${isActive
-                ? 'bg-primary/10 text-primary font-semibold shadow-sm shadow-primary/10'
-                : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+              `flex items-center py-2.5 px-3 rounded-md transition-all duration-200 mb-1 group ${isActive
+                ? 'bg-primary text-white font-bold shadow-md shadow-primary/20'
+                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
               }`
             }
             onClick={() => {
@@ -344,8 +349,8 @@ const SidebarContent = ({ menuItems, onClose, isCollapsed = false, user, handleL
           >
             {({ isActive }) => (
               <>
-                <item.icon className={`transition-colors ${isCollapsed ? 'mx-auto' : 'mr-3'} ${isActive ? 'text-primary' : 'text-sidebar-foreground/60 group-hover:text-sidebar-foreground'}`} size={20} />
-                {!isCollapsed && <span className="font-medium text-sm">{item.label}</span>}
+                <item.icon className={`transition-colors ${isCollapsed ? 'mx-auto' : 'mr-3'} ${isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-600'}`} size={18} />
+                {!isCollapsed && <span className="font-semibold text-sm">{item.label}</span>}
               </>
             )}
           </NavLink>

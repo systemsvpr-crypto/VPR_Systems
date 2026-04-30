@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
 import SearchableDropdown from '../../components/SearchableDropdown';
 import { supabase } from '../../supabase';
+import { whatsappService } from '../../services/whatsappService';
 import { cn } from '../../lib/utils';
 
 const OtdOrder = () => {
@@ -38,7 +39,6 @@ const OtdOrder = () => {
   const [clientFilter, setClientFilter] = useState('');
   const [godownFilter, setGodownFilter] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
   const [initialLoading, setInitialLoading] = useState(true);
 
@@ -266,7 +266,7 @@ const OtdOrder = () => {
         if (stockEntry) stockValues = stockDataMap[stockEntry];
       }
 
-      const allStockInfo = stockValues ? stockValues.join(', ') : '-';
+      const allStockInfo = stockValues ? stockValues.map(s => `${s.godown}: ${s.stock}`).join(', ') : '-';
 
       return {
         ...order,
@@ -407,7 +407,20 @@ const OtdOrder = () => {
 
       if (error) throw error;
 
-      setShowSuccessOverlay(true);
+      // Send WhatsApp Notification
+      try {
+        await whatsappService.sendOrderCreationNotification('9691207533', {
+          customerName: formData.clientName,
+          orderNo: formData.orderNo,
+          items: formData.items,
+          orderDate: formData.orderDate
+        });
+      } catch (wsError) {
+        console.error('WhatsApp failed:', wsError);
+        toast.error(`WhatsApp notification failed: ${wsError.message}`);
+      }
+
+      toast.success('Order created successfully!');
       setFormData(prev => ({
         orderDate: new Date().toISOString().split('T')[0],
         clientName: '',
@@ -417,7 +430,6 @@ const OtdOrder = () => {
       setIsModalOpen(false);
 
       await fetchOrdersData(true);
-      setTimeout(() => setShowSuccessOverlay(false), 2500);
     } catch (error) {
       console.error('Submit error details:', error);
       let errorMsg = error.message || 'Unknown error';
@@ -484,24 +496,45 @@ const OtdOrder = () => {
   );
 
   return (
-    <div className="">
-      <div className="flex flex-col gap-4 mb-6 bg-white p-4 lg:p-5 rounded shadow-sm border border-gray-100 max-w-[1200px] mx-auto">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8 relative z-20">
-          <div className="flex flex-col sm:flex-row gap-3 flex-1 relative z-20">
-            <h1 className="text-xl font-bold text-gray-800 tracking-tight">Orders</h1>
-            <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Manage Dispatch Orders</p>
+    <div className="p-4 lg:p-6 space-y-6">
+      <div className="flex flex-col gap-6 bg-white p-6 rounded-lg shadow-sm border border-slate-200 max-w-[1200px] mx-auto">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Orders</h1>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-1">Manage Sales & Dispatch Orders</p>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={handleRefresh}
+              disabled={isRefreshingOrders}
+              className="erp-btn-secondary h-[42px]"
+            >
+              <RefreshCw size={16} className={isRefreshingOrders ? 'animate-spin' : ''} />
+              Refresh
+            </button>
+
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="erp-btn-primary h-[42px] px-6 shadow-md shadow-primary/10"
+            >
+              <Plus size={18} className="stroke-[3]" />
+              New Order
+            </button>
           </div>
         </div>
 
-        <div className="flex flex-col lg:flex-row justify-between gap-4 lg:items-start relative z-20">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 w-full">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="relative group">
+            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors" />
             <input
               type="text"
-              placeholder="Search by Client, Godown or Order Number..."
+              placeholder="Search orders..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full h-[42px] px-3 py-2 bg-gray-50 border border-gray-200 rounded focus:ring-2 focus:ring-primary focus:border-transparent outline-none text-sm transition-all"
+              className="w-full h-[42px] pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none text-sm transition-all"
             />
+          </div>
             <div className="h-[42px]">
               <SearchableDropdown
                 value={clientFilter}
@@ -522,36 +555,6 @@ const OtdOrder = () => {
                 focusColor="primary"
               />
             </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button
-              onClick={handleRefresh}
-              disabled={isRefreshingOrders}
-              className="flex items-center justify-center gap-1.5 px-4 h-[42px] bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors text-sm font-bold border border-gray-200 disabled:opacity-50"
-            >
-              <RefreshCw size={15} className={isRefreshingOrders ? 'animate-spin' : ''} />
-              Refresh
-            </button>
-
-            {(searchTerm || clientFilter || godownFilter) && (
-              <button
-                onClick={() => { setSearchTerm(''); setClientFilter(''); setGodownFilter(''); }}
-                className="flex items-center justify-center gap-1.5 px-4 h-[42px] bg-green-50 text-primary rounded hover:bg-green-100 transition-colors text-sm font-bold border border-green-100"
-              >
-                <X size={15} />
-                Clear
-              </button>
-            )}
-
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="flex items-center justify-center gap-2 px-5 h-[42px] bg-primary text-white rounded shadow-md shadow-primary/20 hover:bg-primary-hover font-bold text-sm transition-all flex-1 sm:flex-none ml-auto sm:ml-0"
-            >
-              <Plus size={16} className="stroke-[3]" />
-              New Order
-            </button>
-          </div>
         </div>
       </div>
 
@@ -561,90 +564,61 @@ const OtdOrder = () => {
         </div>
       )}
 
-      {showSuccessOverlay && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/40 backdrop-blur-sm transition-all duration-300">
-          <div className="bg-white px-10 py-8 rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.15)] flex flex-col items-center gap-5 animate-in zoom-in-95 fade-in duration-300 border border-gray-100">
-            <div className="h-16 w-16 bg-green-100/50 rounded-full flex items-center justify-center relative">
-              <div className="absolute inset-0 bg-green-500 rounded-full animate-ping opacity-20"></div>
-              <CheckCircle className="w-8 h-8 text-green-600 relative z-10" />
-            </div>
-            <div className="text-center space-y-1">
-              <h3 className="text-lg font-bold text-gray-900">Order Saved Successfully</h3>
-              <p className="text-xs font-medium text-gray-500">Your order has been added to the dispatch queue.</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="bg-white rounded shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white/50 overflow-hidden max-w-[1200px] mx-auto">
-        <div className="hidden md:block overflow-x-auto max-h-[500px] overflow-y-auto">
-          <table className="w-full text-left border-collapse">
-            <thead className="bg-gray-50/50 backdrop-blur-sm border-b border-gray-100 text-[10px] uppercase text-gray-400 font-black tracking-widest sticky top-0 z-10 shadow-sm">
+      <div className="erp-table-container max-w-[1200px] mx-auto">
+        <div className="hidden md:block overflow-x-auto max-h-[600px] overflow-y-auto custom-scrollbar">
+          <table className="erp-table">
+            <thead className="erp-table-thead">
               <tr>
-                {[
-                  { label: 'Order No', key: 'orderNumber' },
-                  { label: 'Client Name', key: 'clientName' },
-                  { label: 'Item Name', key: 'itemName' },
-                  { label: 'Godown', key: 'godownName' },
-                  { label: 'Order Qty', key: 'qty', align: 'center' },
-                  { label: 'Current Stock', key: 'currentStock', align: 'center' },
-                  { label: 'Order Date', key: 'orderDate', align: 'center' },
-                  { label: 'Rate', key: 'rate', align: 'center' },
-                  { label: 'Canceled Qty', key: 'canceledQty', align: 'center' },
-                  { label: 'Intransit', key: 'intransitQty', align: 'center' },
-                  { label: 'Submitted By', key: 'createdBy', align: 'center' },
-                  { label: 'Total Order Qty', key: 'totalQty', align: 'center' },
-                ].map((col) => (
-                  <th
-                    key={col.key}
-                    className={`px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors ${col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : 'text-left'}`}
-                    onClick={() => requestSort(col.key)}
-                  >
-                    <div className={`flex items-center gap-1 ${col.align === 'center' ? 'justify-center' : col.align === 'right' ? 'justify-end' : 'justify-start'}`}>
-                      {col.label}
-                      <div className="flex flex-col">
-                        <ChevronUp size={10} className={sortConfig.key === col.key && sortConfig.direction === 'asc' ? 'text-primary' : 'text-gray-300'} />
-                        <ChevronDown size={10} className={sortConfig.key === col.key && sortConfig.direction === 'desc' ? 'text-primary' : 'text-gray-300'} />
-                      </div>
-                    </div>
-                  </th>
-                ))}
+                <th className="erp-table-th">Order No</th>
+                <th className="erp-table-th">Client Name</th>
+                <th className="erp-table-th">Item Name</th>
+                <th className="erp-table-th">Godown</th>
+                <th className="erp-table-th text-center">Order Qty</th>
+                <th className="erp-table-th text-center">Current Stock</th>
+                <th className="erp-table-th text-center">Order Date</th>
+                <th className="erp-table-th text-center">Rate</th>
+                <th className="erp-table-th text-center">Canceled Qty</th>
+                <th className="erp-table-th text-center">Intransit</th>
+                <th className="erp-table-th text-center">Submitted By</th>
+                <th className="erp-table-th text-center">Total Order Qty</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
+            <tbody className="divide-y divide-slate-100">
               {(isLoadingOrders || isRefreshingOrders) ? (
                 <TableSkeleton />
               ) : filteredAndSortedOrders.length === 0 ? (
                 <tr>
-                  <td colSpan="14" className="px-6 py-20 text-center">
-                    <div className="flex flex-col items-center gap-3">
-                      <div className="p-4 bg-gray-50 rounded-full">
-                        <Search size={32} className="text-gray-200" />
+                  <td colSpan="14" className="px-6 py-24 text-center">
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="p-5 bg-slate-50 rounded-full text-slate-300">
+                        <Package size={40} strokeWidth={1.5} />
                       </div>
-                      <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">No orders found</p>
+                      <div className="space-y-1">
+                        <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">No orders found</p>
+                        <p className="text-xs text-slate-300">Try adjusting your filters or search term</p>
+                      </div>
                     </div>
                   </td>
                 </tr>
               ) : (
                 filteredAndSortedOrders.map((order, idx) => (
-                  <tr key={idx} className="group hover:bg-slate-50 transition-all duration-300">
-                    <td className="px-6 py-4 font-bold text-primary relative">
-                      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-0 bg-primary group-hover:h-8 transition-all duration-300 rounded-r-full"></div>
+                  <tr key={idx} className="erp-table-tr group">
+                    <td className="erp-table-td font-bold text-primary whitespace-nowrap">
                       {order.orderNumber}
                     </td>
-                    <td className="px-6 py-4 font-bold text-gray-900">{order.clientName}</td>
-                    <td className="px-6 py-4 text-gray-800 font-semibold">{order.itemName}</td>
-                    <td className="px-6 py-4 text-gray-600 font-medium">{order.godownName}</td>
+                    <td className="erp-table-td font-bold text-slate-900 max-w-[200px] truncate" title={order.clientName}>{order.clientName}</td>
+                    <td className="erp-table-td font-semibold text-slate-700 max-w-[250px] whitespace-normal leading-tight" title={order.itemName}>{order.itemName}</td>
+                    <td className="erp-table-td text-slate-600 italic text-[11px] font-black uppercase opacity-60 whitespace-nowrap">{order.godownName}</td>
 
                     {/* Remaining Qty — what's left after cancellations */}
-                    <td className="px-6 py-4 text-center">
+                    <td className="erp-table-td text-center">
                       <span className="inline-flex flex-col items-center">
                         <span className="font-black text-primary text-base leading-tight">{order.qty}</span>
                         <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-none">Remaining</span>
                       </span>
                     </td>
 
-                    <td className="px-6 py-4 text-center bg-slate-50/30">
+                    <td className="erp-table-td text-center bg-slate-50/30">
                       {loadingStock ? (
                         <RefreshCw size={12} className="animate-spin inline text-primary/40" />
                       ) : (
@@ -670,28 +644,28 @@ const OtdOrder = () => {
                       )}
                     </td>
 
-                    <td className="px-6 py-4 text-gray-500 text-[11px] font-black uppercase text-center">{formatDisplayDate(order.orderDate)}</td>
-                    <td className="px-6 py-4 font-medium text-center text-slate-500">₹{order.rate}</td>
+                    <td className="erp-table-td text-gray-500 text-[11px] font-black uppercase text-center whitespace-nowrap">{formatDisplayDate(order.orderDate)}</td>
+                    <td className="erp-table-td font-black text-center text-slate-800 whitespace-nowrap">₹{order.rate}</td>
 
                     {/* Cancelled Qty */}
-                    <td className="px-6 py-4 text-center">
+                    <td className="erp-table-td text-center">
                       <span className="inline-flex flex-col items-center">
                         <span className="font-black text-red-500 text-sm leading-tight">{order.canceledQty > 0 ? order.canceledQty : '—'}</span>
                         <span className="text-[9px] font-bold text-red-300 uppercase tracking-widest leading-none">Cancelled</span>
                       </span>
                     </td>
 
-                    <td className="px-6 py-4 text-gray-500 text-[11px] font-bold text-center">
+                    <td className="erp-table-td text-gray-500 text-[11px] font-bold text-center whitespace-nowrap">
                       {loadingIntransit ? (
                         <RefreshCw size={12} className="animate-spin inline text-primary/40" />
                       ) : (
-                        order.intransitQty
+                        <span className="font-black text-slate-700">{order.intransitQty}</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 text-[10px] text-center text-gray-400 font-bold uppercase tracking-tighter italic whitespace-nowrap">{order.createdBy}</td>
+                    <td className="erp-table-td text-[10px] text-center text-gray-400 font-bold uppercase tracking-tighter italic whitespace-nowrap">{order.createdBy}</td>
 
                     {/* Total (Original) Qty = Remaining + Cancelled */}
-                    <td className="px-6 py-4 text-center bg-gray-50/50">
+                    <td className="erp-table-td text-center bg-gray-50/50">
                       <span className="inline-flex flex-col items-center">
                         <span className="font-black text-gray-700 text-base leading-tight">{(parseFloat(order.qty) || 0) + (parseFloat(order.canceledQty) || 0)}</span>
                         <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-none">Original</span>

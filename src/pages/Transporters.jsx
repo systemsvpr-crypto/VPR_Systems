@@ -320,18 +320,18 @@ const Transporters = ({ isTab = false }) => {
                     </div>
 
                     {/* Desktop View */}
-                    <div className="hidden md:flex bg-white rounded-2xl shadow-sm border border-slate-200/60 flex-col">
+                    <div className="hidden md:flex erp-table-container flex-col">
                         <div className="overflow-x-auto custom-scrollbar">
-                            <table className="w-full text-left border-collapse">
-                                <thead>
-                                    <tr className="bg-slate-50/50 border-b border-slate-100 sticky top-0 z-10 backdrop-blur-md">
-                                        <HeaderCell>Transporter Details</HeaderCell>
-                                        <HeaderCell>Vehicle Number</HeaderCell>
-                                        <HeaderCell>Driver Phone</HeaderCell>
-                                        <HeaderCell>Status</HeaderCell>
-                                        <HeaderCell align="right">Actions</HeaderCell>
-                                    </tr>
-                                </thead>
+                            <table className="erp-table">
+                                    <thead className="erp-table-thead">
+                                        <tr className="erp-table-tr">
+                                            <HeaderCell>Transporter Details</HeaderCell>
+                                            <HeaderCell>Vehicle Number</HeaderCell>
+                                            <HeaderCell>Driver Phone</HeaderCell>
+                                            <HeaderCell align="center">Status</HeaderCell>
+                                            <HeaderCell align="right">Actions</HeaderCell>
+                                        </tr>
+                                    </thead>
                                 <tbody className="divide-y divide-slate-100">
                                     {loading ? (
                                         <EmptyRow message="Loading..." />
@@ -456,11 +456,11 @@ const Transporters = ({ isTab = false }) => {
                             <p className="text-slate-400 text-sm mt-1">Stock In entries with transporters will appear here</p>
                         </div>
                     ) : (
-                        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div className="erp-table-container overflow-hidden">
                             <div className="overflow-x-auto">
-                                <table className="w-full text-left">
-                                    <thead>
-                                        <tr className="bg-slate-50/50 border-b border-slate-100 sticky top-0 z-10 backdrop-blur-md">
+                                <table className="erp-table">
+                                    <thead className="erp-table-thead">
+                                        <tr className="erp-table-tr">
                                             <HeaderCell>Entry ID</HeaderCell>
                                             <HeaderCell>Transporter</HeaderCell>
                                             <HeaderCell>Date</HeaderCell>
@@ -647,7 +647,7 @@ const FormField = ({ label, icon: Icon, className = "", ...props }) => (
 );
 
 const HeaderCell = ({ children, align = "left" }) => (
-    <th className={cn(`px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider`, align === 'right' ? 'text-right' : 'text-left')}>
+    <th className={cn(`erp-table-th`, align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left')}>
         {children}
     </th>
 );
@@ -661,35 +661,35 @@ const EmptyRow = ({ message }) => (
 );
 
 const TransporterRow = ({ transporter, user, onEdit, onDelete }) => (
-    <tr className="hover:bg-slate-50/80 transition-colors group">
-        <td className="px-4 py-3">
+    <tr className="erp-table-tr group">
+        <td className="erp-table-td">
             <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
+                <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-primary/10 group-hover:text-primary transition-colors">
                     <Truck size={18} />
                 </div>
                 <div>
-                    <div className="font-medium text-slate-900 text-sm">{transporter.name}</div>
-                    <div className="text-xs text-slate-500">{new Date(transporter.created_at).toLocaleDateString()}</div>
+                    <div className="font-bold text-slate-900 text-sm">{transporter.name}</div>
+                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{new Date(transporter.created_at).toLocaleDateString()}</div>
                 </div>
             </div>
         </td>
-        <td className="px-4 py-3">
-            <div className="text-sm text-slate-900 font-mono">{transporter.vehicle_number}</div>
+        <td className="erp-table-td">
+            <div className="text-sm text-slate-600 font-black italic">{transporter.vehicle_number || '-'}</div>
         </td>
-        <td className="px-4 py-3">
-            <div className="flex items-center gap-1.5 text-sm text-slate-900">
+        <td className="erp-table-td">
+            <div className="flex items-center gap-1.5 text-sm text-slate-900 font-bold">
                 <Phone size={14} className="text-slate-400" />
-                {transporter.driver_phone}
+                {transporter.driver_phone || '-'}
             </div>
         </td>
-        <td className="px-4 py-3">
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${transporter.is_active ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${transporter.is_active ? 'bg-green-500' : 'bg-red-500'}`}></span>
+        <td className="erp-table-td text-center">
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${transporter.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${transporter.is_active ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
                 {transporter.is_active ? 'Active' : 'Inactive'}
             </span>
         </td>
-        <td className="px-4 py-3 text-right">
-            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <td className="erp-table-td text-right">
+            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
                 <Button variant="ghost" size="icon" type="button" onClick={onEdit} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded transition-all" title="Edit">
                     <Edit2 size={16} />
                 </Button>

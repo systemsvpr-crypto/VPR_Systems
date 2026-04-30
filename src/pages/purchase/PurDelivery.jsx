@@ -3,6 +3,8 @@ import { RefreshCw, Search, ChevronUp, ChevronDown, CheckCircle, Truck, AlertCir
 import { supabase } from '../../supabase';
 import useAuthStore from '../../store/authStore';
 import toast from 'react-hot-toast';
+import SearchableDropdown from '../../components/SearchableDropdown';
+import { whatsappService } from '../../services/whatsappService';
 
 const TS = ({ cols = 6 }) => <>{[...Array(4)].map((_, i) => (
   <tr key={i} className="border-b border-gray-50">
@@ -190,6 +192,37 @@ const PurDelivery = () => {
       const { error } = await supabase.from('purchase_delivery').insert(payload);
       if (error) throw error;
 
+      // --- Group WhatsApp Notifications by Transporter & LR ---
+      const groupedForWA = payload.reduce((acc, del) => {
+        const key = `${del.transporter_name}_${del.lr_number || 'none'}`;
+        if (!acc[key]) acc[key] = {
+          transporter: del.transporter_name,
+          lr: del.lr_number,
+          date: del.delivery_date,
+          items: []
+        };
+        acc[key].items.push({
+          itemName: del.product_name,
+          bags: del.received_qty_bags,
+          kg: del.received_qty_kg
+        });
+        return acc;
+      }, {});
+
+      for (const key in groupedForWA) {
+        const group = groupedForWA[key];
+        try {
+          await whatsappService.sendPurchaseDeliveryNotification('9691207533', {
+            transporterName: group.transporter,
+            lrNo: group.lr,
+            date: group.date,
+            items: group.items
+          });
+        } catch (wsError) {
+          console.error('WhatsApp failed for delivery group:', wsError);
+        }
+      }
+
       toast.success('Deliveries generated successfully!');
       fetchAll(true);
     } catch (e) {
@@ -370,11 +403,14 @@ const PurDelivery = () => {
                           className="w-16 px-2 py-1.5 border border-gray-200 rounded text-xs font-black text-orange-600 focus:ring-2 focus:ring-orange-300 outline-none text-right disabled:bg-gray-50" placeholder="0" />
                       </td>
                       <td className="px-1 py-4">
-                        <select value={row.transporter_name || ''} onChange={e => updateInline(r.id, 'transporter_name', e.target.value)} disabled={!row.checked}
-                          className="w-32 px-2 py-1.5 border border-gray-200 rounded text-xs focus:ring-2 focus:ring-orange-300 outline-none disabled:bg-gray-50">
-                          <option value="">Select TPT</option>
-                          {transporters.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
-                        </select>
+                        <SearchableDropdown 
+                          options={transporters.map(t => t.name)} 
+                          value={row.transporter_name || ''} 
+                          onChange={v => updateInline(r.id, 'transporter_name', v)} 
+                          placeholder="Select TPT" 
+                          showAll={false}
+                          className={!row.checked ? 'opacity-60 pointer-events-none' : ''}
+                        />
                       </td>
                       <td className="px-1 py-4">
                         <input type="text" value={row.lr_number || ''} onChange={e => updateInline(r.id, 'lr_number', e.target.value)} disabled={!row.checked}

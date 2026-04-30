@@ -59,39 +59,53 @@ const Master = () => {
     }
 
     return (
-        <div className="flex flex-col gap-4 pb-6">
-            <div>
-                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Master Configuration</h1>
-                <p className="text-slate-500 mt-1 text-sm">Manage products, godowns, and transporters.</p>
+        <div className="flex flex-col gap-6 pb-10">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
+                        Master <span className="text-primary">Configuration</span>
+                    </h1>
+                    <p className="text-slate-500 mt-1 text-sm font-medium">Manage your organization's core data assets and resources.</p>
+                </div>
+                <div className="flex items-center gap-2 bg-slate-100/50 p-1 rounded-xl border border-slate-200/60 w-fit">
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white rounded-lg shadow-sm border border-slate-200">
+                        <Shield size={14} className="text-primary" />
+                        <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">{user?.role || 'User'} Access</span>
+                    </div>
+                </div>
             </div>
 
-            {/* Tabs */}
-            <div className="flex border-b border-slate-200 overflow-x-auto overflow-y-hidden custom-scrollbar">
-                {allowedTabs.map(tab => (
-                    <button
-                        key={tab.id}
-                        onClick={() => setActiveTab(tab.id)}
-                        className={cn(
-                            "flex-1 min-w-[120px] pb-3 text-xs sm:text-sm font-medium transition-all flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 whitespace-nowrap relative",
-                            activeTab === tab.id
-                                ? 'text-primary'
-                                : 'text-slate-500 hover:text-slate-700'
-                        )}
-                    >
-                        <tab.icon size={16} />
-                        {tab.label}
-                        {activeTab === tab.id && (
-                            <div className="absolute bottom-[-1px] left-0 right-0 h-0.5 bg-primary animate-in fade-in slide-in-from-bottom-1" />
-                        )}
-                    </button>
-                ))}
+            {/* Premium Tabs */}
+            <div className="relative group">
+                <div className="flex items-center gap-1 bg-slate-100/40 p-1.5 rounded-2xl border border-slate-200/50 overflow-x-auto no-scrollbar backdrop-blur-sm">
+                    {allowedTabs.map(tab => (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            className={cn(
+                                "flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 relative whitespace-nowrap",
+                                activeTab === tab.id
+                                    ? 'bg-white text-primary shadow-md shadow-slate-200/50 scale-[1.02]'
+                                    : 'text-slate-500 hover:text-slate-800 hover:bg-white/50'
+                            )}
+                        >
+                            <tab.icon size={16} className={cn("transition-transform duration-300", activeTab === tab.id ? "scale-110" : "opacity-70")} />
+                            {tab.label}
+                            {activeTab === tab.id && (
+                                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-1 bg-primary rounded-full animate-in zoom-in-50 duration-300" />
+                            )}
+                        </button>
+                    ))}
+                </div>
             </div>
 
-            {activeTab === 'products' && <Products />}
-            {activeTab === 'godowns' && <Godowns />}
-            {activeTab === 'transporters' && <Transporters />}
-            {activeTab === 'customers' && <Customers />}
-            {activeTab === 'vendors' && <Vendors />}
+            <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
+                {activeTab === 'products' && <Products />}
+                {activeTab === 'godowns' && <Godowns />}
+                {activeTab === 'transporters' && <Transporters />}
+                {activeTab === 'customers' && <Customers />}
+                {activeTab === 'vendors' && <Vendors />}
+            </div>
         </div>
     );
 };

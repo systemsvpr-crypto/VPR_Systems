@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { cn } from '@/lib/utils';
 import { ChevronDown, Search, X } from 'lucide-react';
 
 const SearchableDropdown = ({
@@ -38,10 +39,19 @@ const SearchableDropdown = ({
     useEffect(() => {
         if (isOpen && dropdownRef.current) {
             const rect = dropdownRef.current.getBoundingClientRect();
+            const dropdownHeight = 320; // Max height + search area approx
+            const spaceBelow = window.innerHeight - rect.bottom;
+            const spaceAbove = rect.top;
+            
+            const shouldShowOnTop = spaceBelow < dropdownHeight && spaceAbove > dropdownHeight;
+
             setMenuPosition({
-                top: rect.bottom + window.scrollY,
+                top: shouldShowOnTop 
+                    ? rect.top + window.scrollY - 4 // Small offset for top
+                    : rect.bottom + window.scrollY,
                 left: rect.left + window.scrollX,
-                width: rect.width
+                width: rect.width,
+                placement: shouldShowOnTop ? 'top' : 'bottom'
             });
             
             // Focus input after a short delay to allow portal to render
@@ -107,7 +117,13 @@ const SearchableDropdown = ({
     const dropdownMenu = (
         <div 
             id="searchable-dropdown-portal"
-            className="fixed z-[9999] mt-1 bg-white border border-gray-200 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.1)] overflow-hidden animate-in fade-in zoom-in-95 duration-200 ease-out origin-top font-sans"
+            className={cn(
+                "fixed z-[9999] bg-white border border-slate-200 rounded-xl shadow-[0_15px_50px_-12px_rgba(0,0,0,0.15)] overflow-hidden font-sans",
+                "animate-in fade-in duration-200 ease-out",
+                menuPosition.placement === 'top' 
+                    ? "origin-bottom -translate-y-full mt-[-10px] slide-in-from-bottom-2" 
+                    : "origin-top mt-1 slide-in-from-top-2"
+            )}
             style={{
                 top: `${menuPosition.top}px`,
                 left: `${menuPosition.left}px`,
@@ -115,7 +131,7 @@ const SearchableDropdown = ({
             }}
             onMouseDown={(e) => e.stopPropagation()}
         >
-            <div className="p-2 border-b border-gray-50 bg-gray-50/30">
+            <div className="p-2 border-b border-slate-50 bg-slate-50/50">
                 <div className="relative group">
                     <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-primary transition-colors" />
                     <input
@@ -185,7 +201,7 @@ const SearchableDropdown = ({
                 <ChevronDown size={14} className={`text-gray-400 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} />
             </button>
 
-            {isOpen && createPortal(dropdownMenu, document.body)}
+            {isOpen && menuPosition.width > 0 && createPortal(dropdownMenu, document.body)}
         </div>
     );
 };

@@ -386,15 +386,17 @@ const Settings = () => {
         <div className="flex flex-col gap-4 pb-6">
             {/* Header */}
             <div>
-                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Settings</h1>
-                <p className="text-slate-500 mt-1 text-sm">Manage system users, teams, and access permissions.</p>
+                <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
+                    System <span className="text-primary">Settings</span>
+                </h1>
+                <p className="text-slate-500 mt-1 text-sm font-medium italic">Manage system users, teams, and access permissions.</p>
             </div>
 
-            {/* Tabs */}
-            <div className="flex items-center gap-6 border-b border-slate-200 mb-6">
+            {/* Modern Segmented Tabs */}
+            <div className="flex p-1 bg-slate-100 rounded-xl w-fit mb-6">
                 <button
                     onClick={() => setActiveTab('Manage Users')}
-                    className={`pb-3 text-sm font-medium transition-all ${activeTab === 'Manage Users' ? 'text-primary border-b-2 border-primary translate-y-[1px]' : 'text-slate-500 hover:text-slate-700'}`}
+                    className={`px-6 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === 'Manage Users' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                 >
                     Manage Users
                 </button>
@@ -455,14 +457,14 @@ const Settings = () => {
                     </div>
 
                     {/* Desktop View (Table) */}
-                    <div className="hidden md:flex bg-white rounded-2xl shadow-sm border border-slate-200/60 flex-col">
+                    <div className="hidden md:flex erp-table-container flex-col">
                         <div className="overflow-x-auto custom-scrollbar">
-                            <table className="w-full text-left border-collapse">
-                                <thead>
-                                    <tr className="bg-slate-50/50 border-b border-slate-100 sticky top-0 z-10 backdrop-blur-md">
+                            <table className="erp-table">
+                                <thead className="erp-table-thead">
+                                    <tr className="erp-table-tr">
                                         <HeaderCell>User Details</HeaderCell>
                                         <HeaderCell>Role & Designation</HeaderCell>
-                                        <HeaderCell>Status</HeaderCell>
+                                        <HeaderCell align="center">Status</HeaderCell>
                                         <HeaderCell align="right">Actions</HeaderCell>
                                     </tr>
                                 </thead>
@@ -730,9 +732,9 @@ export default Settings;
 // ----------------------------------------------------------------------
 
 const StatItem = ({ label, value }) => (
-    <div>
-        <h3 className="text-2xl font-bold text-slate-800">{value}</h3>
-        <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">{label}</p>
+    <div className="flex flex-col">
+        <h3 className="text-2xl font-black text-slate-900 leading-none">{value}</h3>
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">{label}</p>
     </div>
 );
 
@@ -770,7 +772,7 @@ const SelectField = ({ label, options, name, value, onChange, placeholder, requi
 );
 
 const HeaderCell = ({ children, align = "left" }) => (
-    <th className={`px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider text-${align}`}>
+    <th className={cn(`erp-table-th`, align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left')}>
         {children}
     </th>
 );
@@ -784,10 +786,10 @@ const EmptyRow = ({ message }) => (
 );
 
 const UserRow = ({ user, onEdit }) => (
-    <tr className="hover:bg-slate-50/80 transition-colors group">
-        <td className="px-4 py-3">
+    <tr className="erp-table-tr group">
+        <td className="erp-table-td">
             <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-xs border border-slate-200 overflow-hidden shrink-0">
+                <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-primary font-black text-xs border border-slate-200 overflow-hidden shrink-0 group-hover:bg-primary/10 transition-colors">
                     {user.profile_picture ? (
                         <img src={user.profile_picture} alt={user.full_name} className="w-full h-full object-cover" />
                     ) : (
@@ -795,30 +797,30 @@ const UserRow = ({ user, onEdit }) => (
                     )}
                 </div>
                 <div>
-                    <div className="font-medium text-slate-900 text-sm">{user.full_name}</div>
+                    <div className="font-bold text-slate-900 text-sm">{user.full_name}</div>
+                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{user.username || 'No Username'}</div>
                 </div>
             </div>
         </td>
-        <td className="px-4 py-3">
+        <td className="erp-table-td">
             <div className="flex flex-col">
-                <span className="text-sm text-slate-900">{user.role || '-'}</span>
-                <span className="text-xs text-slate-500">{user.designation || '-'}</span>
+                <span className="text-sm text-slate-700 font-bold">{user.role || '-'}</span>
+                <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider">{user.designation || '-'}</span>
             </div>
         </td>
-        <td className="px-4 py-3">
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${user.is_active ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-                }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${user.is_active ? 'bg-green-500' : 'bg-red-500'}`}></span>
+        <td className="erp-table-td text-center">
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${user.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${user.is_active ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
                 {user.is_active ? 'Active' : 'Inactive'}
             </span>
         </td>
-        <td className="px-4 py-3 text-right">
+        <td className="erp-table-td text-right">
             <Button
                 variant="ghost"
                 size="icon"
                 type="button"
                 onClick={onEdit}
-                className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded transition-all opacity-0 group-hover:opacity-100"
+                className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded transition-all opacity-0 group-hover:opacity-100 transform translate-x-2 group-hover:translate-x-0"
                 title="Edit User"
             >
                 <Edit2 size={16} />

@@ -190,16 +190,16 @@ const Customers = () => {
                 </Button>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 flex-col overflow-hidden">
+            <div className="erp-table-container flex-col overflow-hidden">
                 <div className="overflow-x-auto custom-scrollbar">
-                    <table className="w-full text-left border-collapse">
-                        <thead>
-                            <tr className="bg-slate-50/50 border-b border-slate-100">
-                                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Customer Details</th>
-                                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Contact Info</th>
-                                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">GST Number</th>
-                                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">CRM Follow Up</th>
-                                <th className="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">Actions</th>
+                    <table className="erp-table">
+                        <thead className="erp-table-thead">
+                            <tr className="erp-table-tr">
+                                <th className="erp-table-th">Customer Details</th>
+                                <th className="erp-table-th">Contact Info</th>
+                                <th className="erp-table-th">GST Number</th>
+                                <th className="erp-table-th">CRM Follow Up</th>
+                                <th className="erp-table-th text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -209,40 +209,40 @@ const Customers = () => {
                                 <tr><td colSpan="5" className="px-4 py-8 text-center text-slate-500 text-sm">No customers found.</td></tr>
                             ) : (
                                 currentItems.map((customer) => (
-                                    <tr key={customer.id} className="hover:bg-slate-50/80 transition-colors group">
-                                        <td className="px-4 py-3">
+                                    <tr key={customer.id} className="erp-table-tr group">
+                                        <td className="erp-table-td">
                                             <div className="flex items-center gap-3">
-                                                <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
+                                                <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 shrink-0 group-hover:bg-blue-600 group-hover:text-white transition-all duration-300">
                                                     <User size={18} />
                                                 </div>
                                                 <div>
-                                                    <div className="font-medium text-slate-900 text-sm">{customer.customer_name}</div>
-                                                    <div className="text-xs text-slate-500 flex items-center gap-1">
-                                                        <MapPin size={12} /> {customer.location || 'N/A'}
+                                                    <div className="font-bold text-slate-900 text-sm">{customer.customer_name}</div>
+                                                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1">
+                                                        <MapPin size={10} className="text-primary" /> {customer.location || 'N/A'}
                                                     </div>
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="px-4 py-3">
+                                        <td className="erp-table-td">
                                             <div className="space-y-1">
-                                                <div className="flex items-center gap-1.5 text-sm text-slate-700">
+                                                <div className="flex items-center gap-1.5 text-sm text-slate-700 font-bold">
                                                     <Phone size={14} className="text-slate-400" />
                                                     {customer.customer_number || 'N/A'}
                                                 </div>
-                                                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                                                <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium">
                                                     <Mail size={14} className="text-slate-400" />
                                                     {customer.email_id || 'N/A'}
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="px-4 py-3">
-                                            <div className="text-sm font-mono text-slate-700">{customer.gst_number || 'N/A'}</div>
+                                        <td className="erp-table-td">
+                                            <div className="text-sm font-black text-slate-400 bg-slate-50 px-2 py-1 rounded inline-block">{customer.gst_number || 'N/A'}</div>
                                         </td>
-                                        <td className="px-4 py-3">
-                                            <div className="text-xs text-slate-500 italic truncate max-w-[150px]">{customer.crm_follow_up || 'No follow up'}</div>
+                                        <td className="erp-table-td">
+                                            <div className="text-[11px] font-medium text-slate-500 italic truncate max-w-[150px]" title={customer.crm_follow_up}>{customer.crm_follow_up || 'No follow up'}</div>
                                         </td>
-                                        <td className="px-4 py-3 text-right">
-                                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <td className="erp-table-td text-right">
+                                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
                                                 <Button variant="ghost" size="icon" onClick={() => handleOpenModal(customer)} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded transition-all">
                                                     <Edit2 size={16} />
                                                 </Button>

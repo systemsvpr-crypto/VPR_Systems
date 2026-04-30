@@ -423,18 +423,18 @@ const OtdDashboard = () => {
 
   // --- Stat Card Component ---
   const StatCard = ({ title, value, icon: Icon, color, bgColor }) => (
-    <div className="bg-white rounded border border-gray-100/50 p-5 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
+    <div className="erp-card group">
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 group-hover:text-gray-500 transition-colors">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">
             {title}
           </p>
-          <h3 className="text-2xl font-black text-[#58cc02] group-hover:scale-105 transition-transform origin-left">
+          <h3 className={`text-2xl font-bold ${color}`}>
             {value}
           </h3>
         </div>
-        <div className={`p-3 rounded ${bgColor} group-hover:scale-110 transition-transform duration-300`}>
-          <Icon className={`w-6 h-6 ${color}`} />
+        <div className={`p-2.5 rounded-md ${bgColor} text-slate-600`}>
+          <Icon className="w-5 h-5" />
         </div>
       </div>
     </div>
@@ -445,71 +445,46 @@ const OtdDashboard = () => {
     const total = completed + pending;
     const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
 
-    const colorClasses = {
-      "text-blue-600": "from-blue-500 to-blue-400 shadow-blue-500/20",
-      "text-primary": "from-[#58cc02] to-[#86efac] shadow-[#58cc02]/20",
-      "text-orange-600": "from-orange-500 to-orange-400 shadow-orange-500/20",
-      "text-red-600": "from-red-500 to-red-400 shadow-red-500/20",
-    };
-    const barColorClass = colorClasses[color] || "from-primary to-green-400 shadow-primary/20";
-
     return (
-      <div className="bg-white rounded border border-gray-100/50 p-5 shadow-sm hover:shadow-lg hover:ring-1 hover:ring-primary/20 transition-all duration-300 group relative overflow-hidden">
-        <div
-          className={`absolute top-0 right-0 w-24 h-24 -mr-8 -mt-8 rounded-full opacity-5 ${bgColor} group-hover:opacity-10 transition-opacity`}
-        />
+      <div className="erp-card group relative overflow-hidden">
         <div className="flex items-center gap-3 mb-6 relative">
-          <div className={`p-2.5 rounded ${bgColor} group-hover:rotate-12 transition-transform shadow-sm`}>
-            <Icon className={`w-5 h-5 ${color}`} />
+          <div className={`p-2 rounded-md ${bgColor} ${color}`}>
+            <Icon className="w-5 h-5" />
           </div>
           <div>
-            <h4 className="font-bold text-gray-900 text-sm group-hover:text-primary transition-colors">
+            <h4 className="font-bold text-slate-900 text-sm">
               {title}
             </h4>
-            <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest">
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
               Stage {stage}
             </p>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <div className="bg-gray-50/80 p-3 rounded border border-gray-100/50 group-hover:bg-white transition-colors">
-            <p className="text-[9px] font-bold text-gray-400 uppercase mb-1 flex items-center gap-1">
-              <Clock className="w-3 h-3 text-orange-500" /> Pending
-            </p>
-            <span className="text-xl font-black text-orange-600 leading-none">{pending}</span>
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          <div className="bg-slate-50 p-3 rounded border border-slate-100">
+            <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">Pending</p>
+            <span className="text-lg font-bold text-slate-600 leading-none">{pending}</span>
           </div>
-          <div className="bg-gray-50/80 p-3 rounded border border-gray-100/50 group-hover:bg-white transition-colors">
-            <p className="text-[9px] font-bold text-gray-400 uppercase mb-1 flex items-center gap-1">
-              <CheckCircle2 className="w-3 h-3 text-green-500" /> Done
-            </p>
-            <span className="text-xl font-black text-green-600 leading-none">{completed}</span>
+          <div className="bg-slate-50 p-3 rounded border border-slate-100">
+            <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">Done</p>
+            <span className="text-lg font-bold text-primary leading-none">{completed}</span>
           </div>
         </div>
 
         <div className="mt-auto space-y-3">
           <div className="flex justify-between items-end">
-            <div className="flex flex-col">
-              <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                Completion
-              </span>
-              <span className={`text-lg font-black leading-none ${color}`}>{percentage}%</span>
-            </div>
-            <div
-              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${bgColor} ${color} uppercase tracking-tighter shadow-sm border border-current opacity-70`}
-            >
-              Efficiency
-            </div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+              Completion
+            </span>
+            <span className={`text-sm font-bold ${color}`}>{percentage}%</span>
           </div>
 
-          <div className="relative h-2.5 bg-gray-100 rounded-full overflow-hidden shadow-inner p-[2px]">
+          <div className="relative h-1.5 bg-slate-100 rounded-full overflow-hidden">
             <div
-              className={`h-full rounded-full bg-gradient-to-r ${barColorClass} transition-all duration-1000 ease-out shadow-lg relative`}
+              className={`h-full rounded-full bg-primary transition-all duration-1000 ease-out`}
               style={{ width: `${percentage}%` }}
-            >
-              <div className="absolute inset-0 bg-white/20 animate-pulse rounded-full" />
-              <div className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.15)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.15)_50%,rgba(255,255,255,0.15)_75%,transparent_75%,transparent)] bg-[length:24px_24px] opacity-20" />
-            </div>
+            />
           </div>
         </div>
       </div>
@@ -611,43 +586,26 @@ const OtdDashboard = () => {
 
   // --- Main Render ---
   return (
-    <div className="min-h-screen bg-[#F5F5F5]">
-      <div className="p-3 sm:p-6 space-y-6">
-        {/* Header */}
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between bg-white/70 backdrop-blur-sm p-6 rounded shadow-sm border border-white/50">
+    <div className="p-4 lg:p-6 space-y-6">
+      {/* Header */}
+      <div className="flex flex-col gap-6 bg-white p-6 rounded-lg shadow-sm border border-slate-200 max-w-[1200px] mx-auto">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <div className="w-2 h-2 bg-primary rounded animate-pulse"></div>
-              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-[0.2em]">
-                Real-time Overview
-              </span>
-            </div>
-            <h1 className="text-2xl lg:text-3xl font-black text-gray-900 tracking-tight">
-              System Dashboard
-            </h1>
-            <p className="text-sm text-gray-500 font-medium">
-              Monitor your order to dispatch workflow pipeline.
-            </p>
+            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">System Dashboard</h1>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-1">Real-time Order & Dispatch Overview</p>
           </div>
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex flex-col items-end mr-2">
-              <span className="text-[10px] font-bold text-gray-400 uppercase">Last Updated</span>
-              <span className="text-xs font-bold text-gray-700">
-                {new Date().toLocaleTimeString()}
-              </span>
-            </div>
             <button
               onClick={handleRefresh}
               disabled={refreshing}
-              className="group flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-primary rounded hover:bg-primary-hover transition-all shadow-lg shadow-primary/20 active:scale-95"
+              className="erp-btn-primary h-[42px] px-6 shadow-md shadow-primary/10"
             >
-              <RefreshCw
-                className={`w-4 h-4 transition-transform duration-500 ${refreshing ? "animate-spin" : "group-hover:rotate-180"}`}
-              />
-              {refreshing ? "Refreshing..." : "Refresh Analytics"}
+              <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
+              {refreshing ? "Refreshing..." : "Refresh Data"}
             </button>
           </div>
         </div>
+      </div>
 
         {/* Key Stats */}
         <div className="space-y-4 sm:space-y-6">
@@ -858,8 +816,8 @@ const OtdDashboard = () => {
           </div>
 
           {/* Godown Load */}
-          <div className="bg-white rounded border border-white/50 p-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
-            <h3 className="text-lg font-black text-gray-800 mb-6 flex items-center gap-2">
+          <div className="erp-card p-6">
+            <h3 className="erp-card-title mb-6 flex items-center gap-2">
               <Truck className="w-5 h-5 text-primary" />
               Godown Load (Dispatch Qty)
             </h3>
@@ -892,7 +850,6 @@ const OtdDashboard = () => {
                   </p>
                 </div>
               )}
-            </div>
           </div>
         </div>
       </div>

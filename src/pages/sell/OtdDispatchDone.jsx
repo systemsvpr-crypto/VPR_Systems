@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { CheckCircle, History, Save, ChevronDown, ChevronUp, RefreshCw, ClipboardList, X, XCircle, Trash2 } from 'lucide-react';
+import { CheckCircle, History, Save, ChevronDown, ChevronUp, RefreshCw, ClipboardList, X, XCircle, Trash2, Search, Package } from 'lucide-react';
 import SearchableDropdown from '../../components/SearchableDropdown';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
@@ -252,134 +252,90 @@ const OtdDispatchDone = () => {
     try {
       const now = new Date().toISOString();
       const selectedIds = Object.keys(selectedRows).filter(id => selectedRows[id]);
-      
-      // Group selected items by client for bulk notification
-      const selectedItemsDetails = orders.filter(o => selectedIds.includes(String(o.id)));
-      const groupedByClient = selectedItemsDetails.reduce((acc, item) => {
-        const client = item.clientName;
-        if (!acc[client]) acc[client] = [];
-        acc[client].push(item);
-        return acc;
-      }, {});
-
-      const successfulItems = [];
-
-      // 1. Send WhatsApp Notifications First
-      for (const clientName in groupedByClient) {
-        const items = groupedByClient[clientName];
-        try {
-          const productDetails = items.map(i => {
-            const qty = editData[i.id]?.dispatchQty !== undefined ? editData[i.id].dispatchQty : i.dispatchQty;
-            const name = editData[i.id]?.product || i.itemName;
-            return `${name} (${qty})`;
-          });
-          console.log(`OtdDispatchDone sending notification to ${clientName} for ${items.length} items`);
-          
-          await whatsappService.sendBulkDispatchNotification('9691207533', {
-            customerName: clientName,
-            orderNumbers: items.map(i => i.orderNumber),
-            productNames: productDetails,
-            dispatchDates: items.map(i => formatDisplayDate(new Date().toISOString()))
-          });
-          
-          // Add these items to successful list
-          successfulItems.push(...items);
-        } catch (wsError) {
-          console.error(`WhatsApp failed for ${clientName}:`, wsError);
-          toast.error(`WhatsApp failed for ${clientName}: ${wsError.message}`, { duration: 5000 });
-        }
-      }
-
-      if (successfulItems.length === 0) {
-        toast.error('No WhatsApp notifications could be sent. No changes made to database.');
-        setIsSaving(false);
-        return;
-      }
-
-      // 2. Process DB updates ONLY for successful items
       const rowsToLog = [];
       const updates = [];
 
-      for (const item of successfulItems) {
-        const id = item.id;
-        const finalQty = editData[id]?.dispatchQty !== undefined
-          ? parseFloat(editData[id].dispatchQty)
-          : parseFloat(item.dispatchQty);
-        const finalGodown = editData[id]?.godown || item.godownName;
-        const finalProduct = editData[id]?.product || item.itemName;
+      for (const id of selectedIds) {
+        const item = orders.find(o => String(o.id) === String(id));
+        if (item) {
+          const finalQty = editData[id]?.dispatchQty !== undefined
+            ? parseFloat(editData[id].dispatchQty)
+            : parseFloat(item.dispatchQty);
+          const finalGodown = editData[id]?.godown || item.godownName;
+          const finalProduct = editData[id]?.product || item.itemName;
 
-        rowsToLog.push({
-          dispatch_id: item.id,
-          dispatch_number: item.dispatchNo,
-          dispatch_date: item.dispatchDate,
-          complete_date: now.split('T')[0],
-          client_name: item.clientName,
-          product_name: finalProduct,
-          godown_name: finalGodown,
-          order_qty: parseFloat(item.qty) || 0,
-          dispatch_qty: finalQty,
-          crm_name: item.crmName,
-          status: 'Completed',
-          order_no: item.orderNumber,
-          is_skip: false
-        });
-
-        updates.push(
-          supabase.from('dispatch_plans').update({
-            planned_qty: finalQty,
-            godown_name: finalGodown,
+          rowsToLog.push({
+            dispatch_id: item.id,
+            dispatch_number: item.dispatchNo,
+            dispatch_date: item.dispatchDate,
+            complete_date: now.split('T')[0],
+            client_name: item.clientName,
             product_name: finalProduct,
-            dispatch_completed: true,
-            completed_at: now,
+            godown_name: finalGodown,
+            order_qty: parseFloat(item.qty) || 0,
+            dispatch_qty: finalQty,
+            crm_name: item.crmName,
             status: 'Completed',
-            submitted_by: user?.name || user?.full_name || user?.username || 'System',
-          }).eq('id', item.id)
-        );
+            order_no: item.orderNumber,
+            is_skip: false
+          });
 
-        // Stock Integration
-        if (finalGodown && finalProduct && finalQty > 0) {
-          const { data: gData } = await supabase.from('godowns').select('godown_id').eq('name', finalGodown).single();
-          if (gData?.godown_id) {
-            const { data: pData } = await supabase.from('products').select('*').eq('name', finalProduct).eq('godown_id', gData.godown_id).single();
-            if (pData) {
-              const currentStock = parseFloat(pData.closing_quantity) || 0;
-              const newStock = currentStock - finalQty;
-              const mux = parseFloat(pData.mux) || 0;
-              
-              updates.push(
-                supabase.from('products').update({
-                  closing_quantity: newStock,
-                  quantity: (newStock * mux).toFixed(3),
-                  updated_at: now
-                }).eq('product_id', pData.product_id)
-              );
+          updates.push(
+            supabase.from('dispatch_plans').update({
+              planned_qty: finalQty,
+              godown_name: finalGodown,
+              product_name: finalProduct,
+              dispatch_completed: true,
+              completed_at: now,
+              status: 'Completed',
+              submitted_by: user?.name || user?.full_name || user?.username || 'System',
+            }).eq('id', item.id)
+          );
 
-              const entryId = `STK-SAL-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`.toUpperCase();
-              updates.push(
-                supabase.from('stock_management').insert([{
-                  entry_id: entryId,
-                  godown_id: gData.godown_id,
-                  product_id: pData.product_id,
-                  transaction_type: 'out',
-                  quantity: finalQty,
-                  opening_stock: currentStock,
-                  closing_stock: newStock,
-                  reference_number: item.dispatchNo,
-                  date: now.split('T')[0],
-                  notes: `Sales Dispatch: ${item.dispatchNo} for ${item.clientName}`,
-                }])
-              );
+          if (finalGodown && finalProduct && finalQty > 0) {
+            const { data: gData } = await supabase.from('godowns').select('godown_id').eq('name', finalGodown).single();
+            if (gData?.godown_id) {
+              const { data: pData } = await supabase.from('products').select('*').eq('name', finalProduct).eq('godown_id', gData.godown_id).single();
+              if (pData) {
+                const currentStock = parseFloat(pData.closing_quantity) || 0;
+                const newStock = currentStock - finalQty;
+                const mux = parseFloat(pData.mux) || 0;
+                
+                updates.push(
+                  supabase.from('products').update({
+                    closing_quantity: newStock,
+                    quantity: (newStock * mux).toFixed(3),
+                    updated_at: now
+                  }).eq('product_id', pData.product_id)
+                );
 
-              updates.push(
-                supabase.from('stock_notifications').insert([{
-                  notification_type: 'stock_out',
-                  title: 'Stock OUT (Sales)',
-                  message: `${finalQty} units dispatched to ${item.clientName} from ${finalGodown}`,
-                  product_id: pData.product_id,
-                  godown_id: gData.godown_id,
-                  related_id: entryId
-                }])
-              );
+                const entryId = `STK-SAL-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`.toUpperCase();
+                updates.push(
+                  supabase.from('stock_management').insert([{
+                    entry_id: entryId,
+                    godown_id: gData.godown_id,
+                    product_id: pData.product_id,
+                    transaction_type: 'out',
+                    quantity: finalQty,
+                    opening_stock: currentStock,
+                    closing_stock: newStock,
+                    reference_number: item.dispatchNo,
+                    date: now.split('T')[0],
+                    notes: `Sales Dispatch: ${item.dispatchNo} for ${item.clientName}`,
+                  }])
+                );
+
+                updates.push(
+                  supabase.from('stock_notifications').insert([{
+                    notification_type: 'stock_out',
+                    title: 'Stock OUT (Sales)',
+                    message: `${finalQty} units dispatched to ${item.clientName} from ${finalGodown}`,
+                    product_id: pData.product_id,
+                    godown_id: gData.godown_id,
+                    related_id: entryId
+                  }])
+                );
+              }
             }
           }
         }
@@ -396,7 +352,7 @@ const OtdDispatchDone = () => {
         if (errorRes) throw errorRes.error;
       }
 
-      toast.success(`${successfulItems.length} dispatches completed and WhatsApp sent!`);
+      toast.success('Dispatch marked as completed!');
       setSelectedRows({});
       setEditData({});
       await fetchPendingOrders(true);
@@ -646,84 +602,78 @@ const OtdDispatchDone = () => {
 
   // ─── Render ───────────────────────────────────────────────────────────────────
   return (
-    <div className="">
-      {/* Header bar */}
-      <div className="flex flex-col gap-4 mb-6 bg-white p-4 lg:p-5 rounded shadow-sm border border-white/50 max-w-[1200px] mx-auto">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-4">
-            <h1 className="text-xl font-bold text-gray-800 tracking-tight">Dispatch Completed</h1>
-            <div className="flex bg-gray-100 p-1 rounded">
+    <div className="p-4 lg:p-6 space-y-6 bg-slate-50/50 min-h-screen">
+      {/* Header & Tabs */}
+      <div className="flex flex-col gap-6 bg-white p-6 rounded-2xl shadow-sm border border-slate-200 max-w-[1400px] mx-auto">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-6">
+            <div>
+              <h1 className="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-2">
+                <CheckCircle className="text-primary" size={24} />
+                Dispatch Completed
+              </h1>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">Inventory Outflow & Completion Logs</p>
+            </div>
+            
+            <div className="flex bg-slate-100/80 p-1 rounded-xl border border-slate-200/50">
               <button
-                onClick={() => setActiveTab('pending')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-bold transition-all ${activeTab === 'pending' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+                onClick={() => { setActiveTab('pending'); setSelectedRows({}); }}
+                className={`flex items-center gap-2 px-6 py-2 rounded-lg text-xs font-black transition-all uppercase tracking-widest ${activeTab === 'pending' ? 'bg-white text-primary shadow-md shadow-primary/5' : 'text-slate-400 hover:text-slate-600'}`}
               >
-                <CheckCircle size={16} /> Pending
+                <ClipboardList size={14} /> Pending
               </button>
               <button
-                onClick={() => setActiveTab('history')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-bold transition-all ${activeTab === 'history' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+                onClick={() => { setActiveTab('history'); setSelectedRows({}); }}
+                className={`flex items-center gap-2 px-6 py-2 rounded-lg text-xs font-black transition-all uppercase tracking-widest ${activeTab === 'history' ? 'bg-white text-primary shadow-md shadow-primary/5' : 'text-slate-400 hover:text-slate-600'}`}
               >
-                <History size={16} /> History
+                <History size={14} /> History
               </button>
             </div>
           </div>
         </div>
 
-        <div className="flex flex-col lg:flex-row justify-between gap-4 lg:items-start relative z-20">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 w-full">
-            <input
-              type="text"
-              placeholder="Search..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full h-[42px] px-3 py-2 bg-gray-50 border border-gray-200 rounded focus:ring-2 focus:ring-primary focus:border-transparent outline-none text-sm transition-all"
-            />
-            <div className="h-[42px]">
-              <SearchableDropdown value={clientFilter} onChange={setClientFilter} options={allUniqueClients} allLabel="All Clients" className="w-full h-full" focusColor="primary" />
+        {/* Row 2: Filters & Actions */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-t border-slate-50 pt-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 max-w-3xl">
+            <div className="relative group">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors" />
+              <input
+                type="text"
+                placeholder="Search Client or Item..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full h-10 pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-primary/5 focus:border-primary outline-none text-sm font-medium transition-all"
+              />
             </div>
-            <div className="h-[42px]">
-              <SearchableDropdown value={godownFilter} onChange={setGodownFilter} options={allUniqueGodowns} allLabel="All Godowns" className="w-full h-full" focusColor="primary" />
-            </div>
+            <SearchableDropdown value={clientFilter} onChange={setClientFilter} options={allUniqueClients} allLabel="All Clients" className="h-10" />
+            <SearchableDropdown value={godownFilter} onChange={setGodownFilter} options={allUniqueGodowns} allLabel="All Godowns" className="h-10" />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button
-              onClick={handleRefresh}
-              disabled={isRefreshing || isSaving}
-              className="flex items-center justify-center gap-1.5 px-4 h-[42px] bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors text-sm font-bold border border-gray-200 disabled:opacity-50"
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={handleRefresh} 
+              disabled={isRefreshing || isSaving} 
+              className="flex items-center gap-2 px-4 py-2 bg-white text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50 hover:border-slate-300 transition-all font-bold text-xs shadow-sm"
             >
-              <RefreshCw size={15} className={isRefreshing ? 'animate-spin' : ''} /> Refresh
+              <RefreshCw size={14} className={isRefreshing ? 'animate-spin text-primary' : ''} />
+              Refresh
             </button>
-            {(searchTerm || clientFilter || godownFilter) && (
-              <button
-                onClick={() => { setSearchTerm(''); setClientFilter(''); setGodownFilter(''); }}
-                className="flex items-center justify-center gap-1.5 px-4 h-[42px] bg-green-50 text-primary rounded hover:bg-green-100 transition-colors text-sm font-bold border border-green-100"
-              >
-                <X size={15} /> Clear
-              </button>
-            )}
             {activeTab === 'pending' && Object.values(selectedRows).some(v => v) && (
-              <div className="flex items-center gap-2 sm:border-l sm:border-gray-200 sm:pl-3">
-                <button
-                  onClick={() => { setSelectedRows({}); setEditData({}); }}
-                  className="flex items-center justify-center gap-1.5 px-4 h-[42px] bg-white text-gray-700 rounded hover:bg-gray-50 transition-colors font-bold text-sm border border-gray-200"
-                >
-                  <X size={15} /> Cancel
-                </button>
+              <div className="flex items-center gap-2 border-l border-slate-200 pl-2">
                 <button
                   onClick={handleBulkCancelDispatch}
                   disabled={isSaving}
-                  className="flex items-center justify-center gap-2 px-4 h-[42px] bg-red-600 text-white rounded hover:bg-red-700 shadow-md font-bold text-sm shadow-red-500/20 transition-all"
+                  className="flex items-center gap-2 px-4 py-2 bg-rose-50 text-rose-600 border border-rose-100 rounded-xl hover:bg-rose-600 hover:text-white transition-all font-black text-xs shadow-sm"
                 >
-                  <XCircle size={15} /> Cancel Selected
+                  <XCircle size={14} /> Cancel
                 </button>
                 <button
                   onClick={handleSave}
                   disabled={isSaving}
-                  className="flex items-center justify-center gap-2 px-5 h-[42px] bg-primary text-white rounded hover:bg-primary-hover shadow-md font-bold text-sm disabled:opacity-50"
+                  className="flex items-center gap-2 px-6 py-2 bg-primary text-white rounded-xl hover:bg-primary-hover transition-all font-black text-xs shadow-md shadow-primary/20"
                 >
-                  {isSaving ? <RefreshCw size={15} className="animate-spin" /> : <Save size={16} />}
-                  {isSaving ? 'Saving...' : 'Save'}
+                  {isSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+                  Complete All
                 </button>
               </div>
             )}
@@ -739,12 +689,12 @@ const OtdDispatchDone = () => {
       )}
 
       {/* Table */}
-      <div className="bg-white rounded shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white/50 overflow-hidden max-w-[1200px] mx-auto">
-        <div className="hidden md:block relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 max-h-[460px] overflow-y-auto">
-          <table className="w-full text-left border-collapse min-w-[1200px]">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-600 font-bold sticky top-0 z-10 shadow-sm">
-                {activeTab === 'pending' && <th className="px-6 py-4 text-center w-16">Action</th>}
+      <div className="erp-table-container max-w-[1400px] mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="hidden md:block relative overflow-x-auto custom-scrollbar max-h-[600px] overflow-y-auto">
+          <table className="erp-table">
+            <thead className="erp-table-thead">
+              <tr>
+                {activeTab === 'pending' && <th className="erp-table-th text-center w-16">Action</th>}
                 {[
                   { label: 'Dispatch No', key: 'dispatchNo' },
                   { label: 'Dispatch Date', key: 'dispatchDate', align: 'center' },
@@ -761,30 +711,35 @@ const OtdDispatchDone = () => {
                 ].map((col) => (
                   <th
                     key={col.key}
-                    className={`px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors ${col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : 'text-left'}`}
+                    className={`erp-table-th cursor-pointer hover:bg-slate-100 transition-colors ${col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : 'text-left'}`}
                     style={col.minWidth ? { minWidth: col.minWidth } : {}}
                     onClick={() => requestSort(col.key)}
                   >
                     <div className={`flex items-center gap-1.5 ${col.align === 'center' ? 'justify-center' : col.align === 'right' ? 'justify-end' : 'justify-start'}`}>
                       {col.label}
-                      <div className="flex flex-col">
-                        <ChevronUp size={10} className={sortConfig.key === col.key && sortConfig.direction === 'asc' ? 'text-primary' : 'text-gray-300'} />
-                        <ChevronDown size={10} className={sortConfig.key === col.key && sortConfig.direction === 'desc' ? 'text-primary' : 'text-gray-300'} />
+                      <div className="flex flex-col -space-y-1">
+                        <ChevronUp size={12} className={sortConfig.key === col.key && sortConfig.direction === 'asc' ? 'text-primary' : 'text-slate-300'} />
+                        <ChevronDown size={12} className={sortConfig.key === col.key && sortConfig.direction === 'desc' ? 'text-primary' : 'text-slate-300'} />
                       </div>
                     </div>
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200 text-sm">
+            <tbody className="divide-y divide-slate-100">
               {loadingOrders || loadingHistory ? (
                 <TableSkeleton cols={activeTab === 'pending' ? 12 : 9} />
               ) : (activeTab === 'pending' ? filteredAndSortedPending : filteredAndSortedHistory).length === 0 ? (
                 <tr>
-                  <td colSpan={activeTab === 'pending' ? 12 : 9} className="px-6 py-20 text-center">
-                    <div className="flex flex-col items-center gap-3">
-                      <div className="p-4 bg-gray-50 rounded-full"><ClipboardList size={32} className="text-gray-200" /></div>
-                      <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">No items found</p>
+                  <td colSpan="14" className="px-6 py-24 text-center">
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="p-5 bg-slate-50 rounded-full text-slate-300">
+                        <Package size={40} strokeWidth={1.5} />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">No records found</p>
+                        <p className="text-xs text-slate-300">Try adjusting your filters or search term</p>
+                      </div>
                     </div>
                   </td>
                 </tr>
@@ -793,19 +748,25 @@ const OtdDispatchDone = () => {
                   const itemId = item.id;
                   const isSelected = activeTab === 'pending' && !!selectedRows[itemId];
                   return (
-                    <tr key={itemId} className={`transition-colors ${isSelected ? 'bg-green-50/50' : 'hover:bg-gray-50'}`}>
+                    <tr key={itemId} className="erp-table-tr group">
                       {activeTab === 'pending' && (
                         <td className="px-6 py-4 text-center">
                           <input type="checkbox" checked={isSelected} onChange={() => handleCheckboxToggle(itemId)} className="rounded text-primary focus:ring-primary w-4 h-4 cursor-pointer" />
                         </td>
                       )}
-                      <td className="px-6 py-4 font-bold text-gray-900">{item.dispatchNo}</td>
-                      <td className="px-6 py-4 text-gray-500 text-center text-xs font-medium">{formatDisplayDate(item.dispatchDate)}</td>
-                      {activeTab === 'pending' && <td className="px-6 py-4 text-gray-600 text-xs font-medium">{item.orderNumber}</td>}
-                      <td className="px-6 py-4 font-semibold text-gray-800">{item.clientName}</td>
+                    <td className="erp-table-td">
+                      <span className="font-black text-slate-900 tracking-tight">{item.dispatchNo}</span>
+                    </td>
+                    <td className="erp-table-td text-center">
+                      <span className="inline-block px-2.5 py-1 bg-slate-100 text-slate-600 font-black text-[10px] uppercase rounded-md tracking-tighter border border-slate-200">
+                        {formatDisplayDate(item.dispatchDate)}
+                      </span>
+                    </td>
+                    {activeTab === 'pending' && <td className="erp-table-td font-bold text-slate-400">{item.orderNumber}</td>}
+                      <td className="erp-table-td font-bold text-slate-900">{item.clientName}</td>
 
                       {/* Product — editable dropdown when selected; edit goes to dispatch_plans only */}
-                      <td className={`px-6 py-4 text-gray-600 font-medium whitespace-nowrap relative ${isSelected ? 'z-[70]' : ''}`}>
+                      <td className={`erp-table-td font-semibold text-slate-700 truncate max-w-[200px] relative ${isSelected ? 'z-[70]' : ''}`}>
                         {activeTab === 'pending' && isSelected ? (
                           <div className="w-64">
                             <SearchableDropdown
@@ -824,7 +785,7 @@ const OtdDispatchDone = () => {
                       </td>
 
                       {/* Godown */}
-                      <td className={`px-6 py-4 text-center font-bold text-gray-800 relative ${isSelected ? 'z-[60]' : ''}`}>
+                      <td className={`erp-table-td text-center text-slate-600 italic font-black text-[11px] uppercase opacity-60 whitespace-nowrap relative ${isSelected ? 'z-[60]' : ''}`}>
                         {activeTab === 'pending' && isSelected ? (
                           <div className="w-48 mx-auto">
                             <SearchableDropdown
@@ -842,21 +803,23 @@ const OtdDispatchDone = () => {
                         )}
                       </td>
 
-                      <td className="px-6 py-4 border-l border-gray-50 text-right text-xs font-medium text-gray-700">{item.qty}</td>
+                    <td className="erp-table-td text-right">
+                      <span className="font-black text-slate-400">{item.qty}</span>
+                    </td>
 
-                      {/* Dispatch Qty */}
-                      <td className="px-6 py-4 border-l border-gray-50 text-right text-xs font-black text-primary bg-primary/5">
-                        {activeTab === 'pending' && isSelected ? (
-                          <input
-                            type="text"
-                            value={editData[itemId]?.dispatchQty !== undefined ? editData[itemId].dispatchQty : item.dispatchQty}
-                            onChange={(e) => handleEditChange(itemId, 'dispatchQty', e.target.value)}
-                            className="w-full px-1 py-0.5 border rounded text-xs outline-none focus:border-primary text-right"
-                          />
-                        ) : (
-                          item.dispatchQty
-                        )}
-                      </td>
+                    {/* Dispatch Qty */}
+                    <td className="erp-table-td text-right bg-slate-50/30">
+                      {activeTab === 'pending' && isSelected ? (
+                        <input
+                          type="text"
+                          value={editData[itemId]?.dispatchQty !== undefined ? editData[itemId].dispatchQty : item.dispatchQty}
+                          onChange={(e) => handleEditChange(itemId, 'dispatchQty', e.target.value)}
+                          className="w-24 h-8 px-2 border-2 border-slate-200 rounded-lg text-sm font-black text-slate-900 outline-none focus:border-primary transition-all text-center shadow-sm"
+                        />
+                      ) : (
+                        <span className="text-base font-black text-primary tracking-tight">{item.dispatchQty}</span>
+                      )}
+                    </td>
 
                       {/* Pending tab extra columns */}
                       {activeTab === 'pending' && (
@@ -867,7 +830,7 @@ const OtdDispatchDone = () => {
                               disabled={!isSelected}
                               value={editData[itemId]?.completeDate || ''}
                               onChange={(e) => handleEditChange(itemId, 'completeDate', e.target.value)}
-                              className="px-1 py-0.5 border rounded text-xs outline-none focus:border-primary disabled:opacity-50"
+                              className="h-8 px-2 border border-slate-200 rounded-lg text-[11px] font-bold text-slate-600 outline-none focus:border-primary disabled:opacity-40 transition-all"
                             />
                           </td>
                           <td className={`px-6 py-4 text-center relative ${isSelected ? 'z-[50]' : ''}`}>
@@ -876,22 +839,22 @@ const OtdDispatchDone = () => {
                                 disabled={!isSelected}
                                 value={editData[itemId]?.status || 'Completed'}
                                 onChange={(e) => handleEditChange(itemId, 'status', e.target.value)}
-                                className={`w-full pl-3 pr-8 py-2 border border-gray-200 rounded text-xs font-semibold appearance-none bg-white transition-all shadow-sm ${isSelected ? 'cursor-pointer hover:border-primary focus:ring-primary focus:border-transparent outline-none' : 'bg-gray-50 opacity-70 cursor-not-allowed'}`}
+                                className={`w-full pl-3 pr-8 h-8 border border-slate-200 rounded-lg text-[11px] font-black uppercase tracking-wider appearance-none bg-white transition-all shadow-sm ${isSelected ? 'cursor-pointer hover:border-primary focus:ring-4 focus:ring-primary/5 outline-none' : 'bg-slate-50 opacity-40 cursor-not-allowed'}`}
                               >
                                 <option value="Completed">Completed</option>
                                 <option value="Pending">Pending</option>
                               </select>
-                              <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
-                                <ChevronDown size={14} />
+                              <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+                                <ChevronDown size={12} />
                               </div>
                             </div>
                           </td>
-                          <td className="px-6 py-4 border-l border-gray-50 text-xs font-medium text-gray-500">
-                            <div className="flex items-center justify-between gap-2">
-                              <span>{item.crmName}</span>
+                          <td className="px-6 py-4 border-l border-slate-50">
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">{item.crmName}</span>
                               <button
                                 onClick={() => handleCancelDispatch(item)}
-                                className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                                className="p-1.5 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
                                 title="Cancel Dispatch"
                               >
                                 <Trash2 size={14} />
@@ -911,7 +874,7 @@ const OtdDispatchDone = () => {
                             }) : '-'}
                           </td>
                           <td className="px-6 py-4 text-center">
-                            <span className="bg-green-100 text-green-700 px-3 py-1.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider border border-green-200 shadow-sm">
+                            <span className="inline-block px-2.5 py-1.5 bg-emerald-50 text-emerald-600 font-black text-[10px] uppercase rounded-lg tracking-widest border border-emerald-100 shadow-sm">
                               {item.status}
                             </span>
                           </td>
@@ -933,79 +896,65 @@ const OtdDispatchDone = () => {
           ) : (activeTab === 'pending' ? filteredAndSortedPending : filteredAndSortedHistory).length === 0 ? (
             <div className="px-6 py-20 text-center">
               <div className="flex flex-col items-center gap-3">
-                <div className="p-4 bg-gray-50 rounded-full"><ClipboardList size={32} className="text-gray-200" /></div>
-                <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">No items found</p>
+                <div className="p-4 bg-slate-50 rounded-full text-slate-200"><ClipboardList size={32} /></div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">No items found</p>
               </div>
             </div>
           ) : (
-            <div className="divide-y divide-gray-200">
+            <div className="divide-y divide-slate-100 p-2">
               {(activeTab === 'pending' ? filteredAndSortedPending : filteredAndSortedHistory).map((item) => {
                 const itemId = item.id;
                 const isSelected = activeTab === 'pending' && !!selectedRows[itemId];
                 return (
                   <div
                     key={itemId}
-                    className={`p-4 space-y-4 transition-colors ${isSelected ? 'bg-green-50/50' : 'bg-white'}`}
+                    className={`p-5 mb-3 rounded-2xl border transition-all ${isSelected ? 'bg-primary/5 border-primary/20 shadow-lg' : 'bg-white border-slate-100 shadow-sm'}`}
                   >
-                    <div className="flex justify-between items-start">
+                    <div className="flex justify-between items-start mb-4">
                       <div>
-                        <p className="text-[10px] font-bold text-primary uppercase mb-0.5">Dispatch No</p>
-                        <p className="font-bold text-gray-900 text-sm">{item.dispatchNo}</p>
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Dispatch No</p>
+                        <p className="font-black text-slate-900 text-base">{item.dispatchNo}</p>
                       </div>
                       {activeTab === 'pending' && (
                         <div className="flex items-center gap-3">
-                          <button onClick={() => handleCancelDispatch(item)} className="p-1 text-gray-400 hover:text-red-600 transition-colors">
+                          <button onClick={() => handleCancelDispatch(item)} className="p-2 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all">
                             <Trash2 size={18} />
                           </button>
-                          <input type="checkbox" checked={isSelected} onChange={() => handleCheckboxToggle(itemId)} className="rounded text-primary focus:ring-primary w-4 h-4 cursor-pointer mt-1" />
+                          <input type="checkbox" checked={isSelected} onChange={() => handleCheckboxToggle(itemId)} className="rounded text-primary focus:ring-primary w-5 h-5 cursor-pointer" />
                         </div>
                       )}
                     </div>
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div>
-                        <p className="text-[10px] font-bold text-primary uppercase mb-0.5">Customer</p>
-                        <p className="font-semibold text-gray-800">{item.clientName}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-bold text-primary uppercase mb-0.5">Dispatch Date</p>
-                        <p className="text-gray-600">{formatDisplayDate(item.dispatchDate)}</p>
-                      </div>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
                       <div className="col-span-2">
-                        <p className="text-[10px] font-bold text-primary uppercase mb-0.5">Product</p>
-                        {activeTab === 'pending' && isSelected ? (
-                          <SearchableDropdown value={editData[itemId]?.product || item.itemName} onChange={(val) => handleEditChange(itemId, 'product', val)} options={itemNames} placeholder="Select Product" showAll={false} focusColor="primary" className="w-full" />
-                        ) : (
-                          <p className="text-gray-700">{item.itemName}</p>
-                        )}
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Customer</p>
+                        <p className="font-bold text-slate-800">{item.clientName}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] font-bold text-primary uppercase mb-0.5">Godown</p>
-                        {activeTab === 'pending' && isSelected ? (
-                          <SearchableDropdown value={editData[itemId]?.godown || item.godownName} onChange={(val) => handleEditChange(itemId, 'godown', val)} options={godowns} placeholder="Select Godown" showAll={false} focusColor="primary" className="w-full" />
-                        ) : (
-                          <p className="text-gray-700">{item.godownName}</p>
-                        )}
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Date</p>
+                        <p className="font-bold text-slate-600 text-xs bg-slate-50 px-2 py-1 rounded-md inline-block">{formatDisplayDate(item.dispatchDate)}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] font-bold text-primary uppercase mb-0.5">Dispatch Qty</p>
-                        {activeTab === 'pending' && isSelected ? (
-                          <input type="text" value={editData[itemId]?.dispatchQty !== undefined ? editData[itemId].dispatchQty : item.dispatchQty} onChange={(e) => handleEditChange(itemId, 'dispatchQty', e.target.value)} className="w-full px-2 py-1 border rounded text-xs outline-none focus:border-primary" />
-                        ) : (
-                          <p className="font-black text-primary">{item.dispatchQty}</p>
-                        )}
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Order Qty</p>
+                        <p className="font-black text-slate-400 text-xs">{item.qty}</p>
                       </div>
-                      {activeTab === 'pending' && (
-                        <div>
-                          <p className="text-[10px] font-bold text-primary uppercase mb-0.5">Complete Date</p>
-                          <input type="date" disabled={!isSelected} value={editData[itemId]?.completeDate || ''} onChange={(e) => handleEditChange(itemId, 'completeDate', e.target.value)} className="w-full px-2 py-1 border rounded text-xs outline-none focus:border-primary disabled:opacity-50" />
+                      <div className="col-span-2 p-3 bg-slate-50/50 rounded-xl border border-slate-100">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Item & Godown</p>
+                        <div className="flex flex-col gap-1">
+                          <p className="text-sm font-bold text-slate-800 leading-tight">{item.itemName}</p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase italic opacity-60">@{item.godownName}</p>
                         </div>
-                      )}
-                      {activeTab === 'history' && (
-                        <div className="col-span-2">
-                          <p className="text-[10px] font-bold text-primary uppercase mb-0.5">Completed At</p>
-                          <p className="text-gray-600 text-xs">{item.completedAt ? new Date(item.completedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'}</p>
-                        </div>
-                      )}
+                      </div>
+                      <div className="col-span-2 pt-2 flex items-center justify-between">
+                         <div>
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Dispatch Qty</p>
+                            <p className="text-lg font-black text-primary tracking-tight">{item.dispatchQty}</p>
+                         </div>
+                         {activeTab === 'history' && (
+                            <span className="bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border border-emerald-100 shadow-sm">
+                                {item.status}
+                            </span>
+                         )}
+                      </div>
                     </div>
                   </div>
                 );

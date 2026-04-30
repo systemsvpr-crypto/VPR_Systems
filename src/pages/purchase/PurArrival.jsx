@@ -3,6 +3,7 @@ import { RefreshCw, Search, Package, Save, CheckSquare, History, Clock, AlertCir
 import { supabase } from '../../supabase';
 import useAuthStore from '../../store/authStore';
 import toast from 'react-hot-toast';
+import SearchableDropdown from '../../components/SearchableDropdown';
 
 const TS = ({ cols = 8 }) => <>{[...Array(4)].map((_, i) => (
   <tr key={i} className="border-b border-gray-50">
@@ -328,24 +329,36 @@ const PurArrival = () => {
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 pt-4 border-t border-gray-50">
           <div className="space-y-1">
             <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Lifting No</label>
-            <select value={filterLiftNo} onChange={e => setFilterLiftNo(e.target.value)} className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-xs font-bold focus:ring-2 focus:ring-orange-500/20 outline-none">
-              <option value="">All Lifting Nos</option>
-              {uniqueLiftNos.map(no => <option key={no} value={no}>{no}</option>)}
-            </select>
+            <SearchableDropdown 
+              options={uniqueLiftNos} 
+              value={filterLiftNo} 
+              onChange={setFilterLiftNo} 
+              placeholder="All Lifting Nos" 
+              showAll={true} 
+              allLabel="All Lifting Nos"
+            />
           </div>
           <div className="space-y-1">
             <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Product</label>
-            <select value={filterProd} onChange={e => setFilterProd(e.target.value)} className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-xs font-bold focus:ring-2 focus:ring-orange-500/20 outline-none">
-              <option value="">All Products</option>
-              {uniqueProducts.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
+            <SearchableDropdown 
+              options={uniqueProducts} 
+              value={filterProd} 
+              onChange={setFilterProd} 
+              placeholder="All Products" 
+              showAll={true} 
+              allLabel="All Products"
+            />
           </div>
           <div className="space-y-1">
             <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Transporter</label>
-            <select value={filterTrans} onChange={e => setFilterTrans(e.target.value)} className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-lg text-xs font-bold focus:ring-2 focus:ring-orange-500/20 outline-none">
-              <option value="">All Transporters</option>
-              {uniqueTransporters.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <SearchableDropdown 
+              options={uniqueTransporters} 
+              value={filterTrans} 
+              onChange={setFilterTrans} 
+              placeholder="All Transporters" 
+              showAll={true} 
+              allLabel="All Transporters"
+            />
           </div>
           <div className="space-y-1">
             <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Del. Date</label>
@@ -439,11 +452,14 @@ const PurArrival = () => {
                         className={`w-20 px-2 py-1.5 border border-gray-200 rounded font-black text-gray-700 text-xs focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all text-right ${isDisabled ? 'bg-gray-50 border-transparent opacity-60' : 'bg-white text-green-600'}`} placeholder="0" />
                     </td>
                     <td className="px-1 py-4">
-                      <select value={row.godown_name || ''} onChange={e => updateEditRow(d.id, 'godown_name', e.target.value)} disabled={isDisabled}
-                        className={`w-32 px-2 py-1.5 border border-gray-200 rounded font-bold text-gray-700 text-xs focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all ${isDisabled ? 'bg-gray-50 border-transparent opacity-60' : 'bg-white'}`}>
-                        <option value="">Select Godown</option>
-                        {godowns.map(g => <option key={g.name} value={g.name}>{g.name}</option>)}
-                      </select>
+                      <SearchableDropdown 
+                        options={godowns.map(g => g.name)} 
+                        value={row.godown_name || ''} 
+                        onChange={v => updateEditRow(d.id, 'godown_name', v)} 
+                        placeholder="Select Godown" 
+                        showAll={false}
+                        className={isDisabled ? 'opacity-60 pointer-events-none' : ''}
+                      />
                     </td>
                     <td className="px-1 py-4">
                       <input type="text" value={row.remarks || ''} onChange={e => updateEditRow(d.id, 'remarks', e.target.value)} disabled={isDisabled}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Save, Loader, Clock, History, ChevronDown, ChevronUp, RefreshCw, X, XCircle } from 'lucide-react';
+import { Save, Loader, Clock, History, ChevronDown, ChevronUp, RefreshCw, X, XCircle, Search } from 'lucide-react';
 import SearchableDropdown from '../../components/SearchableDropdown';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
@@ -599,7 +599,16 @@ const OtdSkip = () => {
 
         <div className="flex flex-col lg:flex-row justify-between gap-4 lg:items-start relative z-20">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 w-full">
-            <input type="text" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full h-[42px] px-3 py-2 bg-gray-50 border border-gray-200 rounded focus:ring-2 focus:ring-primary focus:border-transparent outline-none text-sm transition-all" />
+            <div className="relative group">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors" />
+              <input
+                type="text"
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full h-[42px] pl-10 pr-3 bg-slate-50 border border-slate-200 rounded focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none text-sm transition-all"
+              />
+            </div>
             <div className="h-[42px]"><SearchableDropdown value={clientFilter} onChange={setClientFilter} options={allUniqueClients} allLabel="All Clients" className="w-full h-full" focusColor="primary" /></div>
             <div className="h-[42px]"><SearchableDropdown value={godownFilter} onChange={setGodownFilter} options={allUniqueGodowns} allLabel="All Godowns" className="w-full h-full" focusColor="primary" /></div>
           </div>
@@ -619,13 +628,13 @@ const OtdSkip = () => {
       {isSaving && (<div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-white/40 backdrop-blur-md"><div className="bg-white/80 p-10 rounded-3xl shadow-xl flex flex-col items-center gap-4 border border-white/50"><Loader className="w-10 h-10 animate-spin text-primary" /><p className="text-sm font-black text-gray-700 uppercase tracking-widest">Processing Skip...</p></div></div>)}
       {refreshing && (<div className="fixed top-0 left-0 right-0 h-1 z-[101] bg-gray-100 overflow-hidden"><div className="h-full bg-primary animate-shimmer" style={{ width: '40%' }}></div></div>)}
 
-      <div className="bg-white rounded shadow-sm border border-gray-200 overflow-hidden max-w-[1200px] mx-auto">
+      <div className="erp-table-container max-w-[1200px] mx-auto">
         <div className="hidden md:block overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 max-h-[460px] overflow-y-auto">
-          <table className="w-full text-left border-collapse min-w-[1200px]">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-600 font-bold sticky top-0 z-10 shadow-sm">
+          <table className="erp-table min-w-[1200px]">
+            <thead className="erp-table-thead">
+              <tr className="erp-table-tr">
                 {activeTab === 'pending' && (
-                  <th className="px-6 py-4 text-center w-16">
+                  <th className="erp-table-th text-center w-16">
                     <div className="flex flex-col items-center gap-1">
                       <span className="text-[10px] text-gray-400">All</span>
                       <input type="checkbox" checked={isAllFilteredSelected} onChange={toggleSelectAll} className="rounded text-primary focus:ring-primary w-4 h-4 cursor-pointer" />
@@ -634,9 +643,9 @@ const OtdSkip = () => {
                 )}
                 {activeTab === 'pending' && (
                   <>
-                    <th className="px-6 py-4 text-primary-hover text-right whitespace-nowrap">Dispatch Qty</th>
-                    <th className="px-6 py-4 text-primary-hover text-center whitespace-nowrap">Dispatch Date</th>
-                    <th className="px-6 py-4 text-primary-hover text-center whitespace-nowrap">GST Inc.</th>
+                    <th className="erp-table-th text-right whitespace-nowrap">Dispatch Qty</th>
+                    <th className="erp-table-th text-center whitespace-nowrap">Dispatch Date</th>
+                    <th className="erp-table-th text-center whitespace-nowrap">GST Inc.</th>
                   </>
                 )}
                 {[
@@ -664,7 +673,7 @@ const OtdSkip = () => {
                     { label: 'Godown Name', key: 'godownName', align: 'center' }
                   ] : [])
                 ].map((col) => (
-                  <th key={col.key} className={`px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors ${col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : 'text-left'}`} onClick={() => requestSort(col.key)}>
+                  <th key={col.key} className={`erp-table-th cursor-pointer hover:bg-slate-100/50 transition-colors ${col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : 'text-left'}`} onClick={() => requestSort(col.key)}>
                     <div className={`flex items-center gap-1 ${col.align === 'center' ? 'justify-center' : col.align === 'right' ? 'justify-end' : 'justify-start'}`}>
                       {col.label}
                       <div className="flex flex-col"><ChevronUp size={10} className={sortConfig.key === col.key && sortConfig.direction === 'asc' ? 'text-primary' : 'text-gray-300'} /><ChevronDown size={10} className={sortConfig.key === col.key && sortConfig.direction === 'desc' ? 'text-primary' : 'text-gray-300'} /></div>
@@ -680,7 +689,7 @@ const OtdSkip = () => {
                 const isSelected = activeTab === 'pending' && !!selectedRows[originalIdx];
                 const edit = editData[originalIdx] || {};
                 return (
-                  <tr key={idx} className={isSelected ? 'bg-green-50/50' : 'hover:bg-gray-50'}>
+                  <tr key={idx} className="erp-table-tr group">
                     {activeTab === 'pending' && (<td className="px-6 py-4 text-center"><input type="checkbox" checked={isSelected} onChange={() => handleCheckboxToggle(originalIdx)} className="rounded text-primary focus:ring-primary w-4 h-4 cursor-pointer" /></td>)}
                     {activeTab === 'pending' && (
                       <>
@@ -689,21 +698,21 @@ const OtdSkip = () => {
                         <td className="px-6 py-4 text-center">{isSelected ? (<select value={edit.gstIncluded || 'No'} onChange={(e) => handleEditChange(originalIdx, 'gstIncluded', e.target.value)} className="w-full px-1 py-1 border border-gray-300 rounded text-sm outline-none"><option value="Yes">Yes</option><option value="No">No</option></select>) : (<span className="text-gray-300 italic text-[10px]">-</span>)}</td>
                       </>
                     )}
-                    <td className="px-6 py-4 font-semibold text-gray-900">{item.orderNumber}</td>
-                    <td className="px-6 py-4 font-medium text-gray-800">{item.clientName}</td>
-                    <td className="px-6 py-4 font-semibold text-gray-700">{item.itemName}</td>
-                    <td className="px-6 py-4 text-gray-600 text-center">{isSelected ? (<SearchableDropdown value={edit.godown || ''} onChange={(val) => handleEditChange(originalIdx, 'godown', val)} options={godowns} placeholder="Select Godown" showAll={false} className="w-full text-left" />) : (item.godown)}</td>
+                    <td className="erp-table-td font-black text-slate-500">{item.orderNumber}</td>
+                    <td className="erp-table-td font-bold text-slate-900">{item.clientName}</td>
+                    <td className="erp-table-td font-semibold text-slate-700 truncate max-w-[200px]" title={item.itemName}>{item.itemName}</td>
+                    <td className="erp-table-td text-center text-slate-600 italic font-black text-[11px] uppercase opacity-60 whitespace-nowrap">{isSelected ? (<SearchableDropdown value={edit.godown || ''} onChange={(val) => handleEditChange(originalIdx, 'godown', val)} options={godowns} placeholder="Select Godown" showAll={false} className="w-full text-left" />) : (item.godown)}</td>
 
                     {activeTab === 'pending' && (<>
                       {/* Order Qty — Remaining sub-label */}
-                      <td className="px-6 py-4 text-center">
+                      <td className="erp-table-td text-center">
                         <span className="inline-flex flex-col items-center">
                           <span className="font-black text-primary text-base leading-tight">{item.orderQty}</span>
                           <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-none">Remaining</span>
                         </span>
                       </td>
                       {/* Remaining Planning Qty - with minus badge */}
-                      <td className="px-6 py-4 text-center">
+                      <td className="erp-table-td text-center">
                         {item.planningPendingQty < 0 ? (
                           <span className="inline-flex flex-col items-center gap-0.5">
                             <span className="inline-flex items-center gap-1 bg-red-50 border border-red-200 text-red-600 font-black text-sm px-2 py-0.5 rounded-full leading-tight">
@@ -720,40 +729,36 @@ const OtdSkip = () => {
                         )}
                       </td>
                       {/* In Process */}
-                      <td className="px-6 py-4 text-center">
+                      <td className="erp-table-td text-center">
                         <span className="inline-flex flex-col items-center">
                           <span className="font-bold text-indigo-500 leading-tight">{item.inProcessQty || 0}</span>
                           <span className="text-[9px] font-bold text-indigo-300 uppercase tracking-widest leading-none">In Process</span>
                         </span>
                       </td>
                       {/* Canceled Qty */}
-                      <td className="px-6 py-4 text-center">
+                      <td className="erp-table-td text-center">
                         <span className="inline-flex flex-col items-center">
                           <span className="font-bold text-red-500 leading-tight">{item.canceledQty > 0 ? item.canceledQty : '—'}</span>
                           <span className="text-[9px] font-bold text-red-300 uppercase tracking-widest leading-none">Cancelled</span>
                         </span>
                       </td>
-                      {/* Total Order Qty */}
-                      <td className="px-6 py-4 text-center bg-gray-50/50">
-                        <span className="inline-flex flex-col items-center">
-                          <span className="font-black text-gray-700 text-base leading-tight">{item.totalOriginalQty}</span>
-                          <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-none">Original</span>
-                        </span>
-                      </td>
+                    <td className="erp-table-td text-center bg-gray-50/50">
+                      <span className="inline-flex flex-col items-center">
+                        <span className="font-black text-gray-700 text-base leading-tight">{item.totalOriginalQty}</span>
+                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-none">Original</span>
+                      </span>
+                    </td>
                       {/* Current Stock (async spinner) */}
-                      <td className="px-6 py-4 text-center text-[10px] font-bold text-gray-500 bg-slate-50/50 leading-tight">
-                        {loadingStock ? <RefreshCw size={12} className="animate-spin inline text-primary/40" /> : (item.currentStock || '-')}
-                      </td>
-                      {/* Order Date */}
-                      <td className="px-6 py-4 text-[11px] font-black uppercase text-gray-500 text-center">{formatDisplayDate(item.orderDate)}</td>
-                      {/* Rate */}
-                      <td className="px-6 py-4 text-right text-slate-500 font-medium">₹{item.rate}</td>
+                    <td className="erp-table-td text-center font-black text-slate-400 bg-slate-50/30">
+                      {loadingStock ? <RefreshCw size={12} className="animate-spin inline text-primary/40" /> : (item.currentStock || '-')}
+                    </td>
+                    <td className="erp-table-td text-center text-slate-400 font-bold uppercase text-[10px] tracking-tighter bg-slate-50/50 rounded-lg whitespace-nowrap">{formatDisplayDate(item.orderDate)}</td>
+                    <td className="erp-table-td text-right text-slate-500 font-medium">₹{item.rate}</td>
                       {/* Intransit (async spinner) */}
-                      <td className="px-6 py-4 text-center text-[11px] font-bold text-gray-500">
-                        {loadingIntransit ? <RefreshCw size={12} className="animate-spin inline text-primary/40" /> : item.intransitQty}
-                      </td>
-                      {/* Qty Delivered */}
-                      <td className="px-6 py-4 text-center font-bold text-green-600">{item.qtyDelivered}</td>
+                    <td className="erp-table-td text-center text-slate-400 font-black">
+                      {loadingIntransit ? <RefreshCw size={12} className="animate-spin inline text-primary/40" /> : item.intransitQty}
+                    </td>
+                    <td className="erp-table-td text-center font-black text-green-600">{item.qtyDelivered}</td>
                     </>)}
                     {activeTab === 'history' && (<><td className="px-6 py-4 text-slate-500 font-medium text-right">₹{item.rate}</td><td className="px-6 py-4 text-gray-600 font-bold">{item.dispatchNo}</td><td className="px-6 py-4 text-gray-600 text-right font-bold">{item.dispatchQty}</td><td className="px-6 py-4 text-gray-600 text-xs text-center">{formatDisplayDate(item.dispatchDate)}</td><td className="px-6 py-4 text-gray-600 text-center">{item.godownName}</td></>)}
                   </tr>

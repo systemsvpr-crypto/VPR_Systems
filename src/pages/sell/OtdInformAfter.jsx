@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Mail, History, Save, ChevronUp, ChevronDown, RefreshCw, ClipboardList, CheckCircle } from 'lucide-react';
+import { Mail, History, Save, ChevronUp, ChevronDown, RefreshCw, ClipboardList, CheckCircle, Search, Package } from 'lucide-react';
 import SearchableDropdown from '../../components/SearchableDropdown';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
@@ -21,21 +21,25 @@ const formatDisplayDate = (dateStr) => {
 };
 
 // --- High-Fidelity Skeletons ---
-const TableSkeleton = () => (
-  <div className="w-full space-y-4 p-4">
-    <div className="h-10 bg-gray-100 rounded-lg w-full mb-6 relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent animate-shimmer"></div>
-    </div>
-    {[...Array(6)].map((_, i) => (
-      <div key={i} className="flex space-x-4 border-b border-gray-50 pb-4 relative overflow-hidden">
-        {[1 / 12, 2 / 12, 2 / 12, 3 / 12, 2 / 12, 1 / 12, 1 / 12].map((width, j) => (
-          <div key={j} style={{ width: `${width * 100}%` }} className="h-4 bg-gray-50 rounded relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent animate-shimmer"></div>
+const TableSkeleton = ({ cols = 8 }) => (
+  <tr>
+    <td colSpan={cols} className="p-0">
+      <div className="w-full space-y-4 p-4">
+        <div className="h-10 bg-gray-100 rounded-lg w-full mb-6 relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent animate-shimmer"></div>
+        </div>
+        {[...Array(6)].map((_, i) => (
+          <div key={i} className="flex space-x-4 border-b border-gray-50 pb-4 relative overflow-hidden">
+            {[...Array(7)].map((_, j) => (
+              <div key={j} className="flex-1 h-4 bg-gray-50 rounded relative overflow-hidden">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent animate-shimmer"></div>
+              </div>
+            ))}
           </div>
         ))}
       </div>
-    ))}
-  </div>
+    </td>
+  </tr>
 );
 
 const OtdInformAfter = () => {
@@ -189,7 +193,7 @@ const OtdInformAfter = () => {
             orderNumbers: items.map(i => i.orderNo),
             productNames: items.map(i => `${i.productName} (${i.dispatchQty})`),
             dispatchDates: items.map(i => formatDisplayDate(i.dispatchDate))
-          });
+          }, { stage: 'After Dispatch' });
           // Add to successful list
           items.forEach(it => successfulIds.push(it.id));
         } catch (wsError) {
@@ -228,99 +232,71 @@ const OtdInformAfter = () => {
   const handleRefresh = () => fetchData(true);
 
   return (
-    <div className="">
-      {/* Background Refresh Progress */}
-      {isRefreshing && !isLoading && (
-        <div className="fixed top-0 left-0 right-0 h-1 z-[100] bg-gray-100 overflow-hidden">
-          <div className="h-full bg-primary animate-shimmer-fast w-full origin-left"></div>
-        </div>
-      )}
-
+    <div className="p-4 lg:p-6 space-y-6">
       {/* Header & Controls */}
-      <div className="max-w-[1400px] mx-auto mb-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100">
-          {/* Row 1: Title & Tabs */}
-          <div className="px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-50 gap-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-primary/10 rounded-xl text-primary"><Mail size={22} /></div>
-              <div>
-                <h1 className="text-xl font-bold text-gray-900 tracking-tight leading-none mb-1.5">Inform to Party</h1>
-                <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest leading-none">After Dispatch Notifications</p>
-              </div>
+      <div className="flex flex-col gap-6 bg-white p-6 rounded-lg shadow-sm border border-slate-200 max-w-[1200px] mx-auto">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-6">
+            <div>
+              <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Inform to Party</h1>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-1">Post-Dispatch Client Notifications</p>
             </div>
-
-            <div className="flex items-center gap-2 bg-gray-100/80 p-1 rounded-xl border border-gray-200/50">
+            
+            <div className="flex bg-slate-100 p-1 rounded-lg">
               <button
                 onClick={() => { setActiveTab('pending'); setSelectedRows({}); }}
-                className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'pending' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-bold transition-all ${activeTab === 'pending' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 <ClipboardList size={16} /> PENDING
               </button>
               <button
                 onClick={() => { setActiveTab('history'); setSelectedRows({}); }}
-                className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'history' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-bold transition-all ${activeTab === 'history' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 <History size={16} /> HISTORY
               </button>
             </div>
           </div>
+        </div>
 
-          {/* Row 2: Filters & Actions */}
-          <div className="px-6 py-4 bg-gray-50/30 flex flex-wrap items-center gap-4 relative z-20">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 flex-1 min-w-[300px]">
-              <div className="relative">
-                <div className="absolute inset-y-0 left-3 flex items-center text-gray-400"><RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} /></div>
-                <input
-                  type="text"
-                  placeholder="Search..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-primary/20 outline-none"
-                />
-              </div>
-              <SearchableDropdown value={clientFilter} onChange={setClientFilter} options={allUniqueClients} allLabel="ALL CLIENTS" placeholder="Client" />
-              <SearchableDropdown value={godownFilter} onChange={setGodownFilter} options={allUniqueGodowns} allLabel="ALL GODOWNS" placeholder="Godown" />
+        {/* Row 2: Filters & Actions */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
+          <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="relative group">
+              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors" />
+              <input
+                type="text"
+                placeholder="Search records..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full h-[42px] pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none text-sm transition-all"
+              />
             </div>
+            <SearchableDropdown value={clientFilter} onChange={setClientFilter} options={allUniqueClients} allLabel="ALL CLIENTS" placeholder="Client" className="h-[42px]" />
+            <SearchableDropdown value={godownFilter} onChange={setGodownFilter} options={allUniqueGodowns} allLabel="ALL GODOWNS" placeholder="Godown" className="h-[42px]" />
+          </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              <button onClick={handleRefresh} disabled={isRefreshing} className="px-4 py-2 bg-white text-gray-700 rounded-xl hover:bg-gray-50 text-xs font-black border border-gray-200 shadow-sm flex items-center gap-2">
-                <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} /> REFRESH
+          <div className="md:col-span-2 flex flex-wrap items-center justify-end gap-3">
+            <button onClick={handleRefresh} disabled={isRefreshing} className="erp-btn-secondary h-[42px]">
+              <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} /> REFRESH
+            </button>
+            {activeTab === 'pending' && Object.keys(selectedRows).length > 0 && (
+              <button onClick={handleSave} disabled={isSaving} className="erp-btn-primary h-[42px] px-6 shadow-md shadow-primary/10">
+                {isSaving ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18} />}
+                {isSaving ? 'SAVING...' : 'CONFIRM NOTIFY'}
               </button>
-              {activeTab === 'pending' && Object.keys(selectedRows).length > 0 && (
-                <button onClick={handleSave} disabled={isSaving} className="px-6 py-2 bg-primary text-white rounded-xl hover:opacity-90 shadow-lg shadow-primary/20 font-black text-xs tracking-widest flex items-center gap-2">
-                  {isSaving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={18} />}
-                  {isSaving ? 'SAVING...' : 'CONFIRM NOTIFY'}
-                </button>
-              )}
-            </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Main Table Content */}
-      <div className="max-w-[1400px] mx-auto bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden min-h-[400px]">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-separate border-spacing-0">
-            <thead>
-              <tr className="bg-gray-50 sticky top-0 z-10 border-b border-gray-200">
-                {activeTab === 'pending' && (
-                  <th className="px-6 py-4 text-center w-16">
-                    <input
-                      type="checkbox"
-                      checked={pendingItems.length > 0 && filteredItems.every(it => selectedRows[it.id])}
-                      onChange={() => {
-                        const allCurrent = filteredItems.map(it => it.id);
-                        const allSelected = allCurrent.every(id => selectedRows[id]);
-                        setSelectedRows(prev => {
-                          const next = { ...prev };
-                          allCurrent.forEach(id => { if (allSelected) delete next[id]; else next[id] = true; });
-                          return next;
-                        });
-                      }}
-                      className="rounded-md w-5 h-5 cursor-pointer"
-                    />
-                  </th>
-                )}
+      <div className="erp-table-container max-w-[1200px] mx-auto">
+        <div className="hidden md:block overflow-x-auto max-h-[600px] overflow-y-auto custom-scrollbar">
+          <table className="erp-table">
+            <thead className="erp-table-thead">
+              <tr>
+                {activeTab === 'pending' && <th className="erp-table-th text-center w-16">Action</th>}
                 {[
                   { label: 'Dispatch No', key: 'dispatchNo' },
                   { label: 'Dispatch Date', key: 'dispatchDate', align: 'center' },
@@ -333,46 +309,62 @@ const OtdInformAfter = () => {
                   { label: 'Status', key: 'status', align: 'center' },
                   { label: 'Dispatch Qty', key: 'dispatchQty', align: 'right' },
                 ].map(col => (
-                  <th key={col.key} className={`px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors ${col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : 'text-left'}`} onClick={() => requestSort(col.key)}>
-                    <div className={`flex items-center gap-1.5 ${col.align === 'center' ? 'justify-center' : col.align === 'right' ? 'justify-end' : ''}`}>
-                      <span className="text-[11px] font-black uppercase tracking-widest text-gray-500">{col.label}</span>
-                      <ChevronDown size={10} className={sortConfig.key === col.key ? 'text-primary' : 'text-gray-300'} />
+                  <th key={col.key} className={`erp-table-th cursor-pointer hover:bg-slate-100 transition-colors ${col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : 'text-left'}`} onClick={() => requestSort(col.key)}>
+                    <div className={`flex items-center gap-1.5 ${col.align === 'center' ? 'justify-center' : col.align === 'right' ? 'justify-end' : 'justify-start'}`}>
+                      {col.label}
+                      <div className="flex flex-col -space-y-1">
+                        <ChevronUp size={12} className={sortConfig.key === col.key && sortConfig.direction === 'asc' ? 'text-primary' : 'text-slate-300'} />
+                        <ChevronDown size={12} className={sortConfig.key === col.key && sortConfig.direction === 'desc' ? 'text-primary' : 'text-slate-300'} />
+                      </div>
                     </div>
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50 font-medium">
+            <tbody className="divide-y divide-slate-100">
               {isLoading ? (
-                <tr><td colSpan="12"><TableSkeleton /></td></tr>
+                <TableSkeleton cols={activeTab === 'pending' ? 10 : 9} />
               ) : filteredItems.length === 0 ? (
-                <tr><td colSpan="12" className="px-4 py-20 text-center text-gray-400 italic font-bold text-sm">No entries found for this selection.</td></tr>
-              ) : filteredItems.map(item => {
-                const isSelected = activeTab === 'pending' && !!selectedRows[item.id];
-                return (
-                  <tr key={item.id} className={`group ${isSelected ? 'bg-primary/5' : 'hover:bg-gray-50/50'} transition-all`}>
-                    {activeTab === 'pending' && (
-                      <td className="px-6 py-4 text-center">
-                        <input type="checkbox" checked={isSelected} onChange={() => handleCheckboxToggle(item.id)} className="rounded-md w-5 h-5 cursor-pointer" />
+                <tr>
+                  <td colSpan="14" className="px-6 py-24 text-center">
+                    <div className="flex flex-col items-center gap-4">
+                      <div className="p-5 bg-slate-50 rounded-full text-slate-300">
+                        <Package size={40} strokeWidth={1.5} />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">No records found</p>
+                        <p className="text-xs text-slate-300">Try adjusting your filters or search term</p>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                filteredItems.map((item, idx) => {
+                  const isSelected = activeTab === 'pending' && !!selectedRows[item.id];
+                  return (
+                    <tr key={idx} className="erp-table-tr group">
+                      {activeTab === 'pending' && (
+                        <td className="erp-table-td text-center w-16">
+                          <input type="checkbox" checked={isSelected} onChange={() => handleCheckboxToggle(item.id)} className="rounded-md w-5 h-5 cursor-pointer" />
+                        </td>
+                      )}
+                      <td className="erp-table-td font-black text-primary">{item.dispatchNo}</td>
+                      <td className="erp-table-td text-center font-black text-primary uppercase text-[10px] tracking-tighter bg-slate-50/50 rounded-lg whitespace-nowrap">{formatDisplayDate(item.dispatchDate)}</td>
+                      <td className="erp-table-td text-gray-500 font-bold">{item.orderNo}</td>
+                      <td className="erp-table-td font-bold text-slate-900">{item.customerName}</td>
+                      <td className="erp-table-td font-semibold text-slate-700 truncate max-w-[200px]" title={item.productName}>{item.productName}</td>
+                      <td className="erp-table-td text-center text-slate-600 italic font-black text-[11px] uppercase opacity-60 whitespace-nowrap">{item.godown}</td>
+                      <td className="erp-table-td text-gray-400 text-[11px] italic font-bold">{item.crmName}</td>
+                      <td className="erp-table-td text-right font-black text-slate-400">{item.orderQty}</td>
+                      <td className="erp-table-td text-center">
+                        <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest ${activeTab === 'pending' ? 'bg-amber-50 text-amber-600 border border-amber-100' : 'bg-emerald-50 text-emerald-600 border border-emerald-100'}`}>
+                          {item.status}
+                        </span>
                       </td>
-                    )}
-                    <td className="px-6 py-4"><span className="px-2 py-1 rounded bg-indigo-50 text-indigo-700 font-black text-[10px] tracking-wider uppercase">{item.dispatchNo}</span></td>
-                    <td className="px-6 py-4 text-center font-bold text-[11px] text-gray-500">{formatDisplayDate(item.dispatchDate)}</td>
-                    <td className="px-6 py-4 text-gray-600 text-[13px] font-bold">{item.orderNo}</td>
-                    <td className="px-6 py-4 font-bold text-gray-900 text-sm whitespace-nowrap">{item.customerName}</td>
-                    <td className="px-6 py-4 text-[11px] font-bold text-gray-400 uppercase tracking-tighter truncate max-w-[200px]">{item.productName}</td>
-                    <td className="px-6 py-4 text-center text-gray-600 font-bold text-[12px]">{item.godown}</td>
-                    <td className="px-6 py-4 text-gray-400 text-[11px] italic font-bold">{item.crmName}</td>
-                    <td className="px-6 py-4 text-right text-gray-700 font-black text-[13px]">{item.orderQty}</td>
-                    <td className="px-6 py-4 text-center">
-                      <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest ${activeTab === 'pending' ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                        {item.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right font-black text-primary text-[14px]">{item.dispatchQty}</td>
-                  </tr>
-                );
-              })}
+                      <td className="erp-table-td text-right font-black text-primary text-base leading-tight">{item.dispatchQty}</td>
+                    </tr>
+                  );
+                } ))}
             </tbody>
           </table>
         </div>

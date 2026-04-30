@@ -400,19 +400,19 @@ const Products = ({ isTab = false }) => {
                 </div>
 
                 {/* Desktop View */}
-                <div className="hidden md:flex bg-white rounded-2xl shadow-sm border border-slate-200/60 flex-col">
+                <div className="hidden md:flex erp-table-container flex-col">
                     <div className="overflow-x-auto custom-scrollbar">
-                        <table className="w-full text-left border-collapse">
-                            <thead>
-                                <tr className="bg-slate-50/50 border-b border-slate-100 sticky top-0 z-10 backdrop-blur-md">
+                        <table className="erp-table">
+                            <thead className="erp-table-thead">
+                                <tr className="erp-table-tr">
                                     <HeaderCell>Product Details</HeaderCell>
                                     <HeaderCell>MUX</HeaderCell>
                                     <HeaderCell>Godown</HeaderCell>
                                     <HeaderCell>Unit</HeaderCell>
-                                    <HeaderCell>Qty</HeaderCell>
-                                    <HeaderCell>Opening Qty</HeaderCell>
-                                    <HeaderCell>Closing Qty</HeaderCell>
-                                    <HeaderCell>Status</HeaderCell>
+                                    <HeaderCell align="center">Current Stock</HeaderCell>
+                                    <HeaderCell align="center">Opening Qty</HeaderCell>
+                                    <HeaderCell align="center">Closing Qty</HeaderCell>
+                                    <HeaderCell align="center">Status</HeaderCell>
                                     <HeaderCell align="right">Actions</HeaderCell>
                                 </tr>
                             </thead>
@@ -747,7 +747,7 @@ const FormSelect = ({ label, icon: Icon, options, ...props }) => (
 );
 
 const HeaderCell = ({ children, align = "left" }) => (
-    <th className={`px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider text-${align}`}>
+    <th className={`erp-table-th text-${align}`}>
         {children}
     </th>
 );
@@ -761,41 +761,39 @@ const EmptyRow = ({ message }) => (
 );
 
 const ProductRow = ({ product, godowns, user, onEdit, onDelete, onToggle }) => (
-    <tr className="hover:bg-slate-50/80 transition-colors group">
-        <td className="px-4 py-3">
+    <tr className="erp-table-tr group">
+        <td className="erp-table-td">
             <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
+                <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-primary/10 group-hover:text-primary transition-colors">
                     <Package size={18} />
                 </div>
                 <div>
-                    <div className="font-medium text-slate-900 text-sm">{product.name}</div>
-                    <div className="text-xs text-slate-500">{product.product_id}</div>
+                    <div className="font-bold text-slate-900 text-sm">{product.name}</div>
+                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{product.product_id}</div>
                 </div>
             </div>
         </td>
-        <td className="px-4 py-3">
-            <div className="text-sm text-slate-900">{product.mux || '-'}</div>
+        <td className="erp-table-td font-medium text-slate-600 italic">
+            {product.mux || '-'}
         </td>
-        <td className="px-4 py-3">
-            <span className="text-sm text-slate-900">
-                {godowns.find(g => g.godown_id === product.godown_id)?.name || product.godown_id || '-'}
-            </span>
+        <td className="erp-table-td text-slate-500 font-bold text-[11px] uppercase">
+            {godowns.find(g => g.godown_id === product.godown_id)?.name || product.godown_id || '-'}
         </td>
-        <td className="px-4 py-3">
-            <span className="text-sm text-slate-900">{product.unit || '-'}</span>
+        <td className="erp-table-td">
+            <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded text-[10px] font-black">{product.unit || '-'}</span>
         </td>
-        <td className="px-4 py-3">
-            <span className="text-sm font-medium text-slate-900">{product.quantity || 0}</span>
+        <td className="erp-table-td text-center">
+            <span className="font-black text-primary">{product.quantity || 0}</span>
         </td>
-        <td className="px-4 py-3">
-            <span className="text-sm font-medium text-slate-900">{product.opening_quantity || 0}</span>
+        <td className="erp-table-td text-center font-bold text-slate-500">
+            {product.opening_quantity || 0}
         </td>
-        <td className="px-4 py-3">
-            <span className="text-sm font-bold text-slate-900">{product.closing_quantity || 0}</span>
+        <td className="erp-table-td text-center">
+            <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded-lg font-black">{product.closing_quantity || 0}</span>
         </td>
-        <td className="px-4 py-3">
-            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${product.is_active ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${product.is_active ? 'bg-green-500' : 'bg-red-500'}`}></span>
+        <td className="erp-table-td text-center">
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${product.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${product.is_active ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></span>
                 {product.is_active ? 'Active' : 'Disabled'}
             </span>
         </td>

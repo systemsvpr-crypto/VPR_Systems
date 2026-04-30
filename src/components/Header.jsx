@@ -15,6 +15,7 @@ const Header = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [currentTime, setCurrentTime] = useState(new Date());
   const previousCountRef = useRef(0);
 
   // Close dropdowns when clicking outside
@@ -28,7 +29,13 @@ const Header = ({ children }) => {
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      clearInterval(timer);
+    };
   }, []);
 
 // Fetch Stock Notifications
@@ -168,12 +175,46 @@ const Header = ({ children }) => {
     return `${days}d ago`;
   };
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good Morning';
+    if (hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
+  };
+
+  const formatDate = () => {
+    return new Date().toLocaleDateString('en-IN', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    });
+  };
+
+  const formatLiveTime = () => {
+    return currentTime.toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    });
+  };
+
   return (
     <header className="bg-white border-b border-slate-100 sticky top-0 z-20 px-4 sm:px-6 py-3">
       <div className="flex justify-between items-center max-w-7xl mx-auto w-full">
         <div className="flex items-center gap-4 flex-1">
           {children}
-          {/* Order Management Header removed */}
+          <div className="hidden lg:flex flex-col ml-4 border-l border-slate-100 pl-4">
+            <h2 className="text-sm font-black text-slate-900 tracking-tight leading-tight">
+              {getGreeting()}, <span className="text-primary">{user?.full_name?.split(' ')[0] || user?.Name?.split(' ')[0] || 'User'}</span>
+            </h2>
+            <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mt-0.5 flex items-center gap-2">
+              <span>{formatDate()}</span>
+              <span className="w-1 h-1 bg-slate-300 rounded-full"></span>
+              <span className="text-primary font-bold tabular-nums">{formatLiveTime()}</span>
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center space-x-4 sm:space-x-6">
@@ -192,7 +233,7 @@ const Header = ({ children }) => {
             </button>
 
             {isNotificationOpen && (
-              <div className="fixed inset-x-4 top-[72px] sm:absolute sm:inset-auto sm:right-0 sm:mt-3 w-auto sm:w-[28rem] bg-white rounded-2xl shadow-2xl border border-slate-100 py-2 z-50 transform origin-top-right transition-all overflow-hidden ring-1 ring-slate-900/5 flex flex-col">
+              <div className="fixed inset-x-4 top-[72px] sm:absolute sm:inset-auto sm:right-0 sm:mt-3 w-auto sm:w-[28rem] bg-white rounded-lg shadow-xl border border-slate-200 py-2 z-50 transform origin-top-right transition-all overflow-hidden ring-1 ring-slate-900/5 flex flex-col">
                 <div className="px-4 py-3 sm:px-5 sm:py-4 border-b border-slate-50 flex justify-between items-center bg-white flex-shrink-0">
                   <h3 className="text-base font-bold text-slate-800 tracking-tight">Notifications</h3>
                   {unreadCount > 0 && (
@@ -212,7 +253,7 @@ const Header = ({ children }) => {
                           {/* Icon Column */}
                           <div className="mt-1 flex-shrink-0">
                             {notif.context === 'stock' ? (
-                              <div className={`h-10 w-10 rounded-xl flex items-center justify-center shadow-sm ${notif.bgColor} ${notif.textColor}`}>
+                              <div className={`h-10 w-10 rounded-md flex items-center justify-center shadow-sm ${notif.bgColor} ${notif.textColor}`}>
                                 {notif.iconType === 'transfer' && <ArrowRightLeft size={20} strokeWidth={2} />}
                                 {notif.iconType === 'stock_in' && <ArrowDown size={20} strokeWidth={2} />}
                                 {notif.iconType === 'stock_out' && <ArrowUp size={20} strokeWidth={2} />}
@@ -220,7 +261,7 @@ const Header = ({ children }) => {
                                 {notif.iconType === 'default' && <Bell size={20} strokeWidth={2} />}
                               </div>
                             ) : (
-                              <div className="h-10 w-10 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center shadow-sm">
+                              <div className="h-10 w-10 rounded-md bg-orange-50 text-orange-600 flex items-center justify-center shadow-sm">
                                 <Bell size={20} strokeWidth={2} />
                               </div>
                             )}
@@ -249,7 +290,7 @@ const Header = ({ children }) => {
                     ))
                   ) : (
                     <div className="px-4 py-12 text-center bg-slate-50/30 cursor-pointer" onClick={() => navigate('/stock-notifications')}>
-                      <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-slate-50 mb-4 text-slate-300 border border-slate-100">
+                      <div className="inline-flex items-center justify-center w-16 h-16 rounded-lg bg-slate-50 mb-4 text-slate-300 border border-slate-100">
                         <CheckCircle size={32} strokeWidth={1.5} />
                       </div>
                       <p className="text-sm font-semibold text-slate-600">All caught up!</p>
@@ -312,7 +353,7 @@ const Header = ({ children }) => {
             </button>
 
             {isDropdownOpen && (
-              <div className="absolute right-0 mt-3 w-56 bg-white rounded-xl shadow-xl border border-slate-100 py-2 z-50 transform origin-top-right transition-all">
+              <div className="absolute right-0 mt-3 w-56 bg-white rounded-lg shadow-xl border border-slate-200 py-2 z-50 transform origin-top-right transition-all">
                 <div className="px-4 py-3 border-b border-slate-50">
                   <p className="text-sm font-bold text-slate-800 truncate">{user?.full_name || user?.Name || user?.username || 'Guest User'}</p>
                   <p className="text-xs text-slate-500 truncate">{user?.email || 'No email'}</p>

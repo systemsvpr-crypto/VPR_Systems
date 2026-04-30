@@ -66,7 +66,7 @@ const Sell = () => {
         <div className="mb-4">
           <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Module</p>
           <h1 className="text-xl font-extrabold tracking-tight leading-none mt-0.5">
-            <span className="text-blue-600">Sell</span>
+            <span className="text-blue-600">Sales</span>
             <span className="text-gray-400 mx-1.5">/</span>
             <span className="text-gray-700">Dispatch</span>
           </h1>

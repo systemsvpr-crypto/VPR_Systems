@@ -488,8 +488,10 @@ const StockManagement = () => {
     return (
         <div className="flex flex-col gap-4 pb-6">
             <div>
-                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Stock Management</h1>
-                <p className="text-slate-500 mt-1 text-sm">Centralized stock and inventory administration.</p>
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
+                    Stock <span className="text-primary font-black">Management</span>
+                </h1>
+                <p className="text-slate-500 mt-1 text-sm font-medium">Manage and track inventory transactions efficiently.</p>
             </div>
 
             <div className="flex flex-col gap-4 mt-2">
@@ -525,12 +527,11 @@ const StockManagement = () => {
                             </Select>
 
                             <Select value={filterGodown} onValueChange={setFilterGodown}>
-                                <SelectTrigger className="w-[180px] h-10">
-                                    <SelectValue placeholder="All Godowns" />
+                                <SelectTrigger className="w-[160px] h-10">
+                                    <SelectValue placeholder="Godown" />
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectGroup>
-                                        <SelectLabel>Godown</SelectLabel>
                                         <SelectItem value="all">All Godowns</SelectItem>
                                         {godowns.map(g => (
                                             <SelectItem key={g.godown_id} value={g.godown_id}>{g.name}</SelectItem>
@@ -570,19 +571,16 @@ const StockManagement = () => {
                     </div>
 
                     {/* Desktop View */}
-                    <div className="hidden md:flex bg-white rounded-2xl shadow-sm border border-slate-200/60 flex-col">
+                    <div className="hidden md:flex erp-table-container flex-col">
                         <div className="overflow-x-auto custom-scrollbar">
-                            <table className="w-full text-left border-collapse">
-                                <thead>
-                                    <tr className="bg-slate-50/50 border-b border-slate-100 sticky top-0 z-10 backdrop-blur-md">
-                                        <HeaderCell>Entry ID</HeaderCell>
-                                        <HeaderCell>Type</HeaderCell>
+                            <table className="erp-table">
+                                <thead className="erp-table-thead">
+                                    <tr className="erp-table-tr">
+                                        <HeaderCell>Transaction & ID</HeaderCell>
                                         <HeaderCell>Product</HeaderCell>
-                                        <HeaderCell>Godown</HeaderCell>
-                                        <HeaderCell>Qty</HeaderCell>
-                                        <HeaderCell>Opening</HeaderCell>
-                                        <HeaderCell>Closing</HeaderCell>
-                                        <HeaderCell>Date</HeaderCell>
+                                        <HeaderCell>Location</HeaderCell>
+                                        <HeaderCell align="center">Quantity</HeaderCell>
+                                        <HeaderCell align="center">Stock Change</HeaderCell>
                                         <HeaderCell align="right">Actions</HeaderCell>
                                     </tr>
                                 </thead>
@@ -654,32 +652,32 @@ const StockManagement = () => {
                                 <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
                                     <form onSubmit={handleSubmit} className="space-y-5">
                                         <div className="space-y-2">
-                                            <label className="block text-sm font-medium text-slate-700">Type <span className="text-red-500">*</span></label>
-                                            <div className="flex gap-2">
+                                            <label className="block text-sm font-semibold text-slate-700">Transaction Type <span className="text-red-500">*</span></label>
+                                            <div className="flex gap-3">
                                                 <button
                                                     type="button"
                                                     onClick={() => setFormData(prev => ({ ...prev, transaction_type: 'in' }))}
                                                     className={cn(
-                                                        "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all",
+                                                        "flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 text-sm font-bold transition-all",
                                                         formData.transaction_type === 'in'
-                                                            ? 'border-primary bg-primary/10 text-primary'
-                                                            : 'border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
+                                                            ? 'border-emerald-500 bg-emerald-50 text-emerald-700 shadow-sm shadow-emerald-100'
+                                                            : 'border-slate-100 bg-slate-50/50 text-slate-400 hover:border-slate-200 hover:text-slate-500'
                                                     )}
                                                 >
-                                                    <ArrowDown size={16} />
+                                                    <ArrowDown size={18} strokeWidth={2.5} />
                                                     Stock In
                                                 </button>
                                                 <button
                                                     type="button"
                                                     onClick={() => setFormData(prev => ({ ...prev, transaction_type: 'out' }))}
                                                     className={cn(
-                                                        "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all",
+                                                        "flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 text-sm font-bold transition-all",
                                                         formData.transaction_type === 'out'
-                                                            ? 'border-primary bg-primary/10 text-primary'
-                                                            : 'border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50'
+                                                            ? 'border-rose-500 bg-rose-50 text-rose-700 shadow-sm shadow-rose-100'
+                                                            : 'border-slate-100 bg-slate-50/50 text-slate-400 hover:border-slate-200 hover:text-slate-500'
                                                     )}
                                                 >
-                                                    <ArrowUp size={16} />
+                                                    <ArrowUp size={18} strokeWidth={2.5} />
                                                     Stock Out
                                                 </button>
                                             </div>
@@ -922,9 +920,9 @@ const StockManagement = () => {
 export default StockManagement;
 
 const StatItem = ({ label, value }) => (
-    <div>
-        <h3 className="text-2xl font-bold text-slate-800">{value}</h3>
-        <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">{label}</p>
+    <div className="flex flex-col">
+        <h3 className="text-2xl font-bold text-slate-900 leading-none tracking-tight">{value}</h3>
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1.5">{label}</p>
     </div>
 );
 
@@ -937,7 +935,7 @@ const FormField = ({ label, className = "", ...props }) => (
 );
 
 const HeaderCell = ({ children, align = "left" }) => (
-    <th className={`px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider text-${align}`}>
+    <th className={cn(`erp-table-th`, align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left')}>
         {children}
     </th>
 );
@@ -951,30 +949,58 @@ const EmptyRow = ({ message }) => (
 );
 
 const EntryRow = ({ entry, user, getGodownName, getProductName, onEdit, onDelete }) => (
-    <tr className="hover:bg-slate-50/80 transition-colors group">
-        <td className="px-4 py-3 text-sm text-slate-900">{entry.entry_id}</td>
-        <td className="px-4 py-3">
-            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium
-                ${entry.transaction_type === 'in' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                {entry.transaction_type === 'in' && <ArrowDown size={12} />}
-                {entry.transaction_type === 'out' && <ArrowUp size={12} />}
-                {entry.transaction_type.toUpperCase()}
-            </span>
+    <tr className="erp-table-tr group">
+        <td className="erp-table-td">
+            <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase
+                        ${entry.transaction_type === 'in' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                        {entry.transaction_type === 'in' ? <ArrowDown size={10} /> : <ArrowUp size={10} />}
+                        {entry.transaction_type}
+                    </span>
+                    <span className="text-[11px] font-bold text-slate-400">
+                        {new Date(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                    </span>
+                </div>
+                <span className="font-mono text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    {entry.entry_id}
+                </span>
+            </div>
         </td>
-        <td className="px-4 py-3 text-sm text-slate-900">{getProductName(entry.product_id)}</td>
-        <td className="px-4 py-3 text-sm text-slate-500">{getGodownName(entry.godown_id)}</td>
-        <td className="px-4 py-3 text-sm text-slate-900 font-medium">{entry.quantity}</td>
-        <td className="px-4 py-3 text-sm text-slate-500">{entry.opening_stock}</td>
-        <td className="px-4 py-3 text-sm text-slate-500">{entry.closing_stock}</td>
-        <td className="px-4 py-3 text-sm text-slate-500">{entry.date}</td>
-        <td className="px-4 py-3 text-right">
-            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button variant="ghost" size="icon" type="button" onClick={onEdit} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded transition-all" title="Edit">
-                    <Edit2 size={16} />
+        <td className="erp-table-td">
+            <div className="flex flex-col">
+                <span className="font-bold text-slate-900 text-sm leading-tight">{getProductName(entry.product_id)}</span>
+                {entry.reference_number && (
+                    <span className="text-[10px] font-medium text-slate-400 mt-0.5">Ref: {entry.reference_number}</span>
+                )}
+            </div>
+        </td>
+        <td className="erp-table-td">
+            <div className="flex items-center gap-1.5">
+                <MapPin size={12} className="text-slate-400" />
+                <span className="text-sm text-slate-600 font-semibold">{getGodownName(entry.godown_id)}</span>
+            </div>
+        </td>
+        <td className="erp-table-td text-center">
+            <span className="text-sm font-bold text-slate-900">{entry.quantity}</span>
+        </td>
+        <td className="erp-table-td text-center">
+            <div className="flex items-center justify-center gap-2">
+                <span className="text-[11px] font-medium text-slate-400">{entry.opening_stock}</span>
+                <div className="w-4 h-[1px] bg-slate-200"></div>
+                <span className="text-xs font-bold text-primary bg-primary/5 px-2 py-0.5 rounded border border-primary/10">
+                    {entry.closing_stock}
+                </span>
+            </div>
+        </td>
+        <td className="erp-table-td text-right">
+            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                <Button variant="ghost" size="icon" type="button" onClick={onEdit} className="h-8 w-8 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg" title="Edit">
+                    <Edit2 size={14} />
                 </Button>
-                {user?.role === 'SUPER ADMIN' && (
-                    <Button variant="ghost" size="icon" type="button" onClick={onDelete} className="p-1.5 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded transition-all" title="Delete">
-                        <Trash2 size={16} />
+                {(user?.role === 'SUPER ADMIN' || user?.Admin === 'Yes') && (
+                    <Button variant="ghost" size="icon" type="button" onClick={onDelete} className="h-8 w-8 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded-lg" title="Delete">
+                        <Trash2 size={14} />
                     </Button>
                 )}
             </div>

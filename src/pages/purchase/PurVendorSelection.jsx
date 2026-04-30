@@ -3,6 +3,7 @@ import { RefreshCw, Save, Search, FileSpreadsheet, Upload, X, Plus, AlertCircle,
 import { supabase } from '../../supabase';
 import useAuthStore from '../../store/authStore';
 import toast from 'react-hot-toast';
+import SearchableDropdown from '../../components/SearchableDropdown';
 import * as XLSX from 'xlsx';
 
 const TableSkeleton = ({ cols = 8 }) => (
@@ -249,11 +250,13 @@ const PurVendorSelection = () => {
                       d.checked ? (
                         <>
                           <td className="px-2 py-3.5">
-                            <select value={d.vendor_name || ''} onChange={e => updateInline(r.id, 'vendor_name', e.target.value)}
-                              className="w-full px-2 py-1.5 bg-white border border-orange-200 rounded-lg text-xs font-bold focus:ring-2 focus:ring-orange-300 outline-none transition-all">
-                              <option value="">Select Vendor</option>
-                              {vendors.map(v => <option key={v} value={v}>{v}</option>)}
-                            </select>
+                            <SearchableDropdown 
+                              options={vendors} 
+                              value={d.vendor_name || ''} 
+                              onChange={v => updateInline(r.id, 'vendor_name', v)} 
+                              placeholder="Select Vendor" 
+                              showAll={false}
+                            />
                           </td>
                           <td className="px-2 py-3.5">
                             <input type="number" step="0.01" value={d.rate || ''} onChange={e => updateInline(r.id, 'rate', e.target.value)}

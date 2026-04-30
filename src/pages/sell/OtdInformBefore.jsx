@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { BellRing, History, Save, X, ChevronUp, ChevronDown, RefreshCw } from 'lucide-react';
+import { BellRing, History, Save, X, ChevronUp, ChevronDown, RefreshCw, Search } from 'lucide-react';
 import SearchableDropdown from '../../components/SearchableDropdown';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
@@ -242,7 +242,7 @@ const OtdInformBefore = () => {
                         orderNumbers: items.map(i => i.orderNo),
                         productNames: items.map(i => `${i.itemName} (${i.dispatchQty})`),
                         dispatchDates: items.map(i => formatDisplayDate(i.dispatchDate))
-                    });
+                    }, { messageType: 'Before Dispatch' });
                     // If successful, add these items to the list to be updated in DB
                     items.forEach(it => successfulIds.push(it.id));
                 } catch (wsError) {
@@ -280,22 +280,24 @@ const OtdInformBefore = () => {
     };
 
     return (
-        <div className="relative">
-            {/* Header */}
-            <div className="flex flex-col gap-4 mb-6 bg-white p-4 lg:p-5 rounded shadow-sm border border-gray-100 max-w-[1200px] mx-auto">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div className="flex flex-wrap items-center gap-4">
-                        <h1 className="text-xl font-bold text-gray-800 tracking-tight whitespace-nowrap">Inform Before Dispatch</h1>
-                        <div className="flex bg-gray-100 p-1 rounded">
+        <div className="p-4 lg:p-6 space-y-6">
+            <div className="flex flex-col gap-6 bg-white p-6 rounded-lg shadow-sm border border-slate-200 max-w-[1200px] mx-auto">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex flex-wrap items-center gap-6">
+                        <div>
+                            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Inform Before Dispatch</h1>
+                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mt-1">Notify parties prior to dispatch</p>
+                        </div>
+                        <div className="flex bg-slate-100 p-1 rounded-lg">
                             <button
                                 onClick={() => setActiveTab('pending')}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-bold transition-all ${activeTab === 'pending' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+                                className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-bold transition-all ${activeTab === 'pending' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                             >
                                 <BellRing size={16} /> Pending
                             </button>
                             <button
                                 onClick={() => setActiveTab('history')}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-bold transition-all ${activeTab === 'history' ? 'bg-white text-primary shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+                                className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-bold transition-all ${activeTab === 'history' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
                             >
                                 <History size={16} /> History
                             </button>
@@ -304,26 +306,29 @@ const OtdInformBefore = () => {
                 </div>
 
                 {/* Filters */}
-                <div className="flex flex-col lg:flex-row justify-between gap-4 lg:items-start relative z-20">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 w-full">
-                        <input
-                            type="text"
-                            placeholder="Search records..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full h-[42px] px-3 py-2 bg-gray-50 border border-gray-200 rounded focus:ring-2 focus:ring-primary focus:border-transparent outline-none text-sm transition-all"
-                        />
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
+                    <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="relative group">
+                            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors" />
+                            <input
+                                type="text"
+                                placeholder="Search records..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full h-[42px] pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none text-sm transition-all"
+                            />
+                        </div>
                         <SearchableDropdown value={clientFilter} onChange={setClientFilter} options={allUniqueClients} allLabel="All Clients" className="h-[42px]" />
                         <SearchableDropdown value={godownFilter} onChange={setGodownFilter} options={allUniqueGodowns} allLabel="All Godowns" className="h-[42px]" />
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2 shrink-0">
-                        <button onClick={handleRefresh} disabled={refreshing || isSaving} className="flex items-center justify-center gap-1.5 px-4 h-[42px] bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors text-sm font-bold border border-gray-200 disabled:opacity-50">
-                            <RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} /> Refresh
+                    <div className="md:col-span-2 flex flex-wrap items-center justify-end gap-3">
+                        <button onClick={handleRefresh} disabled={refreshing || isSaving} className="erp-btn-secondary h-[42px]">
+                            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} /> Refresh
                         </button>
                         {activeTab === 'pending' && Object.keys(selectedRows).length > 0 && (
-                            <button onClick={handleSave} className="flex items-center justify-center gap-2 px-5 h-[42px] bg-primary text-white rounded hover:bg-primary-hover shadow-md font-bold text-sm">
-                                <Save size={16} /> Confirm Notification
+                            <button onClick={handleSave} className="erp-btn-primary h-[42px] px-6 shadow-md shadow-primary/10">
+                                <Save size={18} /> Confirm Notification
                             </button>
                         )}
                     </div>
@@ -331,12 +336,12 @@ const OtdInformBefore = () => {
             </div>
 
             {/* Content */}
-            <div className="bg-white rounded shadow-sm border border-gray-200 overflow-hidden max-w-[1200px] mx-auto">
-                <div className="hidden md:block overflow-x-auto max-h-[460px] overflow-y-auto">
-                    <table className="w-full text-left border-collapse min-w-[1000px]">
-                        <thead>
-                            <tr className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-600 font-bold sticky top-0 z-10 shadow-sm">
-                                {activeTab === 'pending' && <th className="px-6 py-4 text-center">Action</th>}
+            <div className="erp-table-container max-w-[1200px] mx-auto">
+                <div className="hidden md:block overflow-x-auto max-h-[600px] overflow-y-auto custom-scrollbar">
+                    <table className="erp-table">
+                        <thead className="erp-table-thead">
+                            <tr>
+                                {activeTab === 'pending' && <th className="erp-table-th text-center w-16">Action</th>}
                                 {[
                                     { label: 'Order No', key: 'orderNo' },
                                     { label: 'Dispatch No', key: 'dispatchNo', color: 'blue' },
@@ -348,20 +353,23 @@ const OtdInformBefore = () => {
                                     { label: 'Total Qty', key: 'qty', align: 'right' },
                                     ...(activeTab === 'history' ? [{ label: 'Status', key: 'status', align: 'center' }] : [])
                                 ].map((col) => (
-                                    <th key={col.key} onClick={() => requestSort(col.key)} className={`px-6 py-4 cursor-pointer hover:bg-gray-100 transition-colors ${col.color === 'blue' ? 'text-primary' : ''} ${col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : ''}`}>
-                                        <div className={`flex items-center gap-1.5 ${col.align === 'center' ? 'justify-center' : col.align === 'right' ? 'justify-end' : ''}`}>
+                                    <th key={col.key} onClick={() => requestSort(col.key)} className={`erp-table-th cursor-pointer hover:bg-slate-100 transition-colors ${col.align === 'center' ? 'text-center' : col.align === 'right' ? 'text-right' : 'text-left'}`}>
+                                        <div className={`flex items-center gap-1.5 ${col.align === 'center' ? 'justify-center' : col.align === 'right' ? 'justify-end' : 'justify-start'}`}>
                                             {col.label}
-                                            <ChevronDown size={10} className={sortConfig.key === col.key ? 'text-primary' : 'text-gray-300'} />
+                                            <div className="flex flex-col -space-y-1">
+                                                <ChevronUp size={12} className={sortConfig.key === col.key && sortConfig.direction === 'asc' ? 'text-primary' : 'text-slate-300'} />
+                                                <ChevronDown size={12} className={sortConfig.key === col.key && sortConfig.direction === 'desc' ? 'text-primary' : 'text-slate-300'} />
+                                            </div>
                                         </div>
                                     </th>
                                 ))}
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-200 text-sm font-medium">
+                        <tbody className="divide-y divide-slate-100 text-sm font-medium">
                             {loading ? <TableSkeleton cols={activeTab === 'pending' ? 10 : 9} /> : (activeTab === 'pending' ? filteredAndSortedPending : filteredAndSortedHistory).map(item => (
-                                <tr key={item.id} className={`${selectedRows[item.id] ? 'bg-green-50/50' : 'hover:bg-gray-50'} transition-colors group`}>
+                                <tr key={item.id} className="erp-table-tr group">
                                     {activeTab === 'pending' && (
-                                        <td className="px-6 py-4 text-center">
+                                        <td className="erp-table-td text-center w-16">
                                             <div className="flex items-center gap-2 justify-center">
                                                 <input type="checkbox" checked={!!selectedRows[item.id]} onChange={() => handleCheckboxToggle(item.id)} className="rounded text-primary cursor-pointer w-4 h-4 shadow-sm" />
                                                 {selectedRows[item.id] && (
@@ -373,17 +381,17 @@ const OtdInformBefore = () => {
                                             </div>
                                         </td>
                                     )}
-                                    <td className="px-6 py-4 text-gray-500">{item.orderNo}</td>
-                                    <td className="px-6 py-4 font-bold text-primary">{item.dispatchNo}</td>
-                                    <td className="px-6 py-4 text-right font-black text-gray-800 text-base">{item.dispatchQty}</td>
-                                    <td className="px-6 py-4 text-center font-bold text-primary uppercase text-[10px] tracking-tighter bg-slate-50/50 rounded-lg">{formatDisplayDate(item.dispatchDate)}</td>
-                                    <td className="px-6 py-4 font-bold text-gray-900">{item.clientName}</td>
-                                    <td className="px-6 py-4 text-center text-gray-600 italic font-black text-[11px] uppercase opacity-60">{item.godownName}</td>
-                                    <td className="px-6 py-4 font-semibold text-gray-700 truncate max-w-[200px]">{item.itemName}</td>
-                                    <td className="px-6 py-4 text-right font-black text-gray-400">{item.qty}</td>
+                                    <td className="erp-table-td text-gray-500 font-bold">{item.orderNo}</td>
+                                    <td className="erp-table-td font-black text-primary">{item.dispatchNo}</td>
+                                    <td className="erp-table-td text-right font-black text-slate-800 text-base">{item.dispatchQty}</td>
+                                    <td className="erp-table-td text-center font-black text-primary uppercase text-[10px] tracking-tighter bg-slate-50/50 rounded-lg whitespace-nowrap">{formatDisplayDate(item.dispatchDate)}</td>
+                                    <td className="erp-table-td font-bold text-slate-900">{item.clientName}</td>
+                                    <td className="erp-table-td text-center text-slate-600 italic font-black text-[11px] uppercase opacity-60 whitespace-nowrap">{item.godownName}</td>
+                                    <td className="erp-table-td font-semibold text-slate-700 truncate max-w-[200px]" title={item.itemName}>{item.itemName}</td>
+                                    <td className="erp-table-td text-right font-black text-slate-400">{item.qty}</td>
                                     {activeTab === 'history' && (
-                                        <td className="px-6 py-4 text-center">
-                                            <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-green-100 text-green-700 shadow-sm">
+                                        <td className="erp-table-td text-center">
+                                            <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 border border-emerald-100 shadow-sm">
                                                 Informed
                                             </span>
                                         </td>

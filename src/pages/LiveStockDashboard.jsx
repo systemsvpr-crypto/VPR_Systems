@@ -264,93 +264,84 @@ const LiveStockDashboard = () => {
     };
 
     return (
-        <div className="flex flex-col gap-4 pb-6">
-            <div>
-                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Stock Dashboard</h1>
-                <p className="text-slate-500 mt-1 text-sm">Manage and view inventory. (Total: {totalProducts} products)</p>
+    <div className="p-4 lg:p-6 space-y-6">
+      {/* Premium Header */}
+      <div className="flex flex-col gap-8 max-w-[1400px] mx-auto animate-in fade-in slide-in-from-top-2 duration-500">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
+              Stock <span className="text-primary">Dashboard</span>
+            </h1>
+            <div className="flex items-center gap-3 mt-2">
+                <span className="px-3 py-1 bg-slate-100 rounded-lg text-[10px] font-black text-slate-500 uppercase tracking-widest border border-slate-200/60">
+                    Total: {totalProducts} Products
+                </span>
+                <span className="px-3 py-1 bg-primary/5 rounded-lg text-[10px] font-black text-primary uppercase tracking-widest border border-primary/10">
+                    Live Status
+                </span>
             </div>
-
-
-            {/* Tabs */}
-            <div className="flex items-center gap-6 border-b border-slate-200 mt-2">
-                <button
-                    onClick={() => setActiveTab('master')}
-                    className={`pb-3 text-sm font-medium transition-all ${activeTab === 'master' ? 'text-primary border-b-2 border-primary translate-y-[1px]' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    Master Inventory
-                </button>
-                <button
-                    onClick={() => setActiveTab('live')}
-                    className={`pb-3 text-sm font-medium transition-all ${activeTab === 'live' ? 'text-primary border-b-2 border-primary translate-y-[1px]' : 'text-slate-500 hover:text-slate-700'}`}
-                >
-                    Live Stock
-                </button>
-            </div>
+          </div>
+          
+          <div className="flex p-1 bg-slate-100 rounded-xl shadow-inner">
+            <button
+              onClick={() => setActiveTab('master')}
+              className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-black transition-all ${activeTab === 'master' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Master Inventory
+            </button>
+            <button
+              onClick={() => setActiveTab('live')}
+              className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-black transition-all ${activeTab === 'live' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Live Stock
+            </button>
+          </div>
+        </div>
+      </div>
 
             {activeTab === 'master' && (
                 <div className="flex flex-col gap-4">
-                    {/* Date Picker */}
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <Button
+                    {/* Controls */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
+                        <div className="md:col-span-2 flex items-center gap-3">
+                            <button
                                 onClick={() => { fetchGodownsAndTransactions(); fetchProducts(0, true); }}
-                                className="bg-blue-600 hover:bg-blue-700 text-white gap-2 rounded-xl shadow-sm hover:shadow-md transition-all active:scale-95"
+                                className="erp-btn-primary h-[42px] px-6"
                             >
-                                <RefreshCcw size={16} className={cn(loading && "animate-spin")} />
-                                Refresh
-                            </Button>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                            {summaryDate && summaryDate !== new Date().toISOString().split('T')[0] && (
-                                <Button
-                                    variant="ghost"
-                                    onClick={() => { setSummaryDate(new Date().toISOString().split('T')[0]); }}
-                                    className="h-10 px-3 text-red-500 hover:text-red-600 hover:bg-red-50 rounded-xl"
-                                >
-                                    <X size={16} />
-                                    Clear
-                                </Button>
-                            )}
-
-                            <div className="w-[240px]">
+                                <RefreshCcw size={16} className={loading ? "animate-spin" : ""} /> Refresh
+                            </button>
+                            <div className="w-[200px]">
                                 <DatePicker
                                     value={summaryDate}
                                     onChange={(e) => setSummaryDate(e.target.value)}
                                     name="summaryDate"
-                                    placeholder="Select date"
                                 />
                             </div>
+                        </div>
 
-                            <Button
-                                variant="outline"
+                        <div className="md:col-span-2 flex items-center justify-end gap-3">
+                            <button
                                 onClick={handleExport}
                                 disabled={!summaryDate}
-                                className={cn(
-                                    "gap-2 transition-all rounded-xl border border-emerald-200",
-                                    summaryDate
-                                        ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 shadow-sm"
-                                        : "opacity-50 cursor-not-allowed bg-slate-50 text-slate-400 border-slate-200"
-                                )}
+                                className="erp-btn-secondary h-[42px]"
                             >
-                                <Download size={16} />
-                                Export CSV
-                            </Button>
+                                <Download size={16} /> Export CSV
+                            </button>
                         </div>
                     </div>
 
                     {/* Godown-wise Aggregated Summary Table */}
-                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="erp-table-container max-w-[1400px] mx-auto">
                         <div className="overflow-x-auto">
-                            <table className="w-full text-left">
-                                <thead>
-                                    <tr className="bg-slate-50/50 border-b border-slate-100">
-                                        <HeaderCell>Godown Name</HeaderCell>
-                                        <HeaderCell>Opening</HeaderCell>
-                                        <HeaderCell>In</HeaderCell>
-                                        <HeaderCell>Out</HeaderCell>
-                                        <HeaderCell>Closing</HeaderCell>
-                                        <HeaderCell>Transfers</HeaderCell>
+                            <table className="erp-table">
+                                <thead className="erp-table-thead">
+                                    <tr className="erp-table-tr">
+                                        <th className="erp-table-th">Godown Name</th>
+                                        <th className="erp-table-th text-center">Opening</th>
+                                        <th className="erp-table-th text-center">In</th>
+                                        <th className="erp-table-th text-center">Out</th>
+                                        <th className="erp-table-th text-center font-black">Closing</th>
+                                        <th className="erp-table-th text-center">Transfers</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
@@ -371,20 +362,20 @@ const LiveStockDashboard = () => {
                                         const isToday = summaryDate === new Date().toISOString().split('T')[0];
 
                                         return (
-                                            <tr key={godown.godown_id} className="hover:bg-slate-50/80">
-                                                <td className="px-4 py-3">
+                                            <tr key={godown.godown_id} className="erp-table-tr group">
+                                                <td className="erp-table-td">
                                                     <div className="flex items-center gap-2">
-                                                        <MapPin size={16} className="text-blue-600" />
+                                                        <MapPin size={14} className="text-primary" />
                                                         <div>
-                                                            <p className="text-sm font-medium text-slate-900">{godown.name}</p>
-                                                            <p className="text-xs text-slate-500">{godown.city}</p>
+                                                            <p className="text-sm font-bold text-slate-900">{godown.name}</p>
+                                                            <p className="text-[10px] text-slate-400 font-semibold uppercase">{godown.city}</p>
                                                         </div>
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-3 text-sm font-medium">{isToday ? totalOpening.toLocaleString() : '-'}</td>
-                                                <td className="px-4 py-3 text-sm font-medium text-green-600">+{totalIn.toLocaleString()}</td>
-                                                <td className="px-4 py-3 text-sm font-medium text-red-600">-{totalOut.toLocaleString()}</td>
-                                                <td className="px-4 py-3 text-sm font-bold">{isToday ? totalClosing.toLocaleString() : '-'}</td>
+                                                <td className="erp-table-td text-center font-semibold">{isToday ? totalOpening.toLocaleString() : '-'}</td>
+                                                <td className="erp-table-td text-center font-bold text-emerald-600">+{totalIn.toLocaleString()}</td>
+                                                <td className="erp-table-td text-center font-bold text-rose-600">-{totalOut.toLocaleString()}</td>
+                                                <td className="erp-table-td text-center font-bold text-slate-900">{isToday ? totalClosing.toLocaleString() : '-'}</td>
                                                 <td className="px-4 py-3">
                                                     <button
                                                         onClick={() => setSelectedTransfer({ type: 'godown', id: godown.godown_id, name: godown.name })}
@@ -410,45 +401,39 @@ const LiveStockDashboard = () => {
 
                     {/* Dynamic Summary Table */}
                     {loading ? (
-                        <div className="text-center py-12 text-slate-500 bg-white rounded-2xl border border-slate-200">
+                        <div className="erp-card py-12 text-center text-slate-400">
                             Loading Stock Metrics...
                         </div>
                     ) : filteredSummary.length > 0 ? (
-                        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div className="erp-table-container max-w-[1400px] mx-auto">
                             <div className="overflow-x-auto">
-                                <table className="w-full text-left">
-                                    <thead>
-                                        <tr className="bg-slate-50/50 border-b border-slate-100">
-                                            <HeaderCell>Godown</HeaderCell>
-                                            <HeaderCell>Product</HeaderCell>
-                                            <HeaderCell>MUX</HeaderCell>
-                                            <HeaderCell>Opening Quantity (KG)</HeaderCell>
-                                            <HeaderCell>Closing Quantity (KG)</HeaderCell>
-                                            <HeaderCell>Opening Stock</HeaderCell>
-                                            <HeaderCell>In Stock</HeaderCell>
-                                            <HeaderCell>Out Stock</HeaderCell>
-                                            <HeaderCell>Closing Stock</HeaderCell>
-                                            <HeaderCell>Transfers</HeaderCell>
+                                <table className="erp-table">
+                                    <thead className="erp-table-thead">
+                                        <tr className="erp-table-tr">
+                                            <th className="erp-table-th">Godown</th>
+                                            <th className="erp-table-th">Product Details</th>
+                                            <th className="erp-table-th text-center">Opening (KG)</th>
+                                            <th className="erp-table-th text-center font-black">Closing (KG)</th>
+                                            <th className="erp-table-th text-center">In</th>
+                                            <th className="erp-table-th text-center">Out</th>
+                                            <th className="erp-table-th text-center">Transfers</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {filteredSummary.map((s, idx) => (
-                                            <tr key={`${s.godown_id}-${s.product_id}-${idx}`} className="hover:bg-slate-50/80">
-                                                <td className="px-4 py-3 text-sm text-slate-900">{s.godown_name}</td>
-                                                <td className="px-4 py-3 text-sm text-slate-900">{s.product_name}</td>
-                                                <td className="px-4 py-3 text-sm text-slate-900">{s.mux || '-'}</td>
-                                                <td className="px-4 py-3 text-sm font-medium text-slate-500">{s.opening_quantity}</td>
-                                                <td className="px-4 py-3 text-sm font-medium text-slate-500">{s.closing_quantity}</td>
-                                                <td className="px-4 py-3 text-sm font-medium">{s.opening_stock}</td>
-                                                <td className="px-4 py-3 text-sm font-medium text-green-600">+{s.in_stock}</td>
-                                                <td className="px-4 py-3 text-sm font-medium text-red-600">-{s.out_stock}</td>
-                                                <td className="px-4 py-3 text-sm font-bold">{s.closing_stock}</td>
-                                                <td className="px-4 py-3">
+                                            <tr key={`${s.godown_id}-${s.product_id}-${idx}`} className="erp-table-tr">
+                                                <td className="erp-table-td text-xs font-semibold text-slate-500 uppercase">{s.godown_name}</td>
+                                                <td className="erp-table-td text-sm font-bold text-slate-900">{s.product_name}</td>
+                                                <td className="erp-table-td text-center text-slate-500">{s.opening_quantity}</td>
+                                                <td className="erp-table-td text-center font-bold text-slate-900">{s.closing_quantity}</td>
+                                                <td className="erp-table-td text-center font-bold text-emerald-600">+{s.in_stock}</td>
+                                                <td className="erp-table-td text-center font-bold text-rose-600">-{s.out_stock}</td>
+                                                <td className="erp-table-td text-center">
                                                     <button
                                                         onClick={() => setSelectedTransfer({ type: 'product', id: s.product_id, godown_id: s.godown_id, name: s.product_name })}
                                                         className={cn(
-                                                            "text-sm font-medium px-2 py-1 rounded-md transition-colors",
-                                                            s.transfers > 0 ? "bg-blue-50 text-blue-600 hover:bg-blue-100" : "text-slate-400 cursor-default"
+                                                            "text-xs font-bold px-2 py-1 rounded-md transition-all",
+                                                            s.transfers > 0 ? "bg-slate-100 text-primary hover:bg-primary hover:text-white" : "text-slate-300"
                                                         )}
                                                     >
                                                         {s.transfers}
@@ -541,41 +526,49 @@ const LiveStockDashboard = () => {
                             )}
                         </div>
                     ) : (
-                        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div className="erp-table-container">
                             <div className="overflow-x-auto">
-                                <table className="w-full text-left">
-                                    <thead>
-                                        <tr className="bg-slate-50/50 border-b border-slate-100">
+                                <table className="erp-table">
+                                    <thead className="erp-table-thead">
+                                        <tr className="erp-table-tr">
                                             <HeaderCell>Product</HeaderCell>
                                             <HeaderCell>Godown</HeaderCell>
-                                            <HeaderCell>MUX</HeaderCell>
-                                            <HeaderCell>Units</HeaderCell>
-                                            <HeaderCell>Weight (KG)</HeaderCell>
-                                            <HeaderCell>Opening Quantity (KG)</HeaderCell>
-                                            <HeaderCell>Closing Quantity (KG)</HeaderCell>
+                                            <HeaderCell align="center">MUX</HeaderCell>
+                                            <HeaderCell align="center">Units</HeaderCell>
+                                            <HeaderCell align="center">Weight (KG)</HeaderCell>
+                                            <HeaderCell align="center">Opening (KG)</HeaderCell>
+                                            <HeaderCell align="center">Closing (KG)</HeaderCell>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                         {filteredStock.map((stock) => (
-                                            <tr key={`${stock.product_id}-${stock.godown_id}`} className="hover:bg-slate-50/80">
-                                                <td className="px-4 py-3">
+                                            <tr key={`${stock.product_id}-${stock.godown_id}`} className="erp-table-tr">
+                                                <td className="erp-table-td">
                                                     <div className="flex items-center gap-3">
-                                                        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
-                                                            <Package size={14} />
+                                                        <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-primary font-black text-xs border border-slate-200 overflow-hidden shrink-0">
+                                                            <Package size={16} />
                                                         </div>
                                                         <div>
-                                                            <p className="text-sm font-medium text-slate-900">{stock.product_name}</p>
+                                                            <p className="text-sm font-bold text-slate-900">{stock.product_name}</p>
+                                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{stock.product_id}</p>
                                                         </div>
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-3 text-sm text-slate-900">{stock.godown_name}</td>
-                                                <td className="px-4 py-3 text-sm text-slate-900">{stock.mux || '-'}</td>
-                                                <td className="px-4 py-3 text-sm text-slate-900">{stock.current_stock}</td>
-                                                <td className="px-4 py-3 text-sm font-bold text-primary">
-                                                    {((parseFloat(stock.mux) || 0) * (parseFloat(stock.current_stock) || 0)).toFixed(3)}
+                                                <td className="erp-table-td">
+                                                    <div className="flex items-center gap-2">
+                                                        <MapPin size={12} className="text-primary" />
+                                                        <span className="text-sm text-slate-600 font-bold">{stock.godown_name}</span>
+                                                    </div>
                                                 </td>
-                                                <td className="px-4 py-3 text-sm text-slate-500">{stock.opening_quantity}</td>
-                                                <td className="px-4 py-3 text-sm text-slate-500">{stock.closing_quantity}</td>
+                                                <td className="erp-table-td text-center font-bold text-slate-900">{stock.mux || '-'}</td>
+                                                <td className="erp-table-td text-center font-black text-slate-900">{stock.current_stock}</td>
+                                                <td className="erp-table-td text-center">
+                                                    <span className="px-3 py-1 bg-primary/5 text-primary font-black rounded-lg border border-primary/10">
+                                                        {((parseFloat(stock.mux) || 0) * (parseFloat(stock.current_stock) || 0)).toFixed(3)}
+                                                    </span>
+                                                </td>
+                                                <td className="erp-table-td text-center font-medium text-slate-500">{stock.opening_quantity}</td>
+                                                <td className="erp-table-td text-center font-black text-slate-900">{stock.closing_quantity}</td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -616,69 +609,83 @@ const StockCard = ({ stock }) => {
         medium: 'bg-amber-500',
         low: 'bg-rose-500'
     };
+
     const levelBg = {
         high: 'bg-emerald-50 text-emerald-700 border-emerald-100',
         medium: 'bg-amber-50 text-amber-700 border-amber-100',
         low: 'bg-rose-50 text-rose-700 border-rose-100'
     };
 
+    const weight = ((parseFloat(stock.mux) || 0) * (parseFloat(stock.current_stock) || 0)).toFixed(2);
+
     return (
-        <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-200/60 hover:shadow-xl hover:shadow-slate-200/50 transition-all duration-300 group">
-            <div className="flex items-start justify-between mb-4">
-                <div className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-primary/10 group-hover:text-primary transition-colors">
-                    <Package size={24} />
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5 transition-all duration-300 group flex flex-col h-full overflow-hidden">
+            {/* Header */}
+            <div className="flex items-start justify-between mb-4 shrink-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className={cn("px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border", levelBg[stockLevel])}>
+                        {stockLevel === 'high' ? 'Healthy' : stockLevel === 'medium' ? 'Review' : 'Critical'}
+                    </span>
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50 px-2 py-0.5 rounded">
+                        Live
+                    </span>
                 </div>
-                <span className={cn("px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border", levelBg[stockLevel])}>
-                    {stockLevel === 'high' ? 'Healthy' : stockLevel === 'medium' ? 'Review' : 'Critical'}
-                </span>
+                <div className="flex items-center gap-1 text-slate-400 shrink-0">
+                    <MapPin size={10} strokeWidth={3} />
+                    <span className="text-[9px] font-black uppercase tracking-tight truncate max-w-[80px]">{stock.godown_name}</span>
+                </div>
             </div>
 
-            <div className="space-y-1 mb-4">
-                <h3 className="font-bold text-slate-900 text-base leading-tight group-hover:text-primary transition-colors">{stock.product_name}</h3>
-                <div className="flex items-center gap-1.5 text-slate-500">
-                    <MapPin size={12} />
-                    <span className="text-[11px] font-medium">{stock.godown_name}</span>
-                </div>
+            {/* Product Name - Fixed height for alignment */}
+            <div className="mb-4 min-h-[2.5rem]">
+                <h3 className="font-bold text-slate-900 text-sm leading-snug group-hover:text-primary transition-colors line-clamp-2">
+                    {stock.product_name}
+                </h3>
             </div>
 
-            <div className="relative pt-4 border-t border-slate-50 flex items-end justify-between overflow-hidden">
-                <div className="z-10">
-                    <div className="flex items-baseline gap-1">
-                        <p className="text-3xl font-black text-slate-900 tracking-tight">{stock.current_stock}</p>
-                        <p className="text-xs font-bold text-slate-400 uppercase">Qty</p>
+            {/* Availability Grid - More flexible to prevent overflow */}
+            <div className="grid grid-cols-2 gap-4 mb-5 p-4 bg-slate-50/50 rounded-xl border border-slate-100">
+                <div className="flex flex-col min-w-0">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 truncate">Available Pcs</p>
+                    <div className="flex items-baseline gap-1 min-w-0 overflow-hidden">
+                        <span className="text-2xl font-black text-slate-900 tracking-tighter truncate">{stock.current_stock}</span>
                     </div>
-                    {stock.mux && (
-                        <div className="mt-2 flex flex-col">
-                            <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Est. Weight</p>
-                            <p className="text-base font-black text-indigo-600">
-                                {((parseFloat(stock.mux) || 0) * (parseFloat(stock.current_stock) || 0)).toFixed(2)} <span className="text-[10px]">KG</span>
-                            </p>
-                            <div className="flex items-center gap-1 mt-0.5">
-                                <span className="px-1.5 py-0.5 bg-slate-100 rounded text-[9px] font-bold text-slate-500 uppercase tracking-tighter">MUX: {stock.mux}</span>
-                            </div>
-                        </div>
-                    )}
                 </div>
-
-                {/* Progress Bar Side */}
-                <div className="flex flex-col items-center gap-2">
-                    <div className="h-24 w-2 bg-slate-50 rounded-full overflow-hidden flex flex-col justify-end">
-                        <div
-                            className={cn("w-full transition-all duration-700", levelColors[stockLevel])}
-                            style={{ height: `${Math.min(100, (stock.current_stock / 200) * 100)}%` }}
-                        ></div>
+                <div className="flex flex-col border-l border-slate-200 pl-4 min-w-0">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 truncate">Net Weight</p>
+                    <div className="flex flex-col min-w-0">
+                        <span className="text-lg font-black text-primary tracking-tighter truncate leading-tight">
+                            {weight}
+                        </span>
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">KG</span>
                     </div>
                 </div>
             </div>
 
-            <div className="mt-4 pt-4 border-t border-slate-50 grid grid-cols-2 gap-2">
-                <div className="text-center py-1 bg-slate-50 rounded-xl">
-                    <p className="text-[9px] font-black text-slate-400 uppercase mb-0.5">Opening</p>
-                    <p className="text-xs font-bold text-slate-600">{stock.opening_quantity}</p>
+            {/* Footer Data */}
+            <div className="mt-auto space-y-3 pt-3">
+                <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-col min-w-0">
+                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest truncate">Opening</span>
+                        <span className="text-[11px] font-bold text-slate-600 mt-0.5 truncate">{stock.opening_quantity} KG</span>
+                    </div>
+                    <div className="flex flex-col text-right min-w-0">
+                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest truncate">Closing</span>
+                        <span className="text-[11px] font-black text-slate-900 mt-0.5 truncate">{stock.closing_quantity} KG</span>
+                    </div>
                 </div>
-                <div className="text-center py-1 bg-blue-50/50 rounded-xl">
-                    <p className="text-[9px] font-black text-blue-400 uppercase mb-0.5">Closing</p>
-                    <p className="text-xs font-bold text-blue-700">{stock.closing_quantity}</p>
+                
+                {/* Level Indicator */}
+                <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div 
+                        className={cn("h-full transition-all duration-1000", levelColors[stockLevel])}
+                        style={{ width: `${Math.min(100, Math.max(0, (stock.current_stock / 200) * 100))}%` }}
+                    />
+                </div>
+                
+                <div className="flex items-center justify-between text-[8px] font-black text-slate-400 uppercase tracking-tighter shrink-0 pt-1">
+                    <span className="truncate mr-2">MUX: {stock.mux || '-'}</span>
+                    <span className="shrink-0">Synced Now</span>
                 </div>
             </div>
         </div>
@@ -686,7 +693,7 @@ const StockCard = ({ stock }) => {
 };
 
 const HeaderCell = ({ children, align = "left" }) => (
-    <th className={`px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider text-${align}`}>
+    <th className={cn(`erp-table-th`, align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left')}>
         {children}
     </th>
 );

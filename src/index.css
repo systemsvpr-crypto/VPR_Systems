@@ -12,10 +12,10 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.62 0.19 259.76);
+  --primary: oklch(0.45 0.14 250); /* A more professional, stable Navy Blue */
   --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.96 0.01 250);
+  --secondary-foreground: oklch(0.2 0.05 250);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0);
@@ -38,11 +38,11 @@
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
 
-  --font-sans: 'Geist', 'Geist Fallback', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+  --font-sans: 'Inter', 'Geist', sans-serif;
   --font-serif: Source Serif 4, serif;
   --font-mono: JetBrains Mono, monospace;
 
-  --radius: 0.625rem;
+  --radius: 0.5rem; /* Slightly tighter radius for a professional feel */
 
   --shadow-2xs: 0 1px 3px 0px oklch(0.00 0 0 / 0.05);
   --shadow-xs: 0 1px 3px 0px oklch(0.00 0 0 / 0.05);
@@ -189,4 +189,67 @@
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: oklch(0.87 0 0);
+}
+/* --- ERP Design System --- */
+@layer components {
+  /* Table Styles */
+  .erp-table-container {
+    @apply bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden transition-all duration-300;
+  }
+  .erp-table {
+    @apply w-full border-collapse text-left;
+  }
+  .erp-table-thead {
+    @apply bg-slate-50/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-10;
+  }
+  .erp-table-th {
+    @apply px-6 py-4 text-[11px] font-black uppercase tracking-widest text-slate-500 whitespace-nowrap;
+  }
+  .erp-table-tr {
+    @apply border-b border-slate-100 last:border-0 hover:bg-slate-50/80 transition-colors duration-200;
+  }
+  .erp-table-td {
+    @apply px-6 py-4 text-sm text-slate-700;
+  }
+
+  /* Button Styles */
+  .erp-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 bg-primary text-white font-black text-[10px] uppercase tracking-widest px-4 py-2 rounded shadow-sm hover:bg-primary/90 hover:shadow-md active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .erp-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 bg-white text-slate-600 border border-slate-200 font-black text-[10px] uppercase tracking-widest px-4 py-2 rounded shadow-2xs hover:bg-slate-50 hover:border-slate-300 active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .erp-btn-danger {
+    @apply inline-flex items-center justify-center gap-2 bg-red-50 text-red-600 border border-red-100 font-black text-[10px] uppercase tracking-widest px-4 py-2 rounded shadow-2xs hover:bg-red-100 active:scale-[0.98] transition-all;
+  }
+
+  /* Card Styles */
+  .erp-card {
+    @apply bg-white rounded-xl border border-slate-200 shadow-sm p-6 hover:shadow-md transition-shadow duration-300;
+  }
+  .erp-card-header {
+    @apply flex items-center justify-between mb-4;
+  }
+  .erp-card-title {
+    @apply text-xs font-black text-slate-400 uppercase tracking-widest;
+  }
+  .erp-card-value {
+    @apply text-2xl font-black text-slate-800 tracking-tight;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.6) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite linear;
+}
+
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
 }

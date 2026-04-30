@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Save, History, ClipboardList, X, ChevronUp, ChevronDown, RefreshCw, CheckCircle, XCircle } from 'lucide-react';
+import { Save, History, ClipboardList, X, ChevronUp, ChevronDown, RefreshCw, CheckCircle, XCircle, Search } from 'lucide-react';
 import SearchableDropdown from '../../components/SearchableDropdown';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
@@ -115,7 +115,6 @@ const OtdDispatchPlan = () => {
   const [stockLocationFilter, setStockLocationFilter] = useState('');
 
   const [isSaving, setIsSaving] = useState(false);
-  const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
 
   const [orders, setOrders] = useState([]);
   const [dispatchHistory, setDispatchHistory] = useState([]);
@@ -217,9 +216,8 @@ const OtdDispatchPlan = () => {
         const godownName = godownMap[godownId] || godownId;
         const stock = Number(row.closing_quantity) || 0;
         
-        const displayGodown = godownName.toLowerCase() === 'godown' ? 'Gdn' : godownName;
         if (!sMap[item]) sMap[item] = [];
-        sMap[item].push(`${displayGodown}:${stock}`);
+        sMap[item].push({ name: godownName, stock });
       });
 
       setStockDataMap(sMap);
@@ -587,7 +585,9 @@ const OtdDispatchPlan = () => {
           }
       }
       
-      const allStockInfo = stockValues ? stockValues.join(', ') : '-';
+      const allStockInfo = stockValues 
+        ? stockValues.map(s => `${s.name.toLowerCase() === 'godown' ? 'Gdn' : s.name}:${s.stock}`).join(', ') 
+        : '-';
       const realTimeIntransit = intransitDataMap[`${itemKey}|${String(order.godownName || "").trim().toLowerCase()}`] !== undefined ? intransitDataMap[`${itemKey}|${String(order.godownName || "").trim().toLowerCase()}`] : '0';
 
       const inProcessQty = totalAlreadyPlanned - totalAlreadyDelivered;
@@ -646,13 +646,30 @@ const OtdDispatchPlan = () => {
       const isSelected = !prev[key];
       const next = { ...prev, [key]: isSelected };
       if (isSelected) {
+        // Auto-select godown with highest stock
+        let bestGodown = order.godownName;
+        const itemKey = normalize(order.itemName);
+        let stockValues = stockDataMap[itemKey];
+        if (!stockValues) {
+          const stockEntry = Object.keys(stockDataMap).find(k => itemKey.includes(k) || k.includes(itemKey));
+          if (stockEntry) stockValues = stockDataMap[stockEntry];
+        }
+
+        if (stockValues && stockValues.length > 0) {
+          const withStock = stockValues.filter(s => s.stock > 0);
+          if (withStock.length > 0) {
+            const highest = withStock.reduce((prev, current) => (prev.stock > current.stock) ? prev : current);
+            bestGodown = highest.name;
+          }
+        }
+
         setEditData(prevEdit => ({
           ...prevEdit,
           [key]: {
             dispatchQty: order.planningPendingQty,
             dispatchDate: new Date().toISOString().split('T')[0],
             gstIncluded: 'No',
-            godownName: order.godownName
+            godownName: bestGodown
           }
         }));
       } else {
@@ -664,7 +681,7 @@ const OtdDispatchPlan = () => {
       }
       return next;
     });
-  }, [getRowKey]);
+  }, [getRowKey, normalize, stockDataMap]);
 
   const handleEditChange = useCallback((key, field, value) => {
     setEditData(prev => ({
@@ -722,12 +739,10 @@ const OtdDispatchPlan = () => {
       if (error) throw error;
 
       toast.success('Planning saved successfully!');
-      setShowSuccessOverlay(true);
-      setTimeout(() => setShowSuccessOverlay(false), 2500);
-      await fetchPendingOrders(true);
-      await fetchPlanningHistory(true);
+      
       setSelectedRows({});
       setEditData({});
+      handleRefresh();
 
     } catch (error) {
       console.error('Save failed details:', error);
@@ -816,9 +831,9 @@ const OtdDispatchPlan = () => {
                 <button
                   onClick={handleBulkCancelOrder}
                   disabled={isSaving}
-                  className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors font-bold text-[13px] shadow-sm shadow-red-500/20"
+                  className="flex items-center gap-2 px-3 py-2 bg-rose-50 text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-600 hover:text-white transition-all font-black text-[13px] shadow-sm"
                 >
-                  <XCircle size={14} />
+                  <XCircle size={15} />
                   Cancel Selected
                 </button>
                 <button
@@ -836,13 +851,16 @@ const OtdDispatchPlan = () => {
 
         {/* Filters */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 relative z-20">
-          <input
-            type="text"
-            placeholder="Search..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded focus:ring-primary focus:border-primary"
-          />
+          <div className="relative group">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors" />
+            <input
+              type="text"
+              placeholder="Search..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full h-full pl-10 pr-3 bg-slate-50 border border-slate-200 rounded focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none text-sm transition-all"
+            />
+          </div>
           <SearchableDropdown value={clientFilter} onChange={setClientFilter} options={allUniqueClients} allLabel="All Clients" className="w-full" />
           <SearchableDropdown value={godownFilter} onChange={setGodownFilter} options={allUniqueGodowns} allLabel="All Godowns" className="w-full" />
           <SearchableDropdown value={orderNoFilter} onChange={setOrderNoFilter} options={allUniqueOrderNos} allLabel="All Order No" className="w-full" focusColor="primary" />
@@ -859,82 +877,66 @@ const OtdDispatchPlan = () => {
         </div>
       )}
 
-      {/* Success overlay */}
-      {showSuccessOverlay && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/40 backdrop-blur-sm transition-all duration-300">
-          <div className="bg-white px-10 py-8 rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.15)] flex flex-col items-center gap-5 animate-in zoom-in-95 fade-in duration-300 border border-gray-100">
-            <div className="h-16 w-16 bg-green-100/50 rounded-full flex items-center justify-center relative">
-              <div className="absolute inset-0 bg-green-500 rounded-full animate-ping opacity-20"></div>
-              <CheckCircle className="w-8 h-8 text-green-600 relative z-10" />
-            </div>
-            <div className="text-center space-y-1">
-              <h3 className="text-lg font-bold text-gray-900">Planning Saved Successfully</h3>
-              <p className="text-xs font-medium text-gray-500">The dispatch planning has been successfully updated.</p>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Data Table */}
-      <div className="bg-white rounded shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white/50 overflow-hidden max-w-[1200px] mx-auto">
+      <div className="erp-table-container max-w-[1200px] mx-auto">
 
         {/* ==================== PENDING TAB ==================== */}
         {activeTab === 'pending' ? (
           <>
             {/* Desktop Table */}
             <div className="hidden md:block relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 max-h-[460px] overflow-y-auto">
-              <table className="w-full text-left border-collapse min-w-[1400px] mx-0">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-600 font-bold sticky top-0 z-10 shadow-sm">
-                    <th className="px-6 py-4 text-center">Action</th>
+              <table className="erp-table min-w-[1400px]">
+                <thead className="erp-table-thead">
+                  <tr className="erp-table-tr">
+                    <th className="erp-table-th text-center">Action</th>
                     {isAnySelected && (
                       <>
-                        <th className="px-6 py-4 animate-column text-right">Dispatch Qty</th>
-                        <th className="px-6 py-4 animate-column text-center">Dispatch Date</th>
-                        <th className="px-6 py-4 animate-column text-center">GST</th>
-                        <th className="px-6 py-4 animate-column text-center">Dispatch Godown</th>
+                        <th className="erp-table-th text-right">Dispatch Qty</th>
+                        <th className="erp-table-th text-center">Dispatch Date</th>
+                        <th className="erp-table-th text-center">GST</th>
+                        <th className="erp-table-th text-center">Dispatch Godown</th>
                       </>
                     )}
-                    <th className="px-6 py-4 cursor-pointer hover:bg-gray-100" onClick={() => requestSort('orderNo')}>
+                    <th className="erp-table-th cursor-pointer hover:bg-slate-100/50 transition-colors" onClick={() => requestSort('orderNo')}>
                       <div className="flex items-center gap-1">Order No <SortIcon column="orderNo" sortConfig={sortConfig} /></div>
                     </th>
-                    <th className="px-6 py-4 cursor-pointer hover:bg-gray-100" onClick={() => requestSort('clientName')}>
+                    <th className="erp-table-th cursor-pointer hover:bg-slate-100/50 transition-colors" onClick={() => requestSort('clientName')}>
                       <div className="flex items-center gap-1">Client Name <SortIcon column="clientName" sortConfig={sortConfig} /></div>
                     </th>
-                    <th className="px-6 py-4 cursor-pointer hover:bg-gray-100" onClick={() => requestSort('itemName')}>
+                    <th className="erp-table-th cursor-pointer hover:bg-slate-100/50 transition-colors" onClick={() => requestSort('itemName')}>
                       <div className="flex items-center gap-1">Item Name <SortIcon column="itemName" sortConfig={sortConfig} /></div>
                     </th>
-                    <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 text-center" onClick={() => requestSort('godownName')}>
+                    <th className="erp-table-th cursor-pointer hover:bg-slate-100/50 transition-colors text-center" onClick={() => requestSort('godownName')}>
                       <div className="flex items-center gap-1 justify-center">Godown <SortIcon column="godownName" sortConfig={sortConfig} /></div>
                     </th>
-                    <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 text-right" onClick={() => requestSort('qty')}>
+                    <th className="erp-table-th cursor-pointer hover:bg-slate-100/50 transition-colors text-right" onClick={() => requestSort('qty')}>
                       <div className="flex items-center gap-1 justify-end">Order Qty <SortIcon column="qty" sortConfig={sortConfig} /></div>
                     </th>
-                    <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 text-right" onClick={() => requestSort('planningPendingQty')}>
+                    <th className="erp-table-th cursor-pointer hover:bg-slate-100/50 transition-colors text-right" onClick={() => requestSort('planningPendingQty')}>
                       <div className="flex items-center gap-1 justify-end">Remaining Planning Qty <SortIcon column="planningPendingQty" sortConfig={sortConfig} /></div>
                     </th>
-                    <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 text-right" onClick={() => requestSort('inProcessQty')}>
+                    <th className="erp-table-th cursor-pointer hover:bg-slate-100/50 transition-colors text-right" onClick={() => requestSort('inProcessQty')}>
                       <div className="flex items-center gap-1 justify-end">In Process <SortIcon column="inProcessQty" sortConfig={sortConfig} /></div>
                     </th>
-                    <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 text-right" onClick={() => requestSort('canceledQty')}>
+                    <th className="erp-table-th cursor-pointer hover:bg-slate-100/50 transition-colors text-right" onClick={() => requestSort('canceledQty')}>
                       <div className="flex items-center gap-1 justify-end">Canceled Qty <SortIcon column="canceledQty" sortConfig={sortConfig} /></div>
                     </th>
-                    <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 text-right" onClick={() => requestSort('totalOriginalQty')}>
+                    <th className="erp-table-th cursor-pointer hover:bg-slate-100/50 transition-colors text-right" onClick={() => requestSort('totalOriginalQty')}>
                       <div className="flex items-center gap-1 justify-end">Total Order Qty <SortIcon column="totalOriginalQty" sortConfig={sortConfig} /></div>
                     </th>
-                    <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 text-right" onClick={() => requestSort('currentStock')}>
+                    <th className="erp-table-th cursor-pointer hover:bg-slate-100/50 transition-colors text-right" onClick={() => requestSort('currentStock')}>
                       <div className="flex items-center gap-1 justify-end">Current Stock <SortIcon column="currentStock" sortConfig={sortConfig} /></div>
                     </th>
-                    <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 text-center" onClick={() => requestSort('orderDate')}>
+                    <th className="erp-table-th cursor-pointer hover:bg-slate-100/50 transition-colors text-center" onClick={() => requestSort('orderDate')}>
                       <div className="flex items-center gap-1 justify-center">Order Date <SortIcon column="orderDate" sortConfig={sortConfig} /></div>
                     </th>
-                    <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 text-right" onClick={() => requestSort('rate')}>
+                    <th className="erp-table-th cursor-pointer hover:bg-slate-100/50 transition-colors text-right" onClick={() => requestSort('rate')}>
                       <div className="flex items-center gap-1 justify-end">Rate <SortIcon column="rate" sortConfig={sortConfig} /></div>
                     </th>
-                    <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 text-right" onClick={() => requestSort('intransitQty')}>
+                    <th className="erp-table-th cursor-pointer hover:bg-slate-100/50 transition-colors text-right" onClick={() => requestSort('intransitQty')}>
                       <div className="flex items-center gap-1 justify-end">Intransit Qty <SortIcon column="intransitQty" sortConfig={sortConfig} /></div>
                     </th>
-                    <th className="px-6 py-4 cursor-pointer hover:bg-gray-100 text-right" onClick={() => requestSort('qtyDelivered')}>
+                    <th className="erp-table-th cursor-pointer hover:bg-slate-100/50 transition-colors text-right" onClick={() => requestSort('qtyDelivered')}>
                       <div className="flex items-center gap-1 justify-end">Qty Delivered <SortIcon column="qtyDelivered" sortConfig={sortConfig} /></div>
                     </th>
                   </tr>
@@ -957,8 +959,8 @@ const OtdDispatchPlan = () => {
                     filteredAndSortedOrders.map((order) => {
                       const key = getRowKey(order);
                       return (
-                        <tr key={key} className={`group ${selectedRows[key] ? 'bg-green-50/50' : 'hover:bg-gray-50'} transition-all duration-300`}>
-                          <td className="px-6 py-4 text-center">
+                        <tr key={key} className="erp-table-tr group">
+                          <td className="erp-table-td text-center">
                             <input
                               type="checkbox"
                               checked={!!selectedRows[key]}
@@ -968,45 +970,48 @@ const OtdDispatchPlan = () => {
                           </td>
                           {isAnySelected && (
                             <>
-                              <td className="px-6 py-4 animate-column text-right">
+                              <td className="erp-table-td text-right">
                                 {selectedRows[key] ? (
                                   <input
                                     type="number"
                                     value={editData[key]?.dispatchQty || ''}
                                     onChange={(e) => handleEditChange(key, 'dispatchQty', e.target.value)}
-                                    className="w-20 px-2 py-1 border rounded text-xs outline-none focus:border-primary text-right"
+                                    className="w-28 h-9 px-3 bg-white border-2 border-slate-300 rounded-lg text-[15px] font-black text-slate-900 outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all text-center shadow-md"
+                                    placeholder="0"
                                   />
                                 ) : (
-                                  <span className="text-gray-400">-</span>
+                                  <span className="text-slate-300 font-bold">—</span>
                                 )}
                               </td>
-                              <td className="px-6 py-4 animate-column text-center">
+                              <td className="erp-table-td text-center">
                                 {selectedRows[key] ? (
-                                  <input
-                                    type="date"
-                                    value={editData[key]?.dispatchDate || ''}
-                                    onChange={(e) => handleEditChange(key, 'dispatchDate', e.target.value)}
-                                    className="px-2 py-1 border rounded text-xs outline-none focus:border-primary"
-                                  />
+                                  <div className="relative group">
+                                    <input
+                                        type="date"
+                                        value={editData[key]?.dispatchDate || ''}
+                                        onChange={(e) => handleEditChange(key, 'dispatchDate', e.target.value)}
+                                        className="h-9 px-3 bg-white border border-slate-200 rounded-lg text-[13px] font-bold text-slate-700 outline-none focus:border-primary focus:ring-4 focus:ring-primary/5 transition-all shadow-sm"
+                                    />
+                                  </div>
                                 ) : (
-                                  <span className="text-gray-400">-</span>
+                                  <span className="text-slate-300 font-bold">—</span>
                                 )}
                               </td>
-                              <td className="px-6 py-4 animate-column text-center">
+                              <td className="erp-table-td text-center">
                                 {selectedRows[key] ? (
                                   <select
                                     value={editData[key]?.gstIncluded || ''}
                                     onChange={(e) => handleEditChange(key, 'gstIncluded', e.target.value)}
-                                    className="px-2 py-1 border rounded text-xs outline-none focus:border-primary"
+                                    className="h-9 px-3 bg-white border border-slate-200 rounded-lg text-[13px] font-bold text-slate-700 outline-none focus:border-primary focus:ring-4 focus:ring-primary/5 transition-all shadow-sm cursor-pointer"
                                   >
                                     <option value="Yes">Yes</option>
                                     <option value="No">No</option>
                                   </select>
                                 ) : (
-                                  <span className="text-gray-400">-</span>
+                                  <span className="text-slate-300 font-bold">—</span>
                                 )}
                               </td>
-                              <td className="px-6 py-4 animate-column text-center">
+                              <td className="erp-table-td text-center">
                                 {selectedRows[key] ? (
                                   <div className="w-full min-w-[150px]">
                                     <SearchableDropdown
@@ -1025,13 +1030,13 @@ const OtdDispatchPlan = () => {
                               </td>
                             </>
                           )}
-                          <td className="px-6 py-4 font-bold text-gray-900">{order.orderNo}</td>
-                          <td className="px-6 py-4 font-bold text-gray-800">{order.clientName}</td>
-                          <td className="px-6 py-4 font-semibold text-gray-700">{order.itemName}</td>
-                          <td className="px-6 py-4 text-center font-medium text-gray-600">{order.godownName}</td>
+                          <td className="erp-table-td font-black text-slate-500">{order.orderNo}</td>
+                          <td className="erp-table-td font-bold text-slate-900">{order.clientName}</td>
+                          <td className="erp-table-td font-semibold text-slate-700 truncate max-w-[200px]" title={order.itemName}>{order.itemName}</td>
+                          <td className="erp-table-td text-center text-slate-600 italic font-black text-[11px] uppercase opacity-60 whitespace-nowrap">{order.godownName}</td>
 
                           {/* Remaining Qty (current in app_orders) */}
-                          <td className="px-6 py-4 text-center">
+                          <td className="erp-table-td text-center">
                             <span className="inline-flex flex-col items-center">
                               <span className="font-black text-primary text-base leading-tight">{order.qty}</span>
                               <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest leading-none">Remaining</span>
@@ -1039,7 +1044,7 @@ const OtdDispatchPlan = () => {
                           </td>
 
                           {/* Yet to Plan = remaining - already planned (can be negative = over-planned) */}
-                          <td className="px-6 py-4 text-center">
+                          <td className="erp-table-td text-center">
                             {order.planningPendingQty < 0 ? (
                               <span className="inline-flex flex-col items-center gap-0.5">
                                 <span className="inline-flex items-center gap-1 bg-red-50 border border-red-200 text-red-600 font-black text-sm px-2 py-0.5 rounded-full leading-tight">
@@ -1057,7 +1062,7 @@ const OtdDispatchPlan = () => {
                           </td>
 
                           {/* In-Process = planned but not yet delivered */}
-                          <td className="px-6 py-4 text-center">
+                          <td className="erp-table-td text-center">
                             <span className="inline-flex flex-col items-center">
                               <span className="font-bold text-indigo-500 leading-tight">{order.inProcessQty || 0}</span>
                               <span className="text-[9px] font-bold text-indigo-300 uppercase tracking-widest leading-none">In Process</span>
@@ -1065,7 +1070,7 @@ const OtdDispatchPlan = () => {
                           </td>
 
                           {/* Cancelled Qty */}
-                          <td className="px-6 py-4 text-center">
+                          <td className="erp-table-td text-center">
                             <span className="inline-flex flex-col items-center">
                               <span className="font-bold text-red-500 leading-tight">{order.canceledQty > 0 ? order.canceledQty : '—'}</span>
                               <span className="text-[9px] font-bold text-red-300 uppercase tracking-widest leading-none">Cancelled</span>
@@ -1080,7 +1085,7 @@ const OtdDispatchPlan = () => {
                             </span>
                           </td>
 
-                          <td className="px-6 py-4 text-right text-[10px] font-bold text-gray-500 bg-slate-50/50 leading-tight">
+                          <td className="erp-table-td text-right font-black text-slate-400">
                             {loadingStock ? (
                               <RefreshCw size={12} className="animate-spin inline text-primary/40" />
                             ) : (
@@ -1088,7 +1093,7 @@ const OtdDispatchPlan = () => {
                             )}
                           </td>
                           <td className="px-6 py-4 text-center text-[11px] font-black uppercase text-gray-500">{formatDisplayDate(order.orderDate)}</td>
-                          <td className="px-6 py-4 text-right text-slate-500 font-medium">₹{order.rate}</td>
+                          <td className="erp-table-td text-right text-slate-500 font-medium">₹{order.rate}</td>
                           <td className="px-6 py-4 text-right font-bold text-gray-500">
                             {loadingIntransit ? (
                               <RefreshCw size={12} className="animate-spin inline text-primary/40" />
