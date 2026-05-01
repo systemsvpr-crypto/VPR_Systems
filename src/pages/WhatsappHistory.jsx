@@ -14,10 +14,18 @@ import toast from 'react-hot-toast';
 const WhatsappHistory = () => {
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [searchTerm, setSearchTerm] = useState('');
     const [selectedContactId, setSelectedContactId] = useState(null);
     const [sidebarVisible, setSidebarVisible] = useState(true);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [filterType, setFilterType] = useState('all'); // all, sent, bulk
     const chatEndRef = useRef(null);
+    const unreadRef = useRef(null);
+    const selectedContactIdRef = useRef(selectedContactId);
+
+    // Update ref whenever state changes
+    useEffect(() => {
+        selectedContactIdRef.current = selectedContactId;
+    }, [selectedContactId]);
 
     // Fetch logs from Supabase
     const fetchLogs = useCallback(async () => {
@@ -47,14 +55,38 @@ const WhatsappHistory = () => {
     useEffect(() => {
         fetchLogs();
 
-        // Subscribe to real-time updates for receiving messages
+        // Subscribe to real-time updates for receiving messages and status updates
         const channel = supabase
             .channel('whatsapp_logs_changes')
             .on('postgres_changes', 
                 { event: 'INSERT', schema: 'public', table: 'whatsapp_logs' }, 
                 (payload) => {
-                    setLogs(prev => [payload.new, ...prev]);
-                    toast.success(`New message ${payload.new.status === 'Received' ? 'received' : 'sent'}`);
+                    const newLog = payload.new;
+                    const key = newLog.phone_number || newLog.recipient_name;
+                    
+                    // If this message belongs to the chat we are currently looking at, mark it read immediately
+                    if (key === selectedContactIdRef.current && newLog.is_read === false) {
+                        markMessagesAsRead(key);
+                    }
+                    
+                    setLogs(prev => {
+                        // Prevent duplicate if already in state
+                        if (prev.some(log => log.id === newLog.id)) return prev;
+                        return [newLog, ...prev];
+                    });
+
+                    if (newLog.status === 'Received') {
+                        toast.success(`New message from ${newLog.recipient_name || 'Customer'}`);
+                    }
+                }
+            )
+            .on('postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'whatsapp_logs' },
+                (payload) => {
+                    // Update the status (ticks) or read state in real-time
+                    setLogs(prev => prev.map(log => 
+                        log.id === payload.new.id ? payload.new : log
+                    ));
                 }
             )
             .subscribe();
@@ -80,7 +112,7 @@ const WhatsappHistory = () => {
             });
 
             setNewMessage('');
-            fetchLogs(); // Refresh logs to show new message
+            // No need for fetchLogs() here, the realtime listener will pick it up
             toast.success('Message sent');
         } catch (error) {
             toast.error(error.message);
@@ -142,17 +174,27 @@ const WhatsappHistory = () => {
             }
         });
         
-        const contactList = Array.from(map.values()).sort((a, b) => new Date(b.lastDate) - new Date(a.lastDate));
-        
-        if (searchTerm) {
-            const lower = searchTerm.toLowerCase();
-            return contactList.filter(c => 
-                c.name.toLowerCase().includes(lower) || 
-                c.phone?.includes(searchTerm)
+        let contactList = Array.from(map.values());
+
+        // Apply Category Filtering
+        if (filterType === 'sent') {
+            contactList = contactList.filter(c => c.logs.some(l => l.message_type === 'Manual Text'));
+        } else if (filterType === 'bulk') {
+            contactList = contactList.filter(c => c.logs.some(l => l.stage !== 'Support' && l.stage !== 'Customer Reply'));
+        }
+
+        // Apply Search Filtering
+        if (searchTerm.trim()) {
+            const term = searchTerm.toLowerCase();
+            contactList = contactList.filter(c => 
+                c.name.toLowerCase().includes(term) || 
+                c.phone?.includes(term) ||
+                c.lastMessage?.toLowerCase().includes(term)
             );
         }
-        return contactList;
-    }, [logs, searchTerm]);
+
+        return contactList.sort((a, b) => new Date(b.lastDate) - new Date(a.lastDate));
+    }, [logs, searchTerm, filterType]);
 
     const selectedContact = useMemo(() => 
         contacts.find(c => c.id === selectedContactId), 
@@ -163,9 +205,13 @@ const WhatsappHistory = () => {
         return [...selectedContact.logs].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     }, [selectedContact]);
 
-    // Scroll to bottom when chat changes
+    // Scroll to first unread or bottom
     useEffect(() => {
-        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (unreadRef.current) {
+            unreadRef.current.scrollIntoView({ behavior: 'auto', block: 'center' });
+        } else {
+            chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
+        }
     }, [chatMessages]);
 
     const formatMessageTime = (dateStr) => {
@@ -281,12 +327,24 @@ const WhatsappHistory = () => {
                         />
                     </div>
                     <div className="flex items-center gap-2 px-1">
-                        <button className="px-3 py-1 bg-[#202c33] text-[#00a884] rounded-full text-[12px] font-bold">All</button>
-                        <button className="px-3 py-1 text-[#8696a0] hover:bg-[#202c33] rounded-full text-[12px] font-bold transition-all">Sent</button>
-                        <button className="px-3 py-1 text-[#8696a0] hover:bg-[#202c33] rounded-full text-[12px] font-bold transition-all">Bulk</button>
-                        <div className="ml-auto text-[#8696a0] cursor-pointer hover:text-white transition-colors">
-                            <Filter size={18} />
-                        </div>
+                        <button 
+                            onClick={() => setFilterType('all')}
+                            className={`px-3 py-1 rounded-full text-[12px] font-bold transition-all ${filterType === 'all' ? 'bg-[#202c33] text-[#00a884]' : 'text-[#8696a0] hover:bg-[#202c33]'}`}
+                        >
+                            All
+                        </button>
+                        <button 
+                            onClick={() => setFilterType('sent')}
+                            className={`px-3 py-1 rounded-full text-[12px] font-bold transition-all ${filterType === 'sent' ? 'bg-[#202c33] text-[#00a884]' : 'text-[#8696a0] hover:bg-[#202c33]'}`}
+                        >
+                            Sent
+                        </button>
+                        <button 
+                            onClick={() => setFilterType('bulk')}
+                            className={`px-3 py-1 rounded-full text-[12px] font-bold transition-all ${filterType === 'bulk' ? 'bg-[#202c33] text-[#00a884]' : 'text-[#8696a0] hover:bg-[#202c33]'}`}
+                        >
+                            Bulk
+                        </button>
                     </div>
                 </div>
 
@@ -389,54 +447,66 @@ const WhatsappHistory = () => {
                                             </span>
                                         </div>
 
-                                        {group.messages.map((msg) => {
+                                        {group.messages.map((msg, index) => {
                                             const isIncoming = msg.status === 'Received';
+                                            const isFirstUnread = msg.is_read === false && isIncoming && group.messages.slice(0, index).every(m => m.is_read !== false);
+                                            
                                             return (
-                                                <div 
-                                                    key={msg.id} 
-                                                    className={`flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300 ${isIncoming ? 'items-start' : 'items-end'}`}
-                                                >
-                                                    {/* Template Badge (Sent only) */}
-                                                    {!isIncoming && (
-                                                        <div className="flex items-center gap-1 mb-1 pr-1">
-                                                            <span className="bg-[#005c4b]/30 text-[#00a884] text-[9px] font-black px-2.5 py-0.5 rounded-full border border-[#00a884]/20 uppercase tracking-tighter">
-                                                                {msg.message_type?.toLowerCase().replace(/\s+/g, '_') || 'general_msg'}
+                                                <React.Fragment key={msg.id}>
+                                                    {/* Unread Separator */}
+                                                    {isFirstUnread && (
+                                                        <div ref={unreadRef} className="flex justify-center my-4 animate-in fade-in duration-500">
+                                                            <span className="bg-[#182229] text-[#00a884] text-[10px] font-bold px-4 py-1 rounded-full border border-[#00a884]/20 uppercase tracking-widest shadow-sm">
+                                                                Unread Messages Below
                                                             </span>
                                                         </div>
                                                     )}
+                                                    
+                                                    <div 
+                                                        className={`flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300 ${isIncoming ? 'items-start' : 'items-end'}`}
+                                                    >
+                                                        {/* Template Badge (Sent only) */}
+                                                        {!isIncoming && (
+                                                            <div className="flex items-center gap-1 mb-1 pr-1">
+                                                                <span className="bg-[#005c4b]/30 text-[#00a884] text-[9px] font-black px-2.5 py-0.5 rounded-full border border-[#00a884]/20 uppercase tracking-tighter">
+                                                                    {msg.message_type?.toLowerCase().replace(/\s+/g, '_') || 'general_msg'}
+                                                                </span>
+                                                            </div>
+                                                        )}
 
-                                                    {/* Bubble */}
-                                                    <div className={`max-w-[85%] sm:max-w-[70%] lg:max-w-[60%] p-3 rounded-xl shadow-md relative message-bubble border ${
-                                                        isIncoming 
-                                                            ? 'bg-[#202c33] text-[#e9edef] rounded-tl-none border-[#202c33]/50 message-bubble-received' 
-                                                            : 'bg-[#005c4b] text-[#e9edef] rounded-tr-none border-[#005c4b]/50 message-bubble-sent'
-                                                    }`}>
-                                                        {/* Message Content */}
-                                                        <div className="text-[14px] leading-relaxed whitespace-pre-wrap break-words pr-14">
-                                                            {msg.message_content}
-                                                        </div>
+                                                        {/* Bubble */}
+                                                        <div className={`max-w-[85%] sm:max-w-[70%] lg:max-w-[60%] p-3 rounded-xl shadow-md relative message-bubble border ${
+                                                            isIncoming 
+                                                                ? 'bg-[#202c33] text-[#e9edef] rounded-tl-none border-[#202c33]/50 message-bubble-received' 
+                                                                : 'bg-[#005c4b] text-[#e9edef] rounded-tr-none border-[#005c4b]/50 message-bubble-sent'
+                                                        }`}>
+                                                            {/* Message Content */}
+                                                            <div className="text-[14px] leading-relaxed whitespace-pre-wrap break-words pr-14">
+                                                                {msg.message_content}
+                                                            </div>
 
-                                                        {/* Meta: Time + Status */}
-                                                        <div className="absolute bottom-1.5 right-2 flex items-center gap-1 min-w-[60px] justify-end">
-                                                            <span className="text-[10px] text-[#aebac1] font-medium">
-                                                                {formatMessageTime(msg.created_at)}
-                                                            </span>
-                                                            {!isIncoming && (
-                                                                msg.status === 'Sent' ? (
-                                                                    <Check size={15} className="text-[#aebac1] shrink-0" />
-                                                                ) : msg.status === 'Delivered' ? (
-                                                                    <CheckCheck size={15} className="text-[#aebac1] shrink-0" />
-                                                                ) : msg.status === 'Read' ? (
-                                                                    <CheckCheck size={15} className="text-[#53bdeb] shrink-0" />
-                                                                ) : msg.status === 'Success' ? (
-                                                                    <CheckCheck size={15} className="text-[#53bdeb] shrink-0" />
-                                                                ) : (
-                                                                    <XCircle size={14} className="text-rose-400 shrink-0" />
-                                                                )
-                                                            )}
+                                                            {/* Meta: Time + Status */}
+                                                            <div className="absolute bottom-1.5 right-2 flex items-center gap-1 min-w-[60px] justify-end">
+                                                                <span className="text-[10px] text-[#aebac1] font-medium">
+                                                                    {formatMessageTime(msg.created_at)}
+                                                                </span>
+                                                                {!isIncoming && (
+                                                                    msg.status === 'Sent' ? (
+                                                                        <Check size={15} className="text-[#aebac1] shrink-0" />
+                                                                    ) : msg.status === 'Delivered' ? (
+                                                                        <CheckCheck size={15} className="text-[#aebac1] shrink-0" />
+                                                                    ) : msg.status === 'Read' ? (
+                                                                        <CheckCheck size={15} className="text-[#53bdeb] shrink-0" />
+                                                                    ) : msg.status === 'Success' ? (
+                                                                        <CheckCheck size={15} className="text-[#53bdeb] shrink-0" />
+                                                                    ) : (
+                                                                        <XCircle size={14} className="text-rose-400 shrink-0" />
+                                                                    )
+                                                                )}
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </div>
+                                                </React.Fragment>
                                             );
                                         })}
                                     </React.Fragment>
@@ -447,10 +517,6 @@ const WhatsappHistory = () => {
 
                         {/* Chat Footer / Input Area */}
                         <form onSubmit={handleSendMessage} className="px-4 py-2 bg-[#202c33] flex items-center gap-4 h-[62px] shrink-0">
-                            <div className="flex items-center gap-4 text-[#8696a0]">
-                                <Smile size={24} className="hover:text-[#aebac1] cursor-pointer" />
-                                <Paperclip size={24} className="hover:text-[#aebac1] cursor-pointer" />
-                            </div>
                             <div className="flex-1">
                                 <input
                                     type="text"

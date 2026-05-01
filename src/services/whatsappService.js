@@ -9,9 +9,9 @@ const META_PHONE_ID = import.meta.env.VITE_WHATSAPP_PHONE_ID;
  * WhatsApp restricts newlines and rejects empty strings.
  */
 const cleanVarValue = (val) => {
-    if (val === null || val === undefined) return ' ';
+    if (val === null || val === undefined) return '-';
     const str = String(val).trim();
-    return str === '' ? ' ' : str;
+    return str === '' ? '-' : str;
 };
 
 const cleanDateValue = (val) => {
@@ -41,10 +41,9 @@ export const sendWhatsAppNotification = async (phoneNumber, templateName, variab
             formattedNumber = '91' + formattedNumber;
         }
 
-        // Region-aware language codes
+        // Region-aware language codes - Custom mapping based on your working templates
         const languageCode = 
             templateName === 'dispatch_planning' ? "en_IN" : 
-            templateName === 'purchase_delivered' ? "en" :
             templateName === 'dispatch_confirmation' ? "en_US" : 
             templateName === 'order_confirmation' ? "en" : "en_US";
 
@@ -211,19 +210,24 @@ export const whatsappService = {
         );
     },
 
-    sendBulkDispatchNotification: async (recipientNumber, { customerName, orderNumbers, productNames, dispatchDates, totalQty: passedTotalQty }, logMeta = {}) => {
+    sendBulkDispatchNotification: async (recipientNumber, { customerName, orderNumbers, items, dispatchDates, totalQty: passedTotalQty }, logMeta = {}) => {
         console.warn('whatsappService.sendBulkDispatchNotification called');
         const isPlanning = (logMeta.stage || 'Before Dispatch') === 'Before Dispatch';
         const template = isPlanning ? 'dispatch_planning' : 'dispatch_confirmation';
         
-        const uniqueOrders = [...new Set(orderNumbers)].join(', ');
-        const productStr = productNames.join(', ');
-        const uniqueDates = [...new Set(dispatchDates)].map(d => cleanDateValue(d)).join(', ');
-        const totalQty = passedTotalQty ? String(passedTotalQty) : String(orderNumbers.length);
+        const uniqueOrders = [...new Set(orderNumbers)].join(', ') || '-';
+        const uniqueDates = [...new Set(dispatchDates)].map(d => cleanDateValue(d)).join(', ') || '-';
+        
+        const totalOverallBags = items.reduce((sum, i) => sum + (parseFloat(i.dispatchQty) || 0), 0);
+        const totalQty = String(totalOverallBags || '0');
+        
+        // Simple Description (for Both) - Using comma join for better template compatibility
+        const simpleProductList = items.map(i => `${i.productName} (${i.dispatchQty})`).join(', ') || '-';
 
+        // Variables based on Template requirements
         const variables = isPlanning 
-            ? [customerName, productStr, totalQty] 
-            : [customerName, uniqueOrders, productStr, uniqueDates, totalQty];
+            ? [customerName, simpleProductList, totalQty] 
+            : [customerName, uniqueOrders, simpleProductList, uniqueDates, totalQty];
 
         return sendWhatsAppNotification(
             recipientNumber,
@@ -232,11 +236,11 @@ export const whatsappService = {
             { 
                 recipientName: customerName, 
                 messageType: isPlanning ? 'dispatch_planning' : 'dispatch_confirmation', 
-                stage: logMeta.stage || 'Before Dispatch', 
+                stage: logMeta.stage || (isPlanning ? 'Before Dispatch' : 'After Dispatch'), 
                 referenceId: uniqueOrders,
                 messageContent: isPlanning
-                    ? `*Dispatch Planning*\n🚚 आज का डिस्पैच प्लान\n\n👤 ग्राहक: ${customerName}\n\n📦 प्रोडक्ट विवरण:\n${productStr}\n\n🔢 कुल मात्रा: ${totalQty}\n\nधन्यवाद\nVijay Industries`
-                    : `*Dispatch Confirmation*\nप्रिय ${customerName} ,\n\nआपके बल्क ऑर्डर्स सफलतापूर्वक डिस्पैच कर दिए गए हैं। 🚚\n\n📌 ऑर्डर विवरण:\n\nऑर्डर नंबर: ${uniqueOrders}\n\nप्रोडक्ट नाम:\n${productStr}\n\nकुल मात्रा : ${totalQty}\n\nडिस्पैच तारीख: ${uniqueDates}\n\nहमसे संपर्क करने के लिए धन्यवाद।\nVijay Industries`,
+                    ? `*Dispatch Planning*\n🚚 आज का डिस्पैच प्लान\n\n👤 ग्राहक: ${customerName}\n\n📦 प्रोडक्ट विवरण:\n${simpleProductList}\n\n🔢 कुल मात्रा: ${totalQty}\n\nधन्यवाद\nVijay Industries`
+                    : `*Dispatch Confirmation*\nप्रिय ${customerName} ,\n\nआपके बल्क ऑर्डर्स सफलतापूर्वक डिस्पैच कर दिए गए हैं। 🚚\n\n📌 ऑर्डर विवरण:\n\nऑर्डर नंबर: ${uniqueOrders}\n\nप्रोडक्ट नाम:\n${simpleProductList}\n\nकुल मात्रा : ${totalQty}\n\nडिस्पैच तारीख: ${uniqueDates}\n\nहमसे संपर्क करने के लिए धन्यवाद।\nVijay Industries`,
                 ...logMeta 
             }
         );
@@ -257,7 +261,7 @@ export const whatsappService = {
             messageType: 'order_confirmation', 
             stage: 'Order Entry', 
             referenceId: orderNo,
-            messageContent: `*Order Confirmation*\nनमस्ते ${customerName} ,\n\nआपका ऑर्डर प्राप्त हो गया है।\n\nइसमें कुछ change करना चाहे या कुछ सुधार हो तो हमें बताए।\n\nItem Name :\n${productListStr}\n\nTotal Qty :- ${totalQty}\n\nआपकी तरफ़ से कुछ जवाब नहीं आने पर ऑर्डर FINAL माना जाएगा।\n\nधन्यवाद!\nvijay Industries`,
+            messageContent: `*Order Confirmation*\nनमस्ते ${customerName} ,\n\nआपका ऑर्डर प्राप्त हो गया है।\n\n*इसमें कुछ change करना चाहे या कुछ सुधार हो तो हमें बताए।*\n\nItem Name :\n ${productListStr}\n\nTotal Qty :- ${totalQty}\n\n*आपकी तरफ़ से कुछ जवाब नहीं आने पर ऑर्डर FINAL माना जाएगा।*\n\n*धन्यवाद!*`,
             ...logMeta 
         });
     },

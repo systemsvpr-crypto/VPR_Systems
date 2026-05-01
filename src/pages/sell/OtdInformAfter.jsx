@@ -89,6 +89,8 @@ const OtdInformAfter = () => {
         informedAt: item.informed_at,
         is_skip: item.is_skip,
         db_status: item.status,
+        rate: item.order?.rate || 0,
+        orderDate: item.order?.order_date,
         status: item.informed_after_dispatch ? 'Informed' : 'Pending'
       }));
 
@@ -191,8 +193,12 @@ const OtdInformAfter = () => {
           await whatsappService.sendBulkDispatchNotification('9691207533', {
             customerName: clientName,
             orderNumbers: items.map(i => i.orderNo),
-            productNames: items.map(i => `${i.productName} (${i.dispatchQty})`),
-            dispatchDates: items.map(i => formatDisplayDate(i.dispatchDate)),
+            items: items.map(i => ({
+              productName: i.productName,
+              dispatchQty: i.dispatchQty,
+              rate: i.rate
+            })),
+            dispatchDates: items.map(i => i.orderDate),
             totalQty: items.reduce((sum, i) => sum + (parseFloat(i.dispatchQty) || 0), 0)
           }, { stage: 'After Dispatch' });
           // Add to successful list

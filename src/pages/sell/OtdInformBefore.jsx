@@ -115,7 +115,8 @@ const OtdInformBefore = () => {
                 informedAt: item.informed_at,
                 dispatchCompleted: item.dispatch_completed,
                 status: item.status,
-                is_skip: item.is_skip
+                is_skip: item.is_skip,
+                rate: item.order?.rate || '0'
             }));
 
             // Pending: Not informed, not completed, not canceled, and NOT a skip
@@ -240,7 +241,11 @@ const OtdInformBefore = () => {
                     await whatsappService.sendBulkDispatchNotification('9691207533', {
                         customerName: clientName,
                         orderNumbers: items.map(i => i.orderNo),
-                        productNames: items.map(i => `${i.itemName} (${i.dispatchQty})`),
+                        items: items.map(i => ({
+                            productName: i.itemName,
+                            dispatchQty: i.dispatchQty,
+                            rate: i.rate
+                        })),
                         dispatchDates: items.map(i => formatDisplayDate(i.dispatchDate)),
                         totalQty: items.reduce((sum, i) => sum + (parseFloat(i.dispatchQty) || 0), 0)
                     }, { stage: 'Before Dispatch' });
