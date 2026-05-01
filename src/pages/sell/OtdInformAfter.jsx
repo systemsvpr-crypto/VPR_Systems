@@ -192,7 +192,8 @@ const OtdInformAfter = () => {
             customerName: clientName,
             orderNumbers: items.map(i => i.orderNo),
             productNames: items.map(i => `${i.productName} (${i.dispatchQty})`),
-            dispatchDates: items.map(i => formatDisplayDate(i.dispatchDate))
+            dispatchDates: items.map(i => formatDisplayDate(i.dispatchDate)),
+            totalQty: items.reduce((sum, i) => sum + (parseFloat(i.dispatchQty) || 0), 0)
           }, { stage: 'After Dispatch' });
           // Add to successful list
           items.forEach(it => successfulIds.push(it.id));

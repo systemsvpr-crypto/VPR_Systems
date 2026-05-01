@@ -293,40 +293,40 @@ const PurArrival = () => {
   return (
     <div className="max-w-[1600px] mx-auto space-y-4">
       {/* ── Sub Tabs ── */}
-      <div className="flex gap-2">
-        <button onClick={() => setActiveTab('active')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-black transition-all border ${activeTab === 'active' ? 'bg-orange-600 text-white border-orange-600 shadow-lg shadow-orange-100' : 'bg-white text-gray-500 border-gray-100 hover:bg-gray-50'}`}>
-          <Clock size={16} /> Active Aawak
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => setActiveTab('active')} className={`flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-black transition-all border ${activeTab === 'active' ? 'bg-orange-600 text-white border-orange-600 shadow-lg shadow-orange-100' : 'bg-white text-gray-500 border-gray-100 hover:bg-gray-50'}`}>
+          <Clock size={16} /> <span className="whitespace-nowrap">Active Aawak</span>
         </button>
-        <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-black transition-all border ${activeTab === 'history' ? 'bg-orange-600 text-white border-orange-600 shadow-lg shadow-orange-100' : 'bg-white text-gray-500 border-gray-100 hover:bg-gray-50'}`}>
-          <History size={16} /> Arrival History
+        <button onClick={() => setActiveTab('history')} className={`flex items-center gap-2 px-4 sm:px-6 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-black transition-all border ${activeTab === 'history' ? 'bg-orange-600 text-white border-orange-600 shadow-lg shadow-orange-100' : 'bg-white text-gray-500 border-gray-100 hover:bg-gray-50'}`}>
+          <History size={16} /> <span className="whitespace-nowrap">Arrival History</span>
         </button>
       </div>
 
       {/* ── Header & Filters ── */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
-            <h2 className="text-xl font-black text-gray-800 tracking-tight">{activeTab === 'active' ? 'Aawak Details' : 'Arrival History'}</h2>
+            <h2 className="text-lg sm:text-xl font-black text-gray-800 tracking-tight">{activeTab === 'active' ? 'Aawak Details' : 'Arrival History'}</h2>
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-0.5">Logistics Tracking & Material Receiving</p>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="relative">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <div className="relative flex-1 min-w-[200px]">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input type="text" placeholder="Search entries..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 w-64 transition-all" />
+              <input type="text" placeholder="Search entries..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 transition-all" />
             </div>
-            <button onClick={() => fetchAll(true)} disabled={refreshing} className="flex items-center gap-1.5 px-4 py-2 bg-gray-50 text-gray-600 rounded-lg text-sm font-bold hover:bg-gray-100 border border-gray-200 transition-all">
+            <button onClick={() => fetchAll(true)} disabled={refreshing} className="flex items-center gap-1.5 px-3 sm:px-4 py-2 bg-gray-50 text-gray-600 rounded-lg text-xs sm:text-sm font-bold hover:bg-gray-100 border border-gray-200 transition-all">
               <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> Refresh
             </button>
             {activeTab === 'active' && (
-              <button onClick={handleBulkSubmit} disabled={saving} className="flex items-center gap-2 px-6 py-2 bg-orange-600 text-white rounded-lg text-sm font-black shadow-md shadow-orange-200 hover:bg-orange-700 transition-all disabled:opacity-50">
+              <button onClick={handleBulkSubmit} disabled={saving} className="flex flex-1 sm:flex-none items-center justify-center gap-2 px-4 sm:px-6 py-2 bg-orange-600 text-white rounded-lg text-xs sm:text-sm font-black shadow-md shadow-orange-200 hover:bg-orange-700 transition-all disabled:opacity-50">
                 {saving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
-                {saving ? 'Syncing...' : 'Sync with Stock'}
+                <span className="whitespace-nowrap">{saving ? 'Syncing...' : 'Sync with Stock'}</span>
               </button>
             )}
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 pt-4 border-t border-gray-50">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-4 border-t border-gray-50">
           <div className="space-y-1">
             <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Lifting No</label>
             <SearchableDropdown 

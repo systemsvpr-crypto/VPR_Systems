@@ -89,6 +89,36 @@ const WhatsappHistory = () => {
         }
     };
 
+    // Mark messages as read when chat is opened
+    const markMessagesAsRead = useCallback(async (contactId) => {
+        try {
+            const { error } = await supabase
+                .from('whatsapp_logs')
+                .update({ is_read: true })
+                .eq('is_read', false)
+                .or(`phone_number.eq.${contactId},recipient_name.eq.${contactId}`);
+
+            if (error) throw error;
+            
+            // Local state update to remove badges immediately
+            setLogs(prev => prev.map(log => {
+                const key = log.phone_number || log.recipient_name;
+                if (key === contactId) {
+                    return { ...log, is_read: true };
+                }
+                return log;
+            }));
+        } catch (error) {
+            console.error('Error marking messages as read:', error);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (selectedContactId) {
+            markMessagesAsRead(selectedContactId);
+        }
+    }, [selectedContactId, markMessagesAsRead]);
+
     // Group logs by contact
     const contacts = useMemo(() => {
         const map = new Map();
@@ -101,10 +131,15 @@ const WhatsappHistory = () => {
                     phone: log.phone_number,
                     lastMessage: log.message_content,
                     lastDate: log.created_at,
+                    unreadCount: 0,
                     logs: []
                 });
             }
-            map.get(key).logs.push(log);
+            const contact = map.get(key);
+            contact.logs.push(log);
+            if (log.is_read === false && log.status === 'Received') {
+                contact.unreadCount += 1;
+            }
         });
         
         const contactList = Array.from(map.values()).sort((a, b) => new Date(b.lastDate) - new Date(a.lastDate));
@@ -296,11 +331,18 @@ const WhatsappHistory = () => {
                                             {new Date(contact.lastDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'numeric' })}
                                         </span>
                                     </div>
-                                    <div className="flex items-center gap-1">
-                                        <span className="text-[#8696a0]">
-                                            <CheckCheck size={14} className="text-[#53bdeb]" />
-                                        </span>
-                                        <p className="text-[#8696a0] text-[13px] truncate">{contact.lastMessage}</p>
+                                    <div className="flex items-center justify-between gap-1">
+                                        <div className="flex items-center gap-1 min-w-0">
+                                            <span className="text-[#8696a0]">
+                                                <CheckCheck size={14} className="text-[#53bdeb]" />
+                                            </span>
+                                            <p className="text-[#8696a0] text-[13px] truncate">{contact.lastMessage}</p>
+                                        </div>
+                                        {contact.unreadCount > 0 && (
+                                            <div className="bg-[#00a884] text-[#111b21] text-[12px] font-bold min-w-[20px] h-[20px] rounded-full flex items-center justify-center px-1 animate-in zoom-in duration-300">
+                                                {contact.unreadCount}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -380,7 +422,13 @@ const WhatsappHistory = () => {
                                                                 {formatMessageTime(msg.created_at)}
                                                             </span>
                                                             {!isIncoming && (
-                                                                msg.status === 'Success' ? (
+                                                                msg.status === 'Sent' ? (
+                                                                    <Check size={15} className="text-[#aebac1] shrink-0" />
+                                                                ) : msg.status === 'Delivered' ? (
+                                                                    <CheckCheck size={15} className="text-[#aebac1] shrink-0" />
+                                                                ) : msg.status === 'Read' ? (
+                                                                    <CheckCheck size={15} className="text-[#53bdeb] shrink-0" />
+                                                                ) : msg.status === 'Success' ? (
                                                                     <CheckCheck size={15} className="text-[#53bdeb] shrink-0" />
                                                                 ) : (
                                                                     <XCircle size={14} className="text-rose-400 shrink-0" />

@@ -241,8 +241,9 @@ const OtdInformBefore = () => {
                         customerName: clientName,
                         orderNumbers: items.map(i => i.orderNo),
                         productNames: items.map(i => `${i.itemName} (${i.dispatchQty})`),
-                        dispatchDates: items.map(i => formatDisplayDate(i.dispatchDate))
-                    }, { messageType: 'Before Dispatch' });
+                        dispatchDates: items.map(i => formatDisplayDate(i.dispatchDate)),
+                        totalQty: items.reduce((sum, i) => sum + (parseFloat(i.dispatchQty) || 0), 0)
+                    }, { stage: 'Before Dispatch' });
                     // If successful, add these items to the list to be updated in DB
                     items.forEach(it => successfulIds.push(it.id));
                 } catch (wsError) {

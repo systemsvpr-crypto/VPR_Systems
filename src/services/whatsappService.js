@@ -1,8 +1,8 @@
 import { supabase } from '../supabase';
 import useAuthStore from '../store/authStore';
 
-const META_TOKEN = 'EAALYSJZB3s9gBQZB9ZBWG6SxUVmf6fioOLmXJfA6zhH6xYjD0aeG5IctWqcXzYBcPVqHsVUfWwjtd7fnGgzZAmZANiKB0j4PBLDDZBPQvzvSV9X6ZBiOdl7daIhFsTW1D5YM7i2cb0zCAe66hAQHaMDHaQ97aG2qtC3yP28wZBqCBQHfVeNLID9wzmpZC64OmhAZDZD';
-const META_PHONE_ID = '973511912520718';
+const META_TOKEN = import.meta.env.VITE_WHATSAPP_TOKEN;
+const META_PHONE_ID = import.meta.env.VITE_WHATSAPP_PHONE_ID;
 
 /**
  * Cleans a value for WhatsApp parameters.
@@ -10,22 +10,10 @@ const META_PHONE_ID = '973511912520718';
  */
 const cleanVarValue = (val) => {
     if (val === null || val === undefined) return ' ';
-    let str = String(val);
-    
-    // WhatsApp supports newlines in parameters as \n
-    str = str.replace(/\t/g, ' ');
-    str = str.replace(/\s{5,}/g, '    '); // max 4 consecutive spaces
-    str = str.replace(/,\s*,/g, ', ');    // double comma fix
-    str = str.replace(/,?\s*$/, '');      // trailing comma remove
-    str = str.trim();
-
-    // WhatsApp rejects empty strings, so use a single space
+    const str = String(val).trim();
     return str === '' ? ' ' : str;
 };
 
-/**
- * Formats a date to DD-MM-YYYY as per template requirements.
- */
 const cleanDateValue = (val) => {
     if (!val) return ' ';
     try {
@@ -34,7 +22,7 @@ const cleanDateValue = (val) => {
         const dd = String(date.getDate()).padStart(2, '0');
         const mm = String(date.getMonth() + 1).padStart(2, '0');
         const yyyy = date.getFullYear();
-        return `${dd}-${mm}-${yyyy}`;
+        return `${dd}/${mm}/${yyyy}`;
     } catch (e) {
         return cleanVarValue(val);
     }
@@ -56,7 +44,7 @@ export const sendWhatsAppNotification = async (phoneNumber, templateName, variab
         // Region-aware language codes
         const languageCode = 
             templateName === 'dispatch_planning' ? "en_IN" : 
-            templateName === 'purchase_delivered' ? "en_IN" :
+            templateName === 'purchase_delivered' ? "en" :
             templateName === 'dispatch_confirmation' ? "en_US" : 
             templateName === 'order_confirmation' ? "en" : "en_US";
 
@@ -106,10 +94,11 @@ export const sendWhatsAppNotification = async (phoneNumber, templateName, variab
             message_type: logMeta.messageType || templateName,
             stage: logMeta.stage || 'General',
             message_content: logMeta.messageContent || variables.join(' | '),
-            status: response.ok ? 'Success' : 'Failed',
+            status: response.ok ? 'Sent' : 'Failed',
             error_message: response.ok ? null : (data.error?.message || 'Failed to send WhatsApp message'),
             sender_name: senderName,
-            reference_id: logMeta.referenceId || '-'
+            reference_id: logMeta.referenceId || '-',
+            message_id: data.messages?.[0]?.id || null
         };
 
         // Attempt logging - don't let log failure block the user experience but log it
@@ -174,10 +163,11 @@ export const sendWhatsAppTextMessage = async (phoneNumber, text, logMeta = {}) =
             message_type: 'Manual Text',
             stage: 'Support',
             message_content: text,
-            status: response.ok ? 'Success' : 'Failed',
+            status: response.ok ? 'Sent' : 'Failed',
             error_message: response.ok ? null : (data.error?.message || 'Failed to send WhatsApp message'),
             sender_name: senderName,
-            reference_id: logMeta.referenceId || '-'
+            reference_id: logMeta.referenceId || '-',
+            message_id: data.messages?.[0]?.id || null
         };
 
         await supabase.from('whatsapp_logs').insert([logEntry]);
@@ -199,9 +189,10 @@ export const whatsappService = {
         const isPlanning = (logMeta.stage || 'Before Dispatch') === 'Before Dispatch';
         const template = isPlanning ? 'dispatch_planning' : 'dispatch_confirmation';
         
+        const dateStr = cleanDateValue(dispatchDate);
         const variables = isPlanning 
             ? [customerName, productName, '1'] 
-            : [customerName, orderNumber, productName, '1', cleanDateValue(dispatchDate)]; 
+            : [customerName, orderNumber, productName, dateStr, '1']; 
 
         return sendWhatsAppNotification(
             recipientNumber,
@@ -220,7 +211,7 @@ export const whatsappService = {
         );
     },
 
-    sendBulkDispatchNotification: async (recipientNumber, { customerName, orderNumbers, productNames, dispatchDates }, logMeta = {}) => {
+    sendBulkDispatchNotification: async (recipientNumber, { customerName, orderNumbers, productNames, dispatchDates, totalQty: passedTotalQty }, logMeta = {}) => {
         console.warn('whatsappService.sendBulkDispatchNotification called');
         const isPlanning = (logMeta.stage || 'Before Dispatch') === 'Before Dispatch';
         const template = isPlanning ? 'dispatch_planning' : 'dispatch_confirmation';
@@ -228,11 +219,11 @@ export const whatsappService = {
         const uniqueOrders = [...new Set(orderNumbers)].join(', ');
         const productStr = productNames.join(', ');
         const uniqueDates = [...new Set(dispatchDates)].map(d => cleanDateValue(d)).join(', ');
-        const totalQty = String(orderNumbers.length);
+        const totalQty = passedTotalQty ? String(passedTotalQty) : String(orderNumbers.length);
 
         const variables = isPlanning 
             ? [customerName, productStr, totalQty] 
-            : [customerName, uniqueOrders, productStr, totalQty, uniqueDates];
+            : [customerName, uniqueOrders, productStr, uniqueDates, totalQty];
 
         return sendWhatsAppNotification(
             recipientNumber,
@@ -274,31 +265,57 @@ export const whatsappService = {
     sendPurchaseDeliveryNotification: async (recipientNumber, { transporterName, lrNo, date, items }, logMeta = {}) => {
         console.warn('whatsappService.sendPurchaseDeliveryNotification called');
         
-        // Format each product into the rich multi-line style
-        // WhatsApp restricts newlines in parameters, so we'll use \n here 
-        // and let cleanVarValue handle the conversion to | separator.
-        const formatProduct = (item) => {
-            if (!item) return ' '; // Return single space for missing items as per WhatsApp rules
-            return `${item.itemName}\nTotal Bag - ${item.bags}\nTotal KG - ${item.kg}`;
+        // Helper to parse item name into Base and Suffix (Size)
+        const parseItem = (name) => {
+            const parts = name.trim().split(' ');
+            if (parts.length <= 1) return { base: name, suffix: '' };
+            const last = parts[parts.length - 1];
+            // If the last part contains numbers or special size chars (*, x), it's a suffix
+            if (/[\d*xX]/.test(last)) {
+                return { base: parts.slice(0, -1).join(' '), suffix: last };
+            }
+            return { base: name, suffix: '' };
         };
 
-        const p1 = formatProduct(items[0]);
-        const p2 = formatProduct(items[1]);
-        const p3 = formatProduct(items[2]);
+        // Group items by base name
+        const groups = items.reduce((acc, item) => {
+            const { base, suffix } = parseItem(item.itemName);
+            if (!acc[base]) acc[base] = { base, lines: [], totalBags: 0, totalKg: 0 };
+            acc[base].lines.push(`${suffix || 'Size'} - ${item.bags} - Rs.${item.rate}`);
+            acc[base].totalBags += (parseInt(item.bags) || 0);
+            acc[base].totalKg += (parseFloat(item.kg) || 0);
+            return acc;
+        }, {});
+
+        const groupEntries = Object.values(groups);
+        const totalOverallBags = items.reduce((sum, i) => sum + (parseInt(i.bags) || 0), 0);
+
+        // Format each group into a multi-line string block
+        const formattedGroups = groupEntries.map((g, idx) => {
+            let block = `${g.base}\n${g.lines.join('\n')}\nTotal Bag - ${g.totalBags}\nTotal KG - ${g.totalKg}`;
+            // If this is the last group, add the Total Lot summary
+            if (idx === groupEntries.length - 1) {
+                block += `\n\nTotal Lot - ${totalOverallBags}`;
+            }
+            return block;
+        });
+
+        // Map blocks to variables {{4}}, {{5}}, {{6}}
+        const p1 = formattedGroups[0] || ' ';
+        const p2 = formattedGroups[1] || ' ';
+        const p3 = formattedGroups.slice(2).join('\n\n') || ' ';
 
         return sendWhatsAppNotification(recipientNumber, 'purchase_delivered', [
             transporterName,
-            lrNo || ' ', // Use space instead of hyphen for blank LR
+            lrNo || ' ', 
             cleanDateValue(date),
             p1,
             p2,
             p3
         ], { 
-            recipientName: transporterName, 
-            messageType: 'purchase_delivered', 
-            stage: 'Purchase', 
+            recipientName: transporterName,
             referenceId: lrNo,
-            messageContent: `*Delivery Notification*\n\nTransporter Name: ${transporterName}\n\nLR No.: ${lrNo || 'Number'}\n\nDate : ${cleanDateValue(date)}\n\nProduct Details:\n\nProduct 1 :- ${p1}\n\nProduct 2 :- ${p2}\n\nProduct 3 :- ${p3}\n\nThank You.\nVijay Industries`,
+            messageContent: `Transporter Name: ${transporterName}\n\nLR No.: ${lrNo || 'Number'}\n\nDate : ${cleanDateValue(date)}\n\nProduct Details:\n\nProduct 1 :- ${p1}\n\nProduct 2 :- ${p2}\n\nProduct 3 :- ${p3}\n\nThank You.`,
             ...logMeta 
         });
     }
