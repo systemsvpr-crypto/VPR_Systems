@@ -45,7 +45,8 @@ export const sendWhatsAppNotification = async (phoneNumber, templateName, variab
         const languageCode = 
             templateName === 'dispatch_planning' ? "en_IN" : 
             templateName === 'dispatch_confirmation' ? "en_US" : 
-            templateName === 'order_confirmation' ? "en" : "en_US";
+            templateName === 'purchase_delivered' ? "en_IN" :
+            templateName === 'order_confirmation' ? "en" : "en";
 
         console.log(`[WhatsApp] Template: ${templateName}, Lang: ${languageCode}, Vars: ${variables.length}`);
         
@@ -295,23 +296,18 @@ export const whatsappService = {
         const totalOverallBags = items.reduce((sum, i) => sum + (parseInt(i.bags) || 0), 0);
 
         // Format each group into a multi-line string block
-        const formattedGroups = groupEntries.map((g, idx) => {
-            let block = `${g.base}\n${g.lines.join('\n')}\nTotal Bag - ${g.totalBags}\nTotal KG - ${g.totalKg}`;
-            // If this is the last group, add the Total Lot summary
-            if (idx === groupEntries.length - 1) {
-                block += `\n\nTotal Lot - ${totalOverallBags}`;
-            }
-            return block;
+        const formattedGroups = groupEntries.map((g) => {
+            return `${g.base}\nSize/Qty: ${g.lines.join(', ')}\nTotal Bag - ${g.totalBags} | KG - ${g.totalKg}`;
         });
 
         // Map blocks to variables {{4}}, {{5}}, {{6}}
-        const p1 = formattedGroups[0] || ' ';
-        const p2 = formattedGroups[1] || ' ';
-        const p3 = formattedGroups.slice(2).join('\n\n') || ' ';
+        const p1 = formattedGroups[0] || '-';
+        const p2 = formattedGroups[1] || '-';
+        const p3 = formattedGroups.slice(2).join('\n\n') || '-';
 
         return sendWhatsAppNotification(recipientNumber, 'purchase_delivered', [
             transporterName,
-            lrNo || ' ', 
+            lrNo || '-', 
             cleanDateValue(date),
             p1,
             p2,
