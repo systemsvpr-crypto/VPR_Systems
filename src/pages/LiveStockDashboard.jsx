@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Package, MapPin, RotateCcw, X, ArrowUp, Download, RefreshCcw } from 'lucide-react';
+import { Search, Package, MapPin, RotateCcw, X, ArrowUp, Download, RefreshCcw, ClipboardList } from 'lucide-react';
 import { supabase } from '../supabase';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
 import { cn } from '@/lib/utils';
+import StockLedger from './LiveStock';
 
 const PAGE_SIZE = 50;
 
@@ -294,6 +295,13 @@ const LiveStockDashboard = () => {
               className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-black transition-all ${activeTab === 'live' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
             >
               Live Stock
+            </button>
+            <button
+              onClick={() => setActiveTab('stock-ledger')}
+              className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-black transition-all ${activeTab === 'stock-ledger' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              <ClipboardList size={16} />
+              Stock Ledger
             </button>
           </div>
         </div>
@@ -584,6 +592,10 @@ const LiveStockDashboard = () => {
                 </div>
             )}
 
+
+            {activeTab === 'stock-ledger' && (
+                <StockLedger />
+            )}
 
             {selectedTransfer && (
                 <TransferModal

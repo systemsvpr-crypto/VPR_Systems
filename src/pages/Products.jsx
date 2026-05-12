@@ -24,6 +24,7 @@ const DEFAULT_FORM_DATA = {
     name: '',
     description: '',
     unit: 'KG',
+    product_type: '',
     mux: '',
     godown_id: '',
     quantity: 0,
@@ -174,7 +175,8 @@ const Products = ({ isTab = false }) => {
         if (errors[name]) {
             setErrors(prev => ({ ...prev, [name]: '' }));
         }
-        setFormData(prev => ({ ...prev, [name]: value }));
+        const transformed = name === 'product_type' ? value.toUpperCase().replace(/\s/g, '') : value;
+        setFormData(prev => ({ ...prev, [name]: transformed }));
     };
 
     useEffect(() => {
@@ -409,6 +411,7 @@ const Products = ({ isTab = false }) => {
                                     <HeaderCell>MUX</HeaderCell>
                                     <HeaderCell>Godown</HeaderCell>
                                     <HeaderCell>Unit</HeaderCell>
+                                    <HeaderCell>Product Type</HeaderCell>
                                     <HeaderCell align="center">Current Stock</HeaderCell>
                                     <HeaderCell align="center">Opening Qty</HeaderCell>
                                     <HeaderCell align="center">Closing Qty</HeaderCell>
@@ -435,7 +438,7 @@ const Products = ({ isTab = false }) => {
                                     ))
                                 )}
                                 {Array.from({ length: Math.max(0, ITEMS_PER_PAGE - products.length) }).map((_, i) => (
-                                    <tr key={`empty-${i}`}><td colSpan="9" className="h-16"></td></tr>
+                                    <tr key={`empty-${i}`}><td colSpan="10" className="h-16"></td></tr>
                                 ))}
                             </tbody>
                         </table>
@@ -523,6 +526,11 @@ const Products = ({ isTab = false }) => {
                                                 label="Base Unit" name="unit" value={formData.unit}
                                                 onChange={handleInputChange} options={UNITS}
                                                 icon={Weight} required error={errors.unit}
+                                            />
+                                            <FormField
+                                                label="Product Type" name="product_type" value={formData.product_type}
+                                                onChange={handleInputChange} placeholder="10 X 12"
+                                                icon={Tag}
                                             />
                                         </div>
 
@@ -754,7 +762,7 @@ const HeaderCell = ({ children, align = "left" }) => (
 
 const EmptyRow = ({ message }) => (
     <tr>
-        <td colSpan="9" className="px-4 py-8 text-center text-slate-500 text-sm">
+        <td colSpan="10" className="px-4 py-8 text-center text-slate-500 text-sm">
             {message}
         </td>
     </tr>
@@ -768,8 +776,16 @@ const ProductRow = ({ product, godowns, user, onEdit, onDelete, onToggle }) => (
                     <Package size={18} />
                 </div>
                 <div>
-                    <div className="font-bold text-slate-900 text-sm">{product.name}</div>
-                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{product.product_id}</div>
+                                    <div className="font-bold text-slate-900 text-sm">{product.name}</div>
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{product.product_id}</div>
+                                        {product.product_type && (
+                                            <>
+                                                <span className="text-slate-200">|</span>
+                                                <div className="text-[10px] font-bold text-violet-600 uppercase tracking-wider bg-violet-50 px-1.5 py-0.5 rounded">{product.product_type}</div>
+                                            </>
+                                        )}
+                                    </div>
                 </div>
             </div>
         </td>
@@ -781,6 +797,13 @@ const ProductRow = ({ product, godowns, user, onEdit, onDelete, onToggle }) => (
         </td>
         <td className="erp-table-td">
             <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded text-[10px] font-black">{product.unit || '-'}</span>
+        </td>
+        <td className="erp-table-td">
+            {product.product_type ? (
+                <span className="text-[10px] font-bold text-violet-600 uppercase tracking-wider bg-violet-50 px-1.5 py-0.5 rounded">{product.product_type}</span>
+            ) : (
+                <span className="text-[10px] text-slate-300">—</span>
+            )}
         </td>
         <td className="erp-table-td text-center">
             <span className="font-black text-primary">{product.quantity || 0}</span>
@@ -822,9 +845,12 @@ const MobileProductCard = ({ product, godowns, user, onEdit, onDelete, onToggle 
                 <Package size={18} />
             </div>
             <div>
-                <h3 className="font-semibold text-slate-900 text-sm">{product.name}</h3>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
-                    <span className="text-[11px] px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{product.mux || 'No MUX'}</span>
+                                    <h3 className="font-semibold text-slate-900 text-sm">{product.name}</h3>
+                                    {product.product_type && (
+                                        <div className="text-[10px] font-bold text-violet-600 uppercase tracking-wider bg-violet-50 px-1.5 py-0.5 rounded w-fit mt-1">{product.product_type}</div>
+                                    )}
+                                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                                        <span className="text-[11px] px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{product.mux || 'No MUX'}</span>
                     <span className="text-[11px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">
                         {godowns.find(g => g.godown_id === product.godown_id)?.name || 'No Godown'}
                     </span>

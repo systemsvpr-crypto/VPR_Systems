@@ -1,13 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { LayoutGrid, MapPin, Truck, Shield } from 'lucide-react';
+import { LayoutGrid, MapPin, Truck, Shield, Package, Users, Building2 } from 'lucide-react';
 import Products from './Products';
 import Godowns from './Godowns';
 import Transporters from './Transporters';
 import Customers from './Customers';
 import Vendors from './Vendors';
+import MasterProduct from './MasterProduct';
 import useAuthStore from '../store/authStore';
 import { cn } from '@/lib/utils';
-import { Users, Building2 } from 'lucide-react';
 
 const Master = () => {
     const { user } = useAuthStore();
@@ -21,6 +21,9 @@ const Master = () => {
 
         if (isAdmin || pageAccess.includes('products')) {
             tabs.push({ id: 'products', label: 'Products', icon: LayoutGrid });
+        }
+        if (isAdmin || pageAccess.includes('product-type')) {
+            tabs.push({ id: 'product-type', label: 'Master Product', icon: Package });
         }
         if (isAdmin || pageAccess.includes('godowns')) {
             tabs.push({ id: 'godowns', label: 'Godowns', icon: MapPin });
@@ -101,6 +104,7 @@ const Master = () => {
 
             <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
                 {activeTab === 'products' && <Products />}
+                {activeTab === 'product-type' && <MasterProduct />}
                 {activeTab === 'godowns' && <Godowns />}
                 {activeTab === 'transporters' && <Transporters />}
                 {activeTab === 'customers' && <Customers />}
