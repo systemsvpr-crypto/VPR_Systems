@@ -264,326 +264,425 @@ const LiveStockDashboard = () => {
     };
 
     return (
-    <div className="p-4 lg:p-6 space-y-6">
-      {/* Premium Header */}
-      <div className="flex flex-col gap-8 max-w-[1400px] mx-auto animate-in fade-in slide-in-from-top-2 duration-500">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
-              Stock <span className="text-primary">Dashboard</span>
-            </h1>
-            <div className="flex items-center gap-3 mt-2">
-                <span className="px-3 py-1 bg-slate-100 rounded-lg text-[10px] font-black text-slate-500 uppercase tracking-widest border border-slate-200/60">
-                    Total: {totalProducts} Products
-                </span>
-                <span className="px-3 py-1 bg-primary/5 rounded-lg text-[10px] font-black text-primary uppercase tracking-widest border border-primary/10">
-                    Live Status
-                </span>
-            </div>
-          </div>
-          
-          <div className="flex p-1 bg-slate-100 rounded-xl shadow-inner">
-            <button
-              onClick={() => setActiveTab('master')}
-              className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-black transition-all ${activeTab === 'master' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-              Master Inventory
-            </button>
-            <button
-              onClick={() => setActiveTab('live')}
-              className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-black transition-all ${activeTab === 'live' ? 'bg-white text-primary shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-              Live Stock
-            </button>
+        <div className="min-h-screen bg-slate-50/50 flex flex-col">
+            {/* Minimal Sticky Header */}
+            <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-slate-200/60 px-6 py-4">
+                <div className="max-w-[1600px] mx-auto flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+                            <Package size={22} strokeWidth={2.5} />
+                        </div>
+                        <div>
+                            <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">
+                                Stock <span className="text-primary">Dashboard</span>
+                            </h1>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1.5">
+                                Inventory Intelligence & Control
+                            </p>
+                        </div>
+                    </div>
 
-          </div>
-        </div>
-      </div>
+                    <div className="flex items-center gap-6 ml-auto">
+                        <div className="flex items-center gap-2 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60">
+                            <button
+                                onClick={() => setActiveTab('master')}
+                                className={cn(
+                                    "px-5 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all duration-200",
+                                    activeTab === 'master' 
+                                        ? "bg-white text-primary shadow-sm" 
+                                        : "text-slate-500 hover:text-slate-700 hover:bg-white/50"
+                                )}
+                            >
+                                Master Inventory
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('live')}
+                                className={cn(
+                                    "px-5 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all duration-200",
+                                    activeTab === 'live' 
+                                        ? "bg-white text-primary shadow-sm" 
+                                        : "text-slate-500 hover:text-slate-700 hover:bg-white/50"
+                                )}
+                            >
+                                Live Status
+                            </button>
+                        </div>
 
-            {activeTab === 'master' && (
-                <div className="flex flex-col gap-4">
-                    {/* Controls */}
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
-                        <div className="md:col-span-2 flex items-center gap-3">
+                        <div className="flex items-center gap-3">
+                            <div className="hidden sm:flex flex-col text-right px-4 border-r border-slate-200">
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Active Assets</p>
+                                <p className="text-sm font-black text-slate-900">{totalProducts.toLocaleString()}</p>
+                            </div>
                             <button
                                 onClick={() => { fetchGodownsAndTransactions(); fetchProducts(0, true); }}
-                                className="erp-btn-primary h-[42px] px-6"
+                                className="p-2.5 rounded-xl bg-white border border-slate-200 text-slate-500 hover:text-primary hover:border-primary/30 transition-all shadow-sm group"
                             >
-                                <RefreshCcw size={16} className={loading ? "animate-spin" : ""} /> Refresh
-                            </button>
-                            <div className="w-[200px]">
-                                <DatePicker
-                                    value={summaryDate}
-                                    onChange={(e) => setSummaryDate(e.target.value)}
-                                    name="summaryDate"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="md:col-span-2 flex items-center justify-end gap-3">
-                            <button
-                                onClick={handleExport}
-                                disabled={!summaryDate}
-                                className="erp-btn-secondary h-[42px]"
-                            >
-                                <Download size={16} /> Export CSV
+                                <RefreshCcw size={18} className={cn(loading && "animate-spin", "group-hover:scale-110 transition-transform")} />
                             </button>
                         </div>
                     </div>
-
-                    {/* Godown-wise Aggregated Summary Table */}
-                    <div className="erp-table-container max-w-[1400px] mx-auto">
-                        <div className="overflow-x-auto">
-                            <table className="erp-table">
-                                <thead className="erp-table-thead">
-                                    <tr className="erp-table-tr">
-                                        <th className="erp-table-th">Godown Name</th>
-                                        <th className="erp-table-th text-center">Opening</th>
-                                        <th className="erp-table-th text-center">In</th>
-                                        <th className="erp-table-th text-center">Out</th>
-                                        <th className="erp-table-th text-center font-black">Closing</th>
-                                        <th className="erp-table-th text-center">Transfers</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {godowns.map(godown => {
-                                        // Total IN = Direct In + Incoming Transfers
-                                        const directIn = dayTransactions.filter(t => t.godown_id === godown.godown_id && t.transaction_type === 'in').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
-
-                                        // Total OUT = Direct Out + Outgoing Transfers
-                                        const directOut = dayTransactions.filter(t => t.godown_id === godown.godown_id && t.transaction_type === 'out').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
-                                        const outgoingTransfers = dayTransactions.filter(t => t.from_location === godown.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
-
-                                        const totalIn = directIn; // Direct In already includes transfers (since they are 'in' at godown_id)
-                                        const totalOut = directOut + outgoingTransfers;
-
-                                        const gProducts = products.filter(p => p.godown_id === godown.godown_id);
-                                        const totalClosing = gProducts.reduce((sum, p) => sum + (parseFloat(p.closing_quantity) || 0), 0);
-                                        const totalOpening = totalClosing - totalIn + totalOut;
-                                        const isToday = summaryDate === new Date().toISOString().split('T')[0];
-
-                                        return (
-                                            <tr key={godown.godown_id} className="erp-table-tr group">
-                                                <td className="erp-table-td">
-                                                    <div className="flex items-center gap-2">
-                                                        <MapPin size={14} className="text-primary" />
-                                                        <div>
-                                                            <p className="text-sm font-bold text-slate-900">{godown.name}</p>
-                                                            <p className="text-[10px] text-slate-400 font-semibold uppercase">{godown.city}</p>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td className="erp-table-td text-center font-semibold">{isToday ? totalOpening.toLocaleString() : '-'}</td>
-                                                <td className="erp-table-td text-center font-bold text-emerald-600">+{totalIn.toLocaleString()}</td>
-                                                <td className="erp-table-td text-center font-bold text-rose-600">-{totalOut.toLocaleString()}</td>
-                                                <td className="erp-table-td text-center font-bold text-slate-900">{isToday ? totalClosing.toLocaleString() : '-'}</td>
-                                                <td className="px-4 py-3">
-                                                    <button
-                                                        onClick={() => setSelectedTransfer({ type: 'godown', id: godown.godown_id, name: godown.name })}
-                                                        className={cn(
-                                                            "text-sm font-medium px-2 py-1 rounded-md transition-colors",
-                                                            (dayTransactions.filter(t => t.godown_id === godown.godown_id && t.from_location).length > 0 ||
-                                                                dayTransactions.filter(t => t.from_location === godown.godown_id).length > 0)
-                                                                ? "bg-blue-50 text-blue-600 hover:bg-blue-100"
-                                                                : "text-slate-400 cursor-default"
-                                                        )}
-                                                    >
-                                                        {(dayTransactions.filter(t => t.godown_id === godown.godown_id && t.from_location).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0) +
-                                                            dayTransactions.filter(t => t.from_location === godown.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0)).toLocaleString()}
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    {/* Dynamic Summary Table */}
-                    {loading ? (
-                        <div className="erp-card py-12 text-center text-slate-400">
-                            Loading Stock Metrics...
-                        </div>
-                    ) : filteredSummary.length > 0 ? (
-                        <div className="erp-table-container max-w-[1400px] mx-auto">
-                            <div className="overflow-x-auto">
-                                <table className="erp-table">
-                                    <thead className="erp-table-thead">
-                                        <tr className="erp-table-tr">
-                                            <th className="erp-table-th">Godown</th>
-                                            <th className="erp-table-th">Product Details</th>
-                                            <th className="erp-table-th text-center">Opening (KG)</th>
-                                            <th className="erp-table-th text-center font-black">Closing (KG)</th>
-                                            <th className="erp-table-th text-center">In</th>
-                                            <th className="erp-table-th text-center">Out</th>
-                                            <th className="erp-table-th text-center">Transfers</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                        {filteredSummary.map((s, idx) => (
-                                            <tr key={`${s.godown_id}-${s.product_id}-${idx}`} className="erp-table-tr">
-                                                <td className="erp-table-td text-xs font-semibold text-slate-500 uppercase">{s.godown_name}</td>
-                                                <td className="erp-table-td text-sm font-bold text-slate-900">{s.product_name}</td>
-                                                <td className="erp-table-td text-center text-slate-500">{s.opening_quantity}</td>
-                                                <td className="erp-table-td text-center font-bold text-slate-900">{s.closing_quantity}</td>
-                                                <td className="erp-table-td text-center font-bold text-emerald-600">+{s.in_stock}</td>
-                                                <td className="erp-table-td text-center font-bold text-rose-600">-{s.out_stock}</td>
-                                                <td className="erp-table-td text-center">
-                                                    <button
-                                                        onClick={() => setSelectedTransfer({ type: 'product', id: s.product_id, godown_id: s.godown_id, name: s.product_name })}
-                                                        className={cn(
-                                                            "text-xs font-bold px-2 py-1 rounded-md transition-all",
-                                                            s.transfers > 0 ? "bg-slate-100 text-primary hover:bg-primary hover:text-white" : "text-slate-300"
-                                                        )}
-                                                    >
-                                                        {s.transfers}
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="text-center py-12 text-slate-500 bg-white rounded-2xl border border-slate-200 space-y-3">
-                            <RotateCcw size={40} className="mx-auto text-slate-300 mb-2" />
-                            <p className="font-medium text-slate-900">No transactions recorded for this date</p>
-                            <p className="text-xs max-w-xs mx-auto">Try selecting a different date or check live stock tab for current inventory.</p>
-                        </div>
-                    )}
                 </div>
-            )}
+            </header>
 
-            {activeTab === 'live' && (
-                <div className="flex flex-col gap-4">
-                    {/* Filters */}
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                        <div className="relative w-full md:w-72">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
+            <main className="flex-1 p-4 lg:p-8 space-y-6 max-w-[1600px] mx-auto w-full animate-in fade-in duration-700">
+                {/* Global Controls */}
+                <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-4 flex flex-col lg:flex-row items-center gap-4">
+                    <div className="flex flex-1 items-center gap-4 w-full">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                             <Input
                                 type="text"
-                                placeholder="Search stock..."
-                                className="pl-9"
+                                placeholder="Search products, IDs or attributes..."
+                                className="pl-11 h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all rounded-xl text-sm font-medium"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
                         </div>
-
-                        <div className="flex items-center gap-3">
-                            <select
-                                value={filterGodown}
-                                onChange={(e) => setFilterGodown(e.target.value)}
-                                className="px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-primary focus:outline-none"
-                            >
-                                <option value="">All Godowns</option>
-                                {godowns.map(g => (
-                                    <option key={g.godown_id} value={g.godown_id}>{g.name}</option>
-                                ))}
-                            </select>
-
-                            <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden">
-                                <button
-                                    onClick={() => setViewMode('grid')}
-                                    className={`p-2 ${viewMode === 'grid' ? 'bg-primary text-white' : 'bg-white text-slate-600'}`}
+                        
+                        <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-1 h-11 shrink-0">
+                            <div className="px-3 border-r border-slate-200 flex items-center gap-2">
+                                <MapPin size={14} className="text-primary" />
+                                <select
+                                    value={filterGodown}
+                                    onChange={(e) => setFilterGodown(e.target.value)}
+                                    className="bg-transparent text-xs font-black text-slate-700 focus:outline-none uppercase tracking-wider min-w-[140px]"
                                 >
-                                    <span className="sr-only">Grid</span>
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-                                    </svg>
-                                </button>
-                                <button
-                                    onClick={() => setViewMode('table')}
-                                    className={`p-2 ${viewMode === 'table' ? 'bg-primary text-white' : 'bg-white text-slate-600'}`}
-                                >
-                                    <span className="sr-only">Table</span>
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-                                    </svg>
-                                </button>
+                                    <option value="">ALL GODOWNS</option>
+                                    {godowns.map(g => (
+                                        <option key={g.godown_id} value={g.godown_id}>{g.name.toUpperCase()}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="w-[140px]">
+                                <DatePicker
+                                    value={summaryDate}
+                                    onChange={(e) => setSummaryDate(e.target.value)}
+                                    name="summaryDate"
+                                    className="border-none bg-transparent h-9 text-xs font-bold text-slate-700"
+                                />
                             </div>
                         </div>
                     </div>
 
-                    {loading ? (
-                        <div className="text-center py-20 text-slate-500">Loading...</div>
-                    ) : filteredStock.length === 0 ? (
-                        <div className="text-center py-20 text-slate-500">No stock data found.</div>
-                    ) : viewMode === 'grid' ? (
-                        <div className="flex flex-col gap-4">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                                {filteredStock.map((stock) => (
-                                    <StockCard
-                                        key={`${stock.product_id}-${stock.godown_id}`}
-                                        stock={stock}
-                                    />
-                                ))}
+                    <div className="flex items-center gap-2 shrink-0">
+                        <button
+                            onClick={handleExport}
+                            className="h-11 px-6 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10 flex items-center gap-2 group"
+                        >
+                            <Download size={16} className="group-hover:-translate-y-0.5 transition-transform" />
+                            Export Report
+                        </button>
+                    </div>
+                </div>
+
+                {activeTab === 'master' && (
+                    <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
+                        {/* Godown-wise Aggregated Summary Table */}
+                        <section className="space-y-4">
+                            <div className="flex items-center justify-between px-1">
+                                <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
+                                    <MapPin size={16} className="text-primary" />
+                                    Godown Distribution
+                                </h2>
                             </div>
-                            {loadingMore && (
-                                <div className="text-center py-4 text-slate-500">
-                                    Loading more products...
+                            <div className="bg-white rounded-3xl border border-slate-200/60 shadow-sm overflow-hidden">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left border-collapse">
+                                        <thead>
+                                            <tr className="bg-slate-50/50 border-b border-slate-100">
+                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Godown Location</th>
+                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Opening</th>
+                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Stock In</th>
+                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Stock Out</th>
+                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Closing</th>
+                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Transfers</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-50">
+                                            {godowns.filter(g => !filterGodown || g.godown_id === filterGodown).map(godown => {
+                                                const directIn = dayTransactions.filter(t => t.godown_id === godown.godown_id && t.transaction_type === 'in').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
+                                                const directOut = dayTransactions.filter(t => t.godown_id === godown.godown_id && t.transaction_type === 'out').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
+                                                const outgoingTransfers = dayTransactions.filter(t => t.from_location === godown.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
+                                                const totalIn = directIn;
+                                                const totalOut = directOut + outgoingTransfers;
+                                                const gProducts = products.filter(p => p.godown_id === godown.godown_id);
+                                                const totalClosing = gProducts.reduce((sum, p) => sum + (parseFloat(p.closing_quantity) || 0), 0);
+                                                const totalOpening = totalClosing - totalIn + totalOut;
+                                                const isToday = summaryDate === new Date().toISOString().split('T')[0];
+
+                                                return (
+                                                    <tr key={godown.godown_id} className="group hover:bg-slate-50/80 transition-colors">
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 group-hover:bg-primary/10 group-hover:text-primary transition-colors">
+                                                                    <MapPin size={14} />
+                                                                </div>
+                                                                <div>
+                                                                    <p className="text-sm font-bold text-slate-900 leading-none">{godown.name}</p>
+                                                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">{godown.city}</p>
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4 text-center font-mono text-xs text-slate-600">
+                                                            {isToday ? totalOpening.toLocaleString() : '-'}
+                                                        </td>
+                                                        <td className="px-6 py-4 text-center">
+                                                            <span className="text-xs font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">+{totalIn.toLocaleString()}</span>
+                                                        </td>
+                                                        <td className="px-6 py-4 text-center">
+                                                            <span className="text-xs font-black text-rose-600 bg-rose-50 px-2 py-1 rounded-md">-{totalOut.toLocaleString()}</span>
+                                                        </td>
+                                                        <td className="px-6 py-4 text-center text-sm font-black text-slate-900">
+                                                            {isToday ? totalClosing.toLocaleString() : '-'}
+                                                        </td>
+                                                        <td className="px-6 py-4 text-center">
+                                                            <button
+                                                                onClick={() => setSelectedTransfer({ type: 'godown', id: godown.godown_id, name: godown.name })}
+                                                                className={cn(
+                                                                    "px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all",
+                                                                    (dayTransactions.filter(t => t.godown_id === godown.godown_id && t.from_location).length > 0 ||
+                                                                        dayTransactions.filter(t => t.from_location === godown.godown_id).length > 0)
+                                                                        ? "bg-primary/10 text-primary hover:bg-primary hover:text-white"
+                                                                        : "bg-slate-100 text-slate-400 cursor-not-allowed"
+                                                                )}
+                                                            >
+                                                                {(dayTransactions.filter(t => t.godown_id === godown.godown_id && t.from_location).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0) +
+                                                                    dayTransactions.filter(t => t.from_location === godown.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0)).toLocaleString()}
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </section>
+
+                        {/* Detailed Metrics Table */}
+                        <section className="space-y-4">
+                            <div className="flex items-center justify-between px-1">
+                                <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
+                                    <Package size={16} className="text-primary" />
+                                    Detailed Product Metrics
+                                </h2>
+                                <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-3 py-1 rounded-full uppercase tracking-tighter">
+                                    Showing {filteredSummary.length} Records
+                                </span>
+                            </div>
+                            
+                            {loading ? (
+                                <div className="bg-white rounded-3xl border border-slate-200/60 p-12 text-center">
+                                    <RefreshCcw size={32} className="animate-spin text-primary/30 mx-auto mb-4" />
+                                    <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Aggregating real-time data...</p>
+                                </div>
+                            ) : filteredSummary.length > 0 ? (
+                                <React.Fragment>
+                                    <div className="bg-white rounded-3xl border border-slate-200/60 shadow-sm overflow-hidden">
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-left border-collapse">
+                                                <thead>
+                                                    <tr className="bg-slate-50/50 border-b border-slate-100">
+                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Product Details</th>
+                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Location</th>
+                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Opening</th>
+                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Closing</th>
+                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">In</th>
+                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Out</th>
+                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Transfers</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-50">
+                                                    {filteredSummary.map((s, idx) => (
+                                                        <tr key={`${s.godown_id}-${s.product_id}-${idx}`} className="group hover:bg-slate-50/80 transition-colors">
+                                                            <td className="px-6 py-4">
+                                                                <div className="flex items-center gap-3">
+                                                                    <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 font-black text-[10px] group-hover:bg-primary/10 group-hover:text-primary transition-colors">
+                                                                        {s.product_name.charAt(0)}
+                                                                    </div>
+                                                                    <div>
+                                                                        <p className="text-sm font-bold text-slate-900 leading-none">{s.product_name}</p>
+                                                                        <div className="flex items-center gap-2 mt-1">
+                                                                            <span className="text-[10px] text-slate-400 font-mono tracking-tighter">{s.product_id}</span>
+                                                                            {s.mux && <span className="text-[10px] font-black text-primary px-1.5 py-0.5 bg-primary/5 rounded">MUX: {s.mux}</span>}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-6 py-4">
+                                                                <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-2 py-1 rounded uppercase tracking-wider">{s.godown_name}</span>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-center font-mono text-xs text-slate-500">{s.opening_quantity}</td>
+                                                            <td className="px-6 py-4 text-center font-mono text-xs font-black text-slate-900">{s.closing_quantity}</td>
+                                                            <td className="px-6 py-4 text-center">
+                                                                <span className="text-xs font-black text-emerald-600">+{s.in_stock}</span>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-center">
+                                                                <span className="text-xs font-black text-rose-600">-{s.out_stock}</span>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-center">
+                                                                <button
+                                                                    onClick={() => setSelectedTransfer({ type: 'product', id: s.product_id, godown_id: s.godown_id, name: s.product_name })}
+                                                                    className={cn(
+                                                                        "px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all",
+                                                                        s.transfers > 0 ? "bg-slate-900 text-white hover:scale-105" : "bg-slate-100 text-slate-300"
+                                                                    )}
+                                                                >
+                                                                    {s.transfers}
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    {hasMore && (
+                                        <button 
+                                            onClick={() => fetchProducts(page + 1)}
+                                            disabled={loadingMore}
+                                            className="w-full py-4 bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-primary transition-all mt-4 rounded-xl border border-dashed border-slate-200"
+                                        >
+                                            {loadingMore ? 'Fetching More Metrics...' : 'Load More Records'}
+                                        </button>
+                                    )}
+                                </React.Fragment>
+                            ) : (
+                                <div className="bg-white rounded-3xl border border-slate-200/60 p-16 text-center space-y-4">
+                                    <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto text-slate-300">
+                                        <RotateCcw size={32} />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-lg font-bold text-slate-900">Quiet Day in Inventory</p>
+                                        <p className="text-xs text-slate-400 max-w-xs mx-auto font-medium">No transactions were recorded for the selected date and filters. Try exploring other dates or godowns.</p>
+                                    </div>
                                 </div>
                             )}
-                        </div>
-                    ) : (
-                        <div className="erp-table-container">
-                            <div className="overflow-x-auto">
-                                <table className="erp-table">
-                                    <thead className="erp-table-thead">
-                                        <tr className="erp-table-tr">
-                                            <HeaderCell>Product</HeaderCell>
-                                            <HeaderCell>Godown</HeaderCell>
-                                            <HeaderCell align="center">MUX</HeaderCell>
-                                            <HeaderCell align="center">Units</HeaderCell>
-                                            <HeaderCell align="center">Weight (KG)</HeaderCell>
-                                            <HeaderCell align="center">Opening (KG)</HeaderCell>
-                                            <HeaderCell align="center">Closing (KG)</HeaderCell>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                        {filteredStock.map((stock) => (
-                                            <tr key={`${stock.product_id}-${stock.godown_id}`} className="erp-table-tr">
-                                                <td className="erp-table-td">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-primary font-black text-xs border border-slate-200 overflow-hidden shrink-0">
-                                                            <Package size={16} />
-                                                        </div>
-                                                        <div>
-                                                            <p className="text-sm font-bold text-slate-900">{stock.product_name}</p>
-                                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{stock.product_id}</p>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td className="erp-table-td">
-                                                    <div className="flex items-center gap-2">
-                                                        <MapPin size={12} className="text-primary" />
-                                                        <span className="text-sm text-slate-600 font-bold">{stock.godown_name}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="erp-table-td text-center font-bold text-slate-900">{stock.mux || '-'}</td>
-                                                <td className="erp-table-td text-center font-black text-slate-900">{stock.current_stock}</td>
-                                                <td className="erp-table-td text-center">
-                                                    <span className="px-3 py-1 bg-primary/5 text-primary font-black rounded-lg border border-primary/10">
-                                                        {((parseFloat(stock.mux) || 0) * (parseFloat(stock.current_stock) || 0)).toFixed(3)}
-                                                    </span>
-                                                </td>
-                                                <td className="erp-table-td text-center font-medium text-slate-500">{stock.opening_quantity}</td>
-                                                <td className="erp-table-td text-center font-black text-slate-900">{stock.closing_quantity}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                                {loadingMore && (
-                                    <div className="text-center py-4 text-slate-500">
-                                        Loading more products...
-                                    </div>
-                                )}
+                        </section>
+                    </div>
+                )}
+
+                {activeTab === 'live' && (
+                    <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
+                        <div className="flex items-center justify-between px-1">
+                            <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
+                                <RotateCcw size={16} className="text-primary animate-spin-slow" />
+                                Live Availability
+                            </h2>
+                            <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl p-1 shadow-sm">
+                                <button
+                                    onClick={() => setViewMode('grid')}
+                                    className={cn("p-2 rounded-lg transition-all", viewMode === 'grid' ? "bg-primary text-white" : "text-slate-400 hover:text-slate-600 hover:bg-slate-50")}
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                                    </svg>
+                                </button>
+                                <button
+                                    onClick={() => setViewMode('table')}
+                                    className={cn("p-2 rounded-lg transition-all", viewMode === 'table' ? "bg-primary text-white" : "text-slate-400 hover:text-slate-600 hover:bg-slate-50")}
+                                >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+                                    </svg>
+                                </button>
                             </div>
                         </div>
-                    )}
-                </div>
-            )}
+
+                        {loading ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                                {[...Array(8)].map((_, i) => (
+                                    <div key={i} className="h-64 bg-white rounded-3xl border border-slate-200 animate-pulse" />
+                                ))}
+                            </div>
+                        ) : filteredStock.length === 0 ? (
+                            <div className="bg-white rounded-3xl border border-slate-200/60 p-20 text-center space-y-4">
+                                <Search size={48} className="text-slate-200 mx-auto" />
+                                <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">No matching products found</p>
+                            </div>
+                        ) : viewMode === 'grid' ? (
+                            <div className="space-y-8">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                                    {filteredStock.map((stock) => (
+                                        <StockCard
+                                            key={`${stock.product_id}-${stock.godown_id}`}
+                                            stock={stock}
+                                        />
+                                    ))}
+                                </div>
+                                {hasMore && (
+                                    <button 
+                                        onClick={() => fetchProducts(page + 1)}
+                                        disabled={loadingMore}
+                                        className="w-full py-4 bg-white border border-slate-200 rounded-2xl text-xs font-black text-slate-500 uppercase tracking-widest hover:border-primary/30 hover:text-primary transition-all disabled:opacity-50"
+                                    >
+                                        {loadingMore ? 'Loading Assets...' : 'Load More Inventory'}
+                                    </button>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="bg-white rounded-3xl border border-slate-200/60 shadow-sm overflow-hidden">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left border-collapse">
+                                        <thead>
+                                            <tr className="bg-slate-50/50 border-b border-slate-100">
+                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Asset Details</th>
+                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Location</th>
+                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">MUX</th>
+                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Units</th>
+                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Total Mass (KG)</th>
+                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Opening</th>
+                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Closing</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-50">
+                                            {filteredStock.map((stock) => (
+                                                <tr key={`${stock.product_id}-${stock.godown_id}`} className="group hover:bg-slate-50/80 transition-colors">
+                                                    <td className="px-6 py-4">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all">
+                                                                <Package size={18} />
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-sm font-bold text-slate-900 leading-none">{stock.product_name}</p>
+                                                                <p className="text-[10px] text-slate-400 font-mono tracking-tighter mt-1">{stock.product_id}</p>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4">
+                                                        <div className="flex items-center gap-2">
+                                                            <MapPin size={12} className="text-slate-400" />
+                                                            <span className="text-xs font-black text-slate-600 uppercase tracking-tight">{stock.godown_name}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-center font-bold text-slate-900">{stock.mux || '-'}</td>
+                                                    <td className="px-6 py-4 text-center font-black text-slate-900">{stock.current_stock}</td>
+                                                    <td className="px-6 py-4 text-center">
+                                                        <span className="px-3 py-1 bg-primary/5 text-primary text-xs font-black rounded-lg border border-primary/10">
+                                                            {((parseFloat(stock.mux) || 0) * (parseFloat(stock.current_stock) || 0)).toFixed(3)}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-6 py-4 text-center font-mono text-xs text-slate-400">{stock.opening_quantity}</td>
+                                                    <td className="px-6 py-4 text-center font-mono text-xs font-black text-slate-900">{stock.closing_quantity}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {hasMore && (
+                                    <button 
+                                        onClick={() => fetchProducts(page + 1)}
+                                        disabled={loadingMore}
+                                        className="w-full py-4 bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-primary transition-all"
+                                    >
+                                        {loadingMore ? 'Fetching...' : 'Show More Data'}
+                                    </button>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
+            </main>
 
 
 
@@ -622,73 +721,76 @@ const StockCard = ({ stock }) => {
     const weight = ((parseFloat(stock.mux) || 0) * (parseFloat(stock.current_stock) || 0)).toFixed(2);
 
     return (
-        <div className="bg-white rounded-2xl p-5 border border-slate-200 hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5 transition-all duration-300 group flex flex-col h-full overflow-hidden">
+        <div className="bg-white rounded-[2rem] p-6 border border-slate-200/60 hover:border-primary/40 hover:shadow-2xl hover:shadow-primary/10 transition-all duration-500 group flex flex-col h-full overflow-hidden relative">
+            {/* Glossy Overlay effect */}
+            <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-primary/10 transition-colors duration-500" />
+            
             {/* Header */}
-            <div className="flex items-start justify-between mb-4 shrink-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className={cn("px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border", levelBg[stockLevel])}>
-                        {stockLevel === 'high' ? 'Healthy' : stockLevel === 'medium' ? 'Review' : 'Critical'}
+            <div className="flex items-start justify-between mb-6 shrink-0 relative z-10">
+                <div className="flex flex-col gap-1">
+                    <span className={cn("inline-flex px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-[0.1em] border w-fit", levelBg[stockLevel])}>
+                        {stockLevel === 'high' ? 'Optimal' : stockLevel === 'medium' ? 'Review' : 'Action Required'}
                     </span>
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50 px-2 py-0.5 rounded">
-                        Live
-                    </span>
+                    <div className="flex items-center gap-1.5 text-slate-400 mt-2">
+                        <MapPin size={10} strokeWidth={3} className="text-primary/60" />
+                        <span className="text-[9px] font-black uppercase tracking-widest truncate max-w-[100px]">{stock.godown_name}</span>
+                    </div>
                 </div>
-                <div className="flex items-center gap-1 text-slate-400 shrink-0">
-                    <MapPin size={10} strokeWidth={3} />
-                    <span className="text-[9px] font-black uppercase tracking-tight truncate max-w-[80px]">{stock.godown_name}</span>
+                <div className="w-12 h-12 rounded-2xl bg-slate-50 flex items-center justify-center text-slate-300 group-hover:bg-primary/10 group-hover:text-primary transition-all duration-500">
+                    <Package size={24} strokeWidth={1.5} />
                 </div>
             </div>
 
-            {/* Product Name - Fixed height for alignment */}
-            <div className="mb-4 min-h-[2.5rem]">
-                <h3 className="font-bold text-slate-900 text-sm leading-snug group-hover:text-primary transition-colors line-clamp-2">
+            {/* Product Name */}
+            <div className="mb-6 min-h-[3rem] relative z-10">
+                <h3 className="font-black text-slate-900 text-base leading-tight group-hover:text-primary transition-colors line-clamp-2">
                     {stock.product_name}
                 </h3>
+                <p className="text-[10px] font-mono text-slate-300 mt-1 uppercase tracking-tighter">{stock.product_id}</p>
             </div>
 
-            {/* Availability Grid - More flexible to prevent overflow */}
-            <div className="grid grid-cols-2 gap-4 mb-5 p-4 bg-slate-50/50 rounded-xl border border-slate-100">
-                <div className="flex flex-col min-w-0">
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 truncate">Available Pcs</p>
-                    <div className="flex items-baseline gap-1 min-w-0 overflow-hidden">
-                        <span className="text-2xl font-black text-slate-900 tracking-tighter truncate">{stock.current_stock}</span>
+            {/* Metrics Visualization */}
+            <div className="space-y-6 relative z-10">
+                <div className="flex items-end justify-between gap-4">
+                    <div className="flex flex-col">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Net Inventory</p>
+                        <div className="flex items-baseline gap-1.5">
+                            <span className="text-3xl font-black text-slate-900 tracking-tighter">{stock.current_stock}</span>
+                            <span className="text-[10px] font-black text-slate-400 uppercase">Units</span>
+                        </div>
+                    </div>
+                    <div className="flex flex-col text-right">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Calculated Mass</p>
+                        <div className="flex items-baseline justify-end gap-1.5">
+                            <span className="text-xl font-black text-primary tracking-tighter">{weight}</span>
+                            <span className="text-[10px] font-black text-slate-400 uppercase">KG</span>
+                        </div>
                     </div>
                 </div>
-                <div className="flex flex-col border-l border-slate-200 pl-4 min-w-0">
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 truncate">Net Weight</p>
-                    <div className="flex flex-col min-w-0">
-                        <span className="text-lg font-black text-primary tracking-tighter truncate leading-tight">
-                            {weight}
-                        </span>
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">KG</span>
-                    </div>
-                </div>
-            </div>
 
-            {/* Footer Data */}
-            <div className="mt-auto space-y-3 pt-3">
-                <div className="flex items-center justify-between gap-2">
-                    <div className="flex flex-col min-w-0">
-                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest truncate">Opening</span>
-                        <span className="text-[11px] font-bold text-slate-600 mt-0.5 truncate">{stock.opening_quantity} KG</span>
-                    </div>
-                    <div className="flex flex-col text-right min-w-0">
-                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest truncate">Closing</span>
-                        <span className="text-[11px] font-black text-slate-900 mt-0.5 truncate">{stock.closing_quantity} KG</span>
-                    </div>
-                </div>
-                
-                {/* Level Indicator */}
-                <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+                {/* Progress Bar */}
+                <div className="relative h-2 w-full bg-slate-100 rounded-full overflow-hidden">
                     <div 
-                        className={cn("h-full transition-all duration-1000", levelColors[stockLevel])}
-                        style={{ width: `${Math.min(100, Math.max(0, (stock.current_stock / 200) * 100))}%` }}
+                        className={cn("h-full transition-all duration-1000 ease-out", levelColors[stockLevel])}
+                        style={{ width: `${Math.min(100, Math.max(5, (stock.current_stock / 250) * 100))}%` }}
                     />
                 </div>
-                
-                <div className="flex items-center justify-between text-[8px] font-black text-slate-400 uppercase tracking-tighter shrink-0 pt-1">
-                    <span className="truncate mr-2">MUX: {stock.mux || '-'}</span>
-                    <span className="shrink-0">Synced Now</span>
+            </div>
+
+            {/* Footer Metadata */}
+            <div className="mt-auto pt-6 flex items-center justify-between border-t border-slate-50 relative z-10">
+                <div className="flex gap-4">
+                    <div className="flex flex-col">
+                        <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Opening</span>
+                        <span className="text-xs font-bold text-slate-500 mt-0.5">{stock.opening_quantity}</span>
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Closing</span>
+                        <span className="text-xs font-black text-slate-900 mt-0.5">{stock.closing_quantity}</span>
+                    </div>
+                </div>
+                <div className="text-right">
+                    <span className="text-[9px] font-black text-slate-900 px-2 py-1 bg-slate-100 rounded-lg uppercase tracking-tight">MUX: {stock.mux || '0.00'}</span>
                 </div>
             </div>
         </div>

@@ -53,7 +53,8 @@ const MasterProduct = () => {
 
             const { data: products, error: prodError } = await supabase
                 .from('products')
-                .select('master_product_id');
+                .select('master_product_id')
+                .limit(10000);
             if (prodError) throw prodError;
 
             const counts = {};
@@ -186,7 +187,8 @@ const MasterProduct = () => {
             const { data, error } = await supabase
                 .from('products')
                 .select('id, name, product_id, unit, master_product_id')
-                .order('name', { ascending: true });
+                .order('name', { ascending: true })
+                .limit(10000);
             if (error) throw error;
             setAllProducts(data || []);
             setSelectedVariantIds(new Set(
@@ -209,6 +211,21 @@ const MasterProduct = () => {
         setSelectedVariantIds(prev => {
             const next = new Set(prev);
             next.has(productId) ? next.delete(productId) : next.add(productId);
+            return next;
+        });
+    };
+
+    const handleSelectAll = () => {
+        const allVisibleIds = filteredProducts.map(p => p.id);
+        const allVisibleSelected = allVisibleIds.length > 0 && allVisibleIds.every(id => selectedVariantIds.has(id));
+        
+        setSelectedVariantIds(prev => {
+            const next = new Set(prev);
+            if (allVisibleSelected) {
+                allVisibleIds.forEach(id => next.delete(id));
+            } else {
+                allVisibleIds.forEach(id => next.add(id));
+            }
             return next;
         });
     };
@@ -249,7 +266,8 @@ const MasterProduct = () => {
                 .from('products')
                 .select('name, product_id, unit, description')
                 .eq('master_product_id', item.id)
-                .order('name', { ascending: true });
+                .order('name', { ascending: true })
+                .limit(1000); // Individual master product variants likely won't exceed 1000
             if (error) throw error;
             setViewVariants(data || []);
         } catch (error) {
@@ -278,12 +296,29 @@ const MasterProduct = () => {
     }, [filteredItems, currentPage]);
 
     const filteredProducts = useMemo(() => {
-        if (!variantSearch) return allProducts;
-        return allProducts.filter(p =>
-            p.name?.toLowerCase().includes(variantSearch.toLowerCase()) ||
-            p.product_id?.toLowerCase().includes(variantSearch.toLowerCase())
+        if (!variantModal) return [];
+        
+        // Filter out products assigned to OTHER master products
+        let result = allProducts.filter(p => 
+            !p.master_product_id || p.master_product_id === variantModal.id
         );
-    }, [allProducts, variantSearch]);
+
+        if (variantSearch) {
+            result = result.filter(p =>
+                p.name?.toLowerCase().includes(variantSearch.toLowerCase()) ||
+                p.product_id?.toLowerCase().includes(variantSearch.toLowerCase())
+            );
+        }
+        
+        // Sort: Selected first, then by name
+        return result.sort((a, b) => {
+            const aSelected = selectedVariantIds.has(a.id);
+            const bSelected = selectedVariantIds.has(b.id);
+            if (aSelected && !bSelected) return -1;
+            if (!aSelected && bSelected) return 1;
+            return (a.name || '').localeCompare(b.name || '');
+        });
+    }, [allProducts, variantSearch, selectedVariantIds, variantModal]);
 
     return (
         <div className="flex flex-col gap-4">
@@ -453,7 +488,7 @@ const MasterProduct = () => {
             {variantModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
                     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={handleCloseVariants}></div>
-                    <div className="relative bg-white rounded-2xl shadow-xl w-full sm:max-w-2xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
+                    <div className="relative bg-white rounded-2xl shadow-xl w-full sm:max-w-4xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200 overflow-hidden">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
                             <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                                 <Package size={20} className="text-violet-500" />
@@ -464,68 +499,132 @@ const MasterProduct = () => {
                             </Button>
                         </div>
 
-                        <div className="p-4 border-b border-slate-100">
-                            <div className="relative">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
-                                <Input
-                                    type="text"
-                                    placeholder="Search products..."
-                                    className="pl-9"
-                                    value={variantSearch}
-                                    onChange={(e) => setVariantSearch(e.target.value)}
-                                />
+                        <div className="flex-1 flex overflow-hidden">
+                            {/* Left Panel: Search and List */}
+                            <div className="flex-1 flex flex-col border-r border-slate-100 min-w-0">
+                                <div className="p-4 border-b border-slate-100 bg-slate-50/30">
+                                    <div className="flex items-center gap-2">
+                                        <div className="relative flex-1">
+                                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
+                                            <Input
+                                                type="text"
+                                                placeholder="Search products..."
+                                                className="pl-9 h-10"
+                                                value={variantSearch}
+                                                onChange={(e) => setVariantSearch(e.target.value)}
+                                            />
+                                        </div>
+                                        <Button 
+                                            variant="outline" 
+                                            size="sm" 
+                                            onClick={handleSelectAll}
+                                            className="h-10 px-3 font-bold text-[10px] uppercase tracking-wider shrink-0 border-slate-200 hover:bg-slate-50"
+                                            disabled={filteredProducts.length === 0}
+                                        >
+                                            {filteredProducts.length > 0 && filteredProducts.every(p => selectedVariantIds.has(p.id)) 
+                                                ? 'Deselect All' 
+                                                : 'Select All'
+                                            }
+                                        </Button>
+                                    </div>
+                                </div>
+
+                                <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                                    {variantLoading ? (
+                                        <div className="text-center py-8 text-slate-500 text-sm">Loading products...</div>
+                                    ) : filteredProducts.length === 0 ? (
+                                        <div className="text-center py-8 text-slate-500 text-sm">No products found.</div>
+                                    ) : (
+                                        <div className="space-y-1">
+                                            {filteredProducts.map((product) => {
+                                                const isSelected = selectedVariantIds.has(product.id);
+                                                return (
+                                                    <div
+                                                        key={product.id}
+                                                        onClick={() => toggleVariant(product.id)}
+                                                        className={cn(
+                                                            "flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border",
+                                                            isSelected
+                                                                ? "bg-primary/5 border-primary/20"
+                                                                : "hover:bg-slate-50 border-transparent"
+                                                        )}
+                                                    >
+                                                        <div className={cn(
+                                                            "w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all shrink-0",
+                                                            isSelected
+                                                                ? "bg-primary border-primary"
+                                                                : "border-slate-300"
+                                                        )}>
+                                                            {isSelected && <Check size={12} className="text-white" />}
+                                                        </div>
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="text-sm font-bold text-slate-900 truncate">{product.name}</div>
+                                                            <div className="text-[11px] text-slate-400 font-medium">
+                                                                {product.product_id}{product.unit ? ` \u00b7 ${product.unit}` : ''}
+                                                            </div>
+                                                        </div>
+                                                        {isSelected && (
+                                                            <span className="text-[10px] font-bold text-primary uppercase tracking-wider bg-primary/10 px-2 py-0.5 rounded-full shrink-0">
+                                                                Variant
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Right Panel: Selected Sidetab */}
+                            <div className="w-[300px] bg-slate-50/50 flex flex-col shrink-0">
+                                <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                                    <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                        <Check size={14} className="text-primary" />
+                                        Selected Variants
+                                    </h3>
+                                    <span className="bg-primary text-white text-[10px] font-black px-2 py-0.5 rounded-full">
+                                        {selectedVariantIds.size}
+                                    </span>
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                                    {selectedVariantIds.size === 0 ? (
+                                        <div className="h-full flex flex-col items-center justify-center text-center p-6 opacity-40">
+                                            <Layers size={32} className="text-slate-300 mb-2" />
+                                            <p className="text-xs font-bold text-slate-400 uppercase">No products selected</p>
+                                        </div>
+                                    ) : (
+                                        <div className="flex flex-col gap-2">
+                                            {Array.from(selectedVariantIds).map(id => {
+                                                const p = allProducts.find(x => x.id === id);
+                                                if (!p) return null;
+                                                return (
+                                                    <div key={id} className="group flex items-center justify-between gap-2 p-2.5 bg-white border border-slate-200 rounded-xl shadow-sm animate-in slide-in-from-right-2 duration-200">
+                                                        <div className="min-w-0">
+                                                            <p className="text-[11px] font-bold text-slate-800 truncate">{p.name}</p>
+                                                            <p className="text-[9px] text-slate-400 uppercase font-black tracking-tighter">{p.product_id}</p>
+                                                        </div>
+                                                        <button 
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                toggleVariant(id);
+                                                            }}
+                                                            className="p-1 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                                                        >
+                                                            <X size={14} />
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-                            {variantLoading ? (
-                                <div className="text-center py-8 text-slate-500 text-sm">Loading products...</div>
-                            ) : filteredProducts.length === 0 ? (
-                                <div className="text-center py-8 text-slate-500 text-sm">No products found.</div>
-                            ) : (
-                                <div className="space-y-1">
-                                    {filteredProducts.map((product) => {
-                                        const isSelected = selectedVariantIds.has(product.id);
-                                        return (
-                                            <div
-                                                key={product.id}
-                                                onClick={() => toggleVariant(product.id)}
-                                                className={cn(
-                                                    "flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all border",
-                                                    isSelected
-                                                        ? "bg-primary/5 border-primary/20"
-                                                        : "hover:bg-slate-50 border-transparent"
-                                                )}
-                                            >
-                                                <div className={cn(
-                                                    "w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all shrink-0",
-                                                    isSelected
-                                                        ? "bg-primary border-primary"
-                                                        : "border-slate-300"
-                                                )}>
-                                                    {isSelected && <Check size={12} className="text-white" />}
-                                                </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="text-sm font-bold text-slate-900 truncate">{product.name}</div>
-                                                    <div className="text-[11px] text-slate-400 font-medium">
-                                                        {product.product_id}{product.unit ? ` \u00b7 ${product.unit}` : ''}
-                                                    </div>
-                                                </div>
-                                                {isSelected && (
-                                                    <span className="text-[10px] font-bold text-primary uppercase tracking-wider bg-primary/10 px-2 py-0.5 rounded-full shrink-0">
-                                                        Variant
-                                                    </span>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="p-4 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex items-center justify-between">
-                            <span className="text-sm text-slate-500">
-                                {selectedVariantIds.size} of {allProducts.length} products selected
+                        <div className="p-4 border-t border-slate-100 bg-white rounded-b-2xl flex items-center justify-between shrink-0">
+                            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-tight">
+                                {selectedVariantIds.size} variants selected for assignment
                             </span>
                             <div className="flex gap-3">
                                 <Button variant="outline" onClick={handleCloseVariants}>Cancel</Button>

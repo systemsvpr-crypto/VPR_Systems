@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } from 'react';
-import { Search, Download, RefreshCcw, ClipboardList, FileSpreadsheet, Printer, ChevronDown, ChevronRight, Filter, Package, ArrowLeft } from 'lucide-react';
+import { Search, Download, RefreshCcw, ClipboardList, FileSpreadsheet, Printer, ChevronDown, ChevronRight, Filter, Package, ArrowLeft, X, ArrowUp } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase';
 import toast from 'react-hot-toast';
@@ -38,6 +38,10 @@ const StockLedger = () => {
     const [visibleMasterCount, setVisibleMasterCount] = useState(10);
     const observerRef = React.useRef(null);
     const [searchTerm, setSearchTerm] = useState('');
+    const [historyModal, setHistoryModal] = useState(null);
+    const [productHistory, setProductHistory] = useState([]);
+    const [fetchingHistory, setFetchingHistory] = useState(false);
+    const [viewMode, setViewMode] = useState('closing'); // closing, opening, inward, outward
 
     const fetchGodowns = useCallback(async () => {
         const { data } = await supabase.from('godowns').select('*').eq('is_active', true).order('name');
@@ -51,8 +55,8 @@ const StockLedger = () => {
         setMasterProducts(mpMap);
     }, []);
 
-    const fetchData = useCallback(async () => {
-        setLoading(true);
+    const fetchData = useCallback(async (silent = false) => {
+        if (!silent) setLoading(true);
         try {
             const [prodRes, snapRes, txnRes] = await Promise.all([
                 supabase.from('products').select('*').eq('is_active', true).limit(10000),
@@ -65,9 +69,9 @@ const StockLedger = () => {
             setTransactions(txnRes.data || []);
         } catch (error) {
             console.error('Error fetching ledger data:', error);
-            toast.error('Failed to fetch stock ledger data');
+            if (!silent) toast.error('Failed to fetch stock ledger data');
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
     }, [selectedDate]);
 
@@ -78,6 +82,41 @@ const StockLedger = () => {
 
     useEffect(() => {
         fetchData();
+    }, [fetchData]);
+
+    const fetchProductHistory = async (product) => {
+        setFetchingHistory(true);
+        setHistoryModal(product);
+        try {
+            const { data, error } = await supabase
+                .from('daily_stock_summary')
+                .select('*')
+                .eq('product_id', product.id)
+                .order('date', { ascending: false })
+                .limit(7);
+            
+            if (error) throw error;
+            setProductHistory(data || []);
+        } catch (error) {
+            console.error('Error fetching product history:', error);
+            toast.error('Failed to fetch product history');
+        } finally {
+            setFetchingHistory(false);
+        }
+    };
+
+    // Real-time subscription
+    useEffect(() => {
+        const channel = supabase
+            .channel('live-stock-ledger')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => fetchData(true))
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_management' }, () => fetchData(true))
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_stock_summary' }, () => fetchData(true))
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
     }, [fetchData]);
 
 
@@ -102,17 +141,70 @@ const StockLedger = () => {
     }, [products, deferredSearchTerm, selectedGodown]);
 
     const productGrid = useMemo(() => {
-        if (filteredProducts.length === 0) return { sortedMasters: [], grandTotal: 0 };
+        const isToday = selectedDate === today;
+        
+        const snapMap = {};
+        const openingMap = {};
+        const inwardMap = {};
+        const outwardMap = {};
+
+        dailySnapshots.forEach(s => {
+            if (selectedGodown === 'all' || s.godown_id === selectedGodown) {
+                const pid = s.product_id; // UUID
+                snapMap[pid] = (snapMap[pid] || 0) + (parseFloat(s.closing_stock) || 0);
+                openingMap[pid] = (openingMap[pid] || 0) + (parseFloat(s.opening_stock) || 0);
+                inwardMap[pid] = (inwardMap[pid] || 0) + (parseFloat(s.in_stock) || 0);
+                outwardMap[pid] = (outwardMap[pid] || 0) + (parseFloat(s.out_stock) || 0);
+            }
+        });
+
+        // Dynamic Today Map
+        const todayInMap = {};
+        const todayOutMap = {};
+        if (isToday) {
+            transactions.forEach(t => {
+                const qty = parseFloat(t.quantity) || 0;
+                // stock_management uses product_id as SKU
+                if (selectedGodown === 'all' || t.godown_id === selectedGodown) {
+                    if (t.transaction_type === 'in') {
+                        todayInMap[t.product_id] = (todayInMap[t.product_id] || 0) + qty;
+                    } else if (t.transaction_type === 'out') {
+                        todayOutMap[t.product_id] = (todayOutMap[t.product_id] || 0) + qty;
+                    }
+                }
+                if (t.from_location && (selectedGodown === 'all' || t.from_location === selectedGodown)) {
+                    todayOutMap[t.product_id] = (todayOutMap[t.product_id] || 0) + qty;
+                }
+            });
+        }
+
+        if (filteredProducts.length === 0 && Object.keys(snapMap).length === 0) return { sortedMasters: [], grandTotal: 0 };
 
         const types = {}; // typeName -> { masterId -> { variantName -> qty } }
-        const masters = {}; // masterId -> { name, variantNames: Set, typeNames: Set }
+        const masters = {}; // masterId -> { name, variantNames: Set, typeNames: Set, variantData: { name -> productObj } }
         
         // Single pass for grouping
         for (const p of filteredProducts) {
             const mId = p.master_product_id || 'unassigned';
             const type = p.product_type || 'OTHER';
             const vName = p.name || 'Unknown';
-            const qty = parseFloat(p.closing_quantity) || 0;
+            
+            let qty = 0;
+            if (viewMode === 'closing') {
+                qty = isToday ? (parseFloat(p.closing_quantity) || 0) : (snapMap[p.id] || 0);
+            } else if (viewMode === 'opening') {
+                if (isToday) {
+                    const in_t = todayInMap[p.product_id] || 0;
+                    const out_t = todayOutMap[p.product_id] || 0;
+                    qty = (parseFloat(p.closing_quantity) || 0) - in_t + out_t;
+                } else {
+                    qty = openingMap[p.id] || 0;
+                }
+            } else if (viewMode === 'inward') {
+                qty = isToday ? (todayInMap[p.product_id] || 0) : (inwardMap[p.id] || 0);
+            } else if (viewMode === 'outward') {
+                qty = isToday ? (todayOutMap[p.product_id] || 0) : (outwardMap[p.id] || 0);
+            }
             
             if (!types[type]) types[type] = {};
             if (!types[type][mId]) types[type][mId] = {};
@@ -122,18 +214,21 @@ const StockLedger = () => {
                 masters[mId] = { 
                     name: masterProducts[mId] || (p.master_product_id ? 'Unknown' : 'Unassigned'), 
                     variantNames: new Set(), 
-                    typeNames: new Set() 
+                    typeNames: new Set(),
+                    variantData: {} 
                 };
             }
             masters[mId].variantNames.add(vName);
             masters[mId].typeNames.add(type);
+            masters[mId].variantData[vName] = p; // Keep product reference for history lookup
         }
         
         const sortedMasters = Object.entries(masters).map(([id, data]) => ({
             id,
             name: data.name,
             variants: Array.from(data.variantNames).sort(),
-            typeNames: Array.from(data.typeNames).sort(sizeOrder)
+            typeNames: Array.from(data.typeNames).sort(sizeOrder),
+            variantData: data.variantData
         })).sort((a, b) => a.name.localeCompare(b.name));
         
         const masterTotals = {};
@@ -163,7 +258,7 @@ const StockLedger = () => {
         }
         
         return { types, sortedMasters, masterTotals, variantTotals, masterTypeTotals, typeGrandTotals, grandTotal };
-    }, [filteredProducts, masterProducts]);
+    }, [filteredProducts, masterProducts, dailySnapshots, transactions, selectedGodown, viewMode, selectedDate, today]);
 
     // Reset pagination when filters change
     useEffect(() => {
@@ -380,6 +475,30 @@ const StockLedger = () => {
                                 <option key={g.godown_id} value={g.godown_id}>{g.name}</option>
                             ))}
                         </select>
+
+                        {/* View Mode Switcher */}
+                        <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 ml-1">
+                            {[
+                                { id: 'closing', label: 'Closing', icon: Package },
+                                { id: 'opening', label: 'Opening', icon: RefreshCcw },
+                                { id: 'inward', label: 'Inward', icon: ArrowUp, color: 'text-emerald-600' },
+                                { id: 'outward', label: 'Outward', icon: ArrowUp, color: 'text-rose-600', rotate: 180 }
+                            ].map(mode => (
+                                <button
+                                    key={mode.id}
+                                    onClick={() => setViewMode(mode.id)}
+                                    className={cn(
+                                        "px-2 py-1.5 rounded-md text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5",
+                                        viewMode === mode.id 
+                                            ? "bg-white text-primary shadow-sm" 
+                                            : "text-slate-400 hover:text-slate-600"
+                                    )}
+                                >
+                                    <mode.icon size={12} className={cn(mode.color)} style={mode.rotate ? { transform: `rotate(${mode.rotate}deg)` } : {}} />
+                                    <span className="hidden xl:inline">{mode.label}</span>
+                                </button>
+                            ))}
+                        </div>
                     </div>
 
                     <div className="relative flex-1 w-full">
@@ -413,7 +532,7 @@ const StockLedger = () => {
             {/* Date Info Bar */}
             <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
                 <span>
-                    Showing data for <strong className="text-slate-600">{selectedDate}</strong>
+                    Showing <strong className="text-primary uppercase">{viewMode}</strong> data for <strong className="text-slate-600">{selectedDate}</strong>
                 </span>
                 <span>
                     {productGrid.sortedMasters.reduce((acc, m) => acc + m.typeNames.length, 0)} items across {productGrid.sortedMasters.length} master products
@@ -452,11 +571,15 @@ const StockLedger = () => {
                                                 </th>
                                                 {mRow.variants.map(vName => (
                                                     <th key={vName} className={cn(
-                                                        "px-2 py-3 text-center font-bold border-b-2 border-r uppercase",
+                                                        "px-2 py-3 text-center font-bold border-b-2 border-r uppercase cursor-pointer hover:bg-slate-200/50 transition-colors group/h",
                                                         theme.bg, theme.text, theme.border
-                                                    )}>
-                                                        <div className="min-w-[90px] break-words">
+                                                    )}
+                                                    onClick={() => fetchProductHistory(mRow.variantData[vName])}
+                                                    title="View Product History"
+                                                    >
+                                                        <div className="min-w-[90px] break-words flex flex-col items-center gap-1">
                                                             {vName}
+                                                            <ClipboardList size={10} className="opacity-0 group-hover/h:opacity-100 transition-opacity" />
                                                         </div>
                                                     </th>
                                                 ))}
@@ -519,6 +642,63 @@ const StockLedger = () => {
                 <div ref={observerRef} className="py-12 text-center bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 mt-6">
                     <RefreshCcw size={24} className="animate-spin mx-auto text-slate-400 mb-3" />
                     <p className="text-sm font-bold text-slate-500 italic">Loading more stock collections...</p>
+                </div>
+            )}
+
+            {/* Product History Modal */}
+            {historyModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
+                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setHistoryModal(null)}></div>
+                    <div className="relative bg-white rounded-2xl shadow-xl w-full sm:max-w-2xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
+                            <div>
+                                <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                                    <ClipboardList size={20} className="text-primary" />
+                                    Stock History: {historyModal.name}
+                                </h2>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{historyModal.product_id}</p>
+                            </div>
+                            <button onClick={() => setHistoryModal(null)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400">
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                            {fetchingHistory ? (
+                                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                                    <RefreshCcw size={32} className="animate-spin text-primary" />
+                                    <p className="text-sm font-medium text-slate-500">Loading history...</p>
+                                </div>
+                            ) : productHistory.length === 0 ? (
+                                <div className="text-center py-12">
+                                    <p className="text-slate-500 font-medium">No history found for this product.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-5 gap-2 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-2 border-b border-slate-100">
+                                        <div>Date</div>
+                                        <div className="text-center">Opening</div>
+                                        <div className="text-center text-emerald-600">Inward</div>
+                                        <div className="text-center text-rose-600">Outward</div>
+                                        <div className="text-center text-primary">Closing</div>
+                                    </div>
+                                    {productHistory.map((h, i) => (
+                                        <div key={i} className="grid grid-cols-5 gap-2 items-center py-3 border-b border-slate-50 hover:bg-slate-50/50 rounded-lg px-1 transition-colors">
+                                            <div className="text-xs font-bold text-slate-700">{h.date}</div>
+                                            <div className="text-center font-mono text-xs">{h.opening_stock}</div>
+                                            <div className="text-center font-mono text-xs font-bold text-emerald-600">+{h.in_stock}</div>
+                                            <div className="text-center font-mono text-xs font-bold text-rose-600">-{h.out_stock}</div>
+                                            <div className="text-center font-mono text-xs font-black text-primary bg-primary/5 rounded py-1">{h.closing_stock}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="p-4 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex justify-end">
+                            <Button onClick={() => setHistoryModal(null)}>Close</Button>
+                        </div>
+                    </div>
                 </div>
             )}
 
