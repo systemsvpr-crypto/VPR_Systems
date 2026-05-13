@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Search, Plus, Edit2, X, Package, Layers, Check, Eye } from 'lucide-react';
+import { Search, Plus, Edit2, X, Package, Layers, Check, Eye, Trash2 } from 'lucide-react';
 import { supabase } from '../supabase';
 import useAuthStore from '../store/authStore';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import DeleteModal from '@/components/ui/DeleteModal';
 import { cn } from '@/lib/utils';
 
 const ITEMS_PER_PAGE = 10;
@@ -25,6 +26,9 @@ const MasterProduct = () => {
     const [currentPage, setCurrentPage] = useState(1);
     const [formData, setFormData] = useState(DEFAULT_FORM_DATA);
     const [errors, setErrors] = useState({});
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [itemToDelete, setItemToDelete] = useState(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     const [variantModal, setVariantModal] = useState(null);
     const [allProducts, setAllProducts] = useState([]);
@@ -132,6 +136,45 @@ const MasterProduct = () => {
             fetchItems();
         } catch (error) {
             toast.error(`Error: ${error.message}`);
+        }
+    };
+
+    const handleDelete = (item) => {
+        setItemToDelete(item);
+        setIsDeleteModalOpen(true);
+    };
+
+    const confirmDelete = async () => {
+        if (!itemToDelete) return;
+        setIsDeleting(true);
+        try {
+            // Check if there are any products linked to this master product
+            const { count, error: countError } = await supabase
+                .from('products')
+                .select('*', { count: 'exact', head: true })
+                .eq('master_product_id', itemToDelete.id);
+            
+            if (countError) throw countError;
+            
+            if (count > 0) {
+                toast.error(`Cannot delete: ${count} product(s) are linked to this type. Unlink them first.`);
+                setIsDeleteModalOpen(false);
+                return;
+            }
+
+            const { error } = await supabase
+                .from('master_product')
+                .delete()
+                .eq('id', itemToDelete.id);
+            if (error) throw error;
+            toast.success('Product type deleted');
+            fetchItems();
+            setIsDeleteModalOpen(false);
+            setItemToDelete(null);
+        } catch (error) {
+            toast.error(`Error: ${error.message}`);
+        } finally {
+            setIsDeleting(false);
         }
     };
 
@@ -329,6 +372,16 @@ const MasterProduct = () => {
                                                 >
                                                     <Edit2 size={16} />
                                                 </Button>
+                                                {user?.role === 'SUPER ADMIN' && (
+                                                    <Button
+                                                        variant="ghost" size="icon"
+                                                        onClick={() => handleDelete(item)}
+                                                        className="p-1.5 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded transition-all"
+                                                        title="Delete"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </Button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>
@@ -531,6 +584,16 @@ const MasterProduct = () => {
                     </div>
                 </div>
             )}
+
+            <DeleteModal
+                isOpen={isDeleteModalOpen}
+                onClose={() => setIsDeleteModalOpen(false)}
+                onConfirm={confirmDelete}
+                title="Delete Product Type"
+                description="Are you sure you want to delete this product type? This action cannot be undone."
+                itemLabel={itemToDelete?.name}
+                loading={isDeleting}
+            />
 
         </div>
     );

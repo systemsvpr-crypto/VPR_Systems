@@ -28,6 +28,7 @@ import {
   HardHat,
   BadgeDollarSign,
   Mail,
+  ClipboardList,
 } from 'lucide-react';
 
 const Sidebar = ({ onClose }) => {
@@ -98,6 +99,7 @@ const Sidebar = ({ onClose }) => {
   /* Combined Master Menu List for Permission Checking */
   const MENU_ITEMS = [
     { path: '/live-stock-dashboard', icon: LayoutDashboard, label: 'Live Stock Dashboard', id: 'live-stock-dashboard' },
+    { path: '/live-stock', icon: ClipboardList, label: 'Live Stock Ledger', id: 'live-stock' },
     { path: '/stock-management', icon: TrendingUp, label: 'Stock', id: 'stock-management' },
     { path: '/sell', icon: BadgeDollarSign, label: 'Sales', id: 'sell' },
     { path: '/purchase', icon: ShoppingCart, label: 'Purchase', id: 'purchase-dashboard' },
@@ -151,7 +153,7 @@ const Sidebar = ({ onClose }) => {
       }
     } else if (item.id === 'master') {
       // Show Master Config if user has access to any master tabs
-      const MASTER_TABS = ['products', 'godowns', 'transporters', 'customers', 'vendors'];
+      const MASTER_TABS = ['products', 'product-type', 'godowns', 'transporters', 'customers', 'vendors'];
       if (MASTER_TABS.some(tabId => hasAccess(tabId))) {
         acc.push(item);
       }

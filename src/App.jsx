@@ -16,6 +16,8 @@ import Sell from './pages/Sell';
 import Purchase from './pages/Purchase';
 import WhatsappHistory from './pages/WhatsappHistory';
 
+import LiveStock from './pages/LiveStock';
+
 // Patch stale localStorage 'user' — re-evaluate Admin flag from role on every app load
 // This fixes sessions that were stored before the case-insensitive Admin fix.
 const patchStoredUser = () => {
@@ -57,6 +59,7 @@ function App() {
             <Route path="master" element={<Master />} />
             <Route path="stock-management" element={<StockManagement />} />
             <Route path="live-stock-dashboard" element={<LiveStockDashboard />} />
+            <Route path="live-stock" element={<LiveStock />} />
             <Route path="sell" element={<Sell />} />
             <Route path="purchase" element={<Purchase />} />
             <Route path="whatsapp-history" element={<WhatsappHistory />} />

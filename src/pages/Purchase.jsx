@@ -1,4 +1,4 @@
-import React, { useState, lazy, Suspense } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -55,8 +55,15 @@ const Purchase = () => {
     (user?.page_access || []).includes('purchase-dashboard')
   );
 
-  const [activeTab, setActiveTab] = useState(allowedTabs[0]?.id || 'pur-dashboard');
+  const [activeTab, setActiveTab] = useState('');
   const ActiveComponent = allowedTabs.find(t => t.id === activeTab)?.component ?? (allowedTabs[0]?.component || PurDashboard);
+
+  // Handle real-time permission changes
+  useEffect(() => {
+    if (allowedTabs.length > 0 && (!activeTab || !allowedTabs.find(t => t.id === activeTab))) {
+      setActiveTab(allowedTabs[0].id);
+    }
+  }, [allowedTabs, activeTab]);
 
   return (
     <div className="flex flex-col min-h-screen -m-4 sm:-m-6 lg:-m-8 bg-[#F5F5F5]">

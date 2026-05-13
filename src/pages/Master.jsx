@@ -17,24 +17,25 @@ const Master = () => {
     const allowedTabs = useMemo(() => {
         const tabs = [];
         const pageAccess = user?.page_access || [];
-        const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.Admin === 'Yes';
+        const roleUpper = (user?.role || '').toUpperCase();
+        const isSuperAdmin = roleUpper === 'SUPER ADMIN' || roleUpper === 'SUPER_ADMIN';
 
-        if (isAdmin || pageAccess.includes('products')) {
+        if (isSuperAdmin || pageAccess.includes('products')) {
             tabs.push({ id: 'products', label: 'Products', icon: LayoutGrid });
         }
-        if (isAdmin || pageAccess.includes('product-type')) {
+        if (isSuperAdmin || pageAccess.includes('product-type')) {
             tabs.push({ id: 'product-type', label: 'Master Product', icon: Package });
         }
-        if (isAdmin || pageAccess.includes('godowns')) {
+        if (isSuperAdmin || pageAccess.includes('godowns')) {
             tabs.push({ id: 'godowns', label: 'Godowns', icon: MapPin });
         }
-        if (isAdmin || pageAccess.includes('transporters')) {
+        if (isSuperAdmin || pageAccess.includes('transporters')) {
             tabs.push({ id: 'transporters', label: 'Transporters', icon: Truck });
         }
-        if (isAdmin || pageAccess.includes('customers')) {
+        if (isSuperAdmin || pageAccess.includes('customers')) {
             tabs.push({ id: 'customers', label: 'Customers', icon: Users });
         }
-        if (isAdmin || pageAccess.includes('vendors')) {
+        if (isSuperAdmin || pageAccess.includes('vendors')) {
             tabs.push({ id: 'vendors', label: 'Purchase Vendor', icon: Building2 });
         }
         return tabs;

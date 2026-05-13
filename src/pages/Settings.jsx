@@ -169,12 +169,15 @@ const Settings = () => {
         setFormData(prev => {
             const newState = { ...prev, [name]: newValue };
 
-            // Auto-set admin pages
+            // Auto-set admin pages or reset user pages
             if (name === 'role') {
                 const roleUpper = newValue?.toUpperCase();
                 if (roleUpper === 'ADMIN' || roleUpper === 'SUPER ADMIN') {
                     const allPageIds = PAGES.flatMap(cat => cat.items.map(p => p.id));
                     newState.page_access = allPageIds;
+                } else {
+                    // Reset to default for normal users
+                    newState.page_access = DEFAULT_USER_PAGES;
                 }
             }
             return newState;

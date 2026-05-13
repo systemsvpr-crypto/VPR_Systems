@@ -1,24 +1,10 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
+import useAuthStore from '../store/authStore';
 
 const ProtectedRoute = ({ children }) => {
   const { pathname } = useLocation();
-
-  // Read from both possible storage locations
-  const userRaw = localStorage.getItem('user');
-  const zustandRaw = localStorage.getItem('vpr'); // Zustand persisted key
-
-  let user = null;
-  try {
-    if (userRaw) {
-      user = JSON.parse(userRaw);
-    } else if (zustandRaw) {
-      const zustandState = JSON.parse(zustandRaw);
-      user = zustandState?.state?.user || null;
-    }
-  } catch {
-    user = null;
-  }
+  const { user } = useAuthStore();
 
   // Not logged in → go to login
   if (!user) {
@@ -57,7 +43,7 @@ const ProtectedRoute = ({ children }) => {
       ['products', 'godowns', 'transporters'].some(p => allowedPages.includes(p))) ||
     // master visible if user has any sub-tab access
     (currentPath === 'master' &&
-      ['products', 'godowns', 'transporters', 'customers', 'vendors'].some(p => allowedPages.includes(p))) ||
+      ['products', 'product-type', 'godowns', 'transporters', 'customers', 'vendors'].some(p => allowedPages.includes(p))) ||
     // purchase visible if any purchase sub-tab access
     (currentPath === 'purchase' &&
       ['purchase-dashboard', 'purchase-indent', 'purchase-vendor-selection', 'purchase-vendor-approve', 'purchase-delivery', 'purchase-arrival', 'purchase-cancelled', 'purchase-pc-report'].some(p => allowedPages.includes(p))) ||

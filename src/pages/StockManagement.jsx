@@ -75,9 +75,10 @@ const StockManagement = () => {
     const allowedTabs = useMemo(() => {
         const tabs = [];
         const pageAccess = user?.page_access || [];
-        const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.Admin === 'Yes';
+        const roleUpper = (user?.role || '').toUpperCase();
+        const isSuperAdmin = roleUpper === 'SUPER ADMIN' || roleUpper === 'SUPER_ADMIN';
 
-        if (isAdmin || pageAccess.includes('stock-management')) {
+        if (isSuperAdmin || pageAccess.includes('stock-management')) {
             tabs.push({ id: 'stocks', label: 'Stocks', icon: Package });
         }
         return tabs;

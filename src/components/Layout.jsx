@@ -5,7 +5,18 @@ import Header from './Header';
 
 const Layout = () => {
   const location = useLocation();
+  const isLiveStock = location.pathname === '/live-stock';
   const isFixedPage = false; // location.pathname.includes('settings');
+
+  if (isLiveStock) {
+    return (
+      <div className="flex h-screen bg-white font-sans text-slate-900 selection:bg-primary/20 overflow-hidden">
+        <main className="flex-1 flex flex-col overflow-hidden relative">
+          <Outlet />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-gray-50 font-sans text-slate-900 selection:bg-primary/20">
