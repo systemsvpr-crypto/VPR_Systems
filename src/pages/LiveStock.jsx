@@ -55,9 +55,9 @@ const StockLedger = () => {
         setLoading(true);
         try {
             const [prodRes, snapRes, txnRes] = await Promise.all([
-                supabase.from('products').select('*').eq('is_active', true),
-                supabase.from('daily_stock_summary').select('*').eq('date', selectedDate),
-                supabase.from('stock_management').select('*').eq('date', selectedDate)
+                supabase.from('products').select('*').eq('is_active', true).limit(10000),
+                supabase.from('daily_stock_summary').select('*').eq('date', selectedDate).limit(10000),
+                supabase.from('stock_management').select('*').eq('date', selectedDate).limit(10000)
             ]);
 
             setProducts(prodRes.data || []);
@@ -245,16 +245,29 @@ const StockLedger = () => {
         try {
             const wb = XLSX.utils.book_new();
 
+            // Helper to calculate column widths
+            const getColWidths = (data) => {
+                const maxChars = [];
+                data.forEach(row => {
+                    row.forEach((cell, i) => {
+                        const len = cell ? cell.toString().length : 0;
+                        if (!maxChars[i] || len > maxChars[i]) maxChars[i] = len;
+                    });
+                });
+                return maxChars.map(w => ({ wch: Math.min(Math.max(w + 2, 8), 50) })); // Min 8, max 50 chars
+            };
+
             // Summary sheet
             const summaryData = [['Godown', 'Opening', 'Inward', 'Outward', 'Closing']];
             Object.entries(godownSummaries).forEach(([id, s]) => {
                 summaryData.push([s.godown.name, s.opening, s.inward, s.outward, s.closing]);
             });
             const ws1 = XLSX.utils.aoa_to_sheet(summaryData);
+            ws1['!cols'] = getColWidths(summaryData);
             XLSX.utils.book_append_sheet(wb, ws1, 'Summary');
 
             // Product grid sheet
-            const { sortedMasters, types, masterTypeTotals } = productGrid;
+            const { sortedMasters, types } = productGrid;
             const gridData = [];
 
             sortedMasters.forEach(m => {
@@ -275,6 +288,7 @@ const StockLedger = () => {
             });
 
             const ws2 = XLSX.utils.aoa_to_sheet(gridData);
+            ws2['!cols'] = getColWidths(gridData);
             XLSX.utils.book_append_sheet(wb, ws2, 'Stock Grid');
 
             XLSX.writeFile(wb, `Stock_Ledger_${selectedDate}.xlsx`);
@@ -282,10 +296,6 @@ const StockLedger = () => {
         } catch (e) {
             toast.error('Export failed: ' + e.message);
         }
-    };
-
-    const handlePrint = () => {
-        window.print();
     };
 
     const toggleGroup = (size) => {
@@ -396,10 +406,6 @@ const StockLedger = () => {
                         <Button variant="outline" size="sm" onClick={handleExportXLSX} className="h-10 gap-2 px-4 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200 transition-all font-bold">
                             <FileSpreadsheet size={14} />
                             <span className="hidden sm:inline">Export</span>
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={handlePrint} className="h-10 gap-2 px-4 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all font-bold">
-                            <Printer size={14} />
-                            <span className="hidden sm:inline">Print</span>
                         </Button>
                     </div>
                 </div>
