@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { UserPlus, Shield, X, Trash2, Pencil, RefreshCw, Loader, Save, Eye, EyeOff } from 'lucide-react';
+import { UserPlus, Shield, X, Trash2, Pencil, RefreshCw, Loader, Save, Eye, EyeOff, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../supabase';
+import Pagination from '@/components/ui/Pagination';
+
+const ITEMS_PER_PAGE = 10;
 
 // --- Skeleton Components ---
 const TableSkeleton = () => (
@@ -69,6 +72,7 @@ const OtdSettings = () => {
     const [userSearchTerm, setUserSearchTerm] = useState('');
     const [isLoading, setIsLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
 
     const allPages = [
         "Dashboard",
@@ -120,6 +124,8 @@ const OtdSettings = () => {
         fetchAllUsers();
     }, [fetchAllUsers]);
 
+    useEffect(() => { setCurrentPage(1); }, [userSearchTerm]);
+
     const filteredUsers = useMemo(() => {
         return users.filter(user =>
             Object.values(user).some(val =>
@@ -127,6 +133,13 @@ const OtdSettings = () => {
             )
         );
     }, [users, userSearchTerm]);
+
+    const totalPages = Math.ceil(filteredUsers.length / ITEMS_PER_PAGE);
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const endIndex = startIndex + ITEMS_PER_PAGE;
+    const currentItems = filteredUsers.slice(startIndex, endIndex);
+    const paginationStart = filteredUsers.length === 0 ? 0 : startIndex + 1;
+    const paginationEnd = Math.min(endIndex, filteredUsers.length);
 
     const handleAddUser = async (e) => {
         e.preventDefault();
@@ -234,13 +247,16 @@ const OtdSettings = () => {
                         <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
                         Refresh
                     </button>
-                    <input
-                        type="text"
-                        placeholder="Search users..."
-                        value={userSearchTerm}
-                        onChange={(e) => setUserSearchTerm(e.target.value)}
-                        className="w-40 lg:w-56 px-4 py-2 bg-gray-50 border border-gray-200 rounded focus:ring-primary focus:border-primary outline-none"
-                    />
+                    <div className="relative">
+                        <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input
+                            type="text"
+                            placeholder="Search users..."
+                            value={userSearchTerm}
+                            onChange={(e) => setUserSearchTerm(e.target.value)}
+                            className="w-40 lg:w-56 h-[42px] pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none text-sm transition-all"
+                        />
+                    </div>
                     <button
                         onClick={() => {
                             setEditingUser(null);
@@ -257,7 +273,7 @@ const OtdSettings = () => {
             </div>
 
             <div className="bg-white rounded shadow-sm border border-gray-200 overflow-hidden">
-                <div className="overflow-x-auto scrollbar-thin max-h-[500px]">
+                <div className="overflow-x-auto scrollbar-thin">
                     <table className="w-full text-left border-collapse min-w-[800px]">
                         <thead>
                             <tr className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-600 font-bold sticky top-0 z-10 shadow-sm">
@@ -270,12 +286,12 @@ const OtdSettings = () => {
                         <tbody className="divide-y divide-gray-100 text-sm">
                             {isLoading ? (
                                 <TableSkeleton />
-                            ) : filteredUsers.length === 0 ? (
+                            ) : currentItems.length === 0 ? (
                                 <tr>
                                     <td colSpan="4" className="px-6 py-12 text-center text-gray-400 italic font-bold text-sm">No users found. Try searching or refresh data.</td>
                                 </tr>
                             ) : null}
-                            {!isLoading && filteredUsers.map((u) => (
+                            {!isLoading && currentItems.map((u) => (
                                 <tr key={u.id} className="hover:bg-gray-50 transition-colors">
                                     <td className="px-6 py-4">
                                         <div className="font-bold text-gray-900">{u.name}</div>
@@ -317,9 +333,23 @@ const OtdSettings = () => {
                                     </td>
                                 </tr>
                             ))}
+                            {!isLoading && Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
+                                <tr key={`empty-${i}`}><td colSpan="4" className="h-16"></td></tr>
+                            ))}
                         </tbody>
                     </table>
                 </div>
+                {!isLoading && (
+                    <Pagination
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        totalItems={filteredUsers.length}
+                        startIndex={paginationStart}
+                        endIndex={paginationEnd}
+                        onPageChange={setCurrentPage}
+                        className="border-t border-gray-200"
+                    />
+                )}
             </div>
 
             {/* Mobile View */}

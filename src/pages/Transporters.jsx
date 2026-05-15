@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
 import DeleteModal from '@/components/ui/DeleteModal';
+import Pagination from '@/components/ui/Pagination';
 import { cn } from '@/lib/utils';
 import {
     Select,
@@ -18,7 +19,7 @@ import {
     SelectValue,
 } from '@/components/ui/Select';
 
-const ITEMS_PER_PAGE = 6;
+const ITEMS_PER_PAGE = 10;
 
 const DEFAULT_FORM_DATA = {
     name: '',
@@ -731,19 +732,4 @@ const MobileTransporterCard = ({ transporter, user, onEdit, onDelete }) => (
     </div>
 );
 
-const Pagination = ({ currentPage, totalPages, totalItems, startIndex, endIndex, onPageChange, className }) => (
-    <div className={cn(`flex flex-col sm:flex-row items-center justify-between p-4 gap-4`, className)}>
-        <p className="text-sm text-slate-500">
-            Showing <span className="font-medium text-slate-900">{startIndex}</span> to <span className="font-medium text-slate-900">{endIndex}</span> of <span className="font-medium text-slate-900">{totalItems}</span> results
-        </p>
-        <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={() => onPageChange(currentPage - 1)} disabled={currentPage === 1} className="h-9 w-9 border-slate-200">
-                <span className="text-slate-600">‹</span>
-            </Button>
-            <span className="text-sm font-medium">{currentPage} / {totalPages || 1}</span>
-            <Button variant="outline" size="icon" onClick={() => onPageChange(currentPage + 1)} disabled={currentPage >= totalPages} className="h-9 w-9 border-slate-200">
-                <span className="text-slate-600">›</span>
-            </Button>
-        </div>
-    </div>
-);
+

@@ -5,6 +5,9 @@ import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
 import { supabase } from '../../supabase';
 import { whatsappService } from '../../services/whatsappService';
+import Pagination from '@/components/ui/Pagination';
+
+const ITEMS_PER_PAGE = 10;
 
 // --- Format date for display ---
 const formatDisplayDate = (dateStr) => {
@@ -56,6 +59,7 @@ const OtdInformAfter = () => {
   const [historyItems, setHistoryItems] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // --- Fetch Data ---
   const fetchData = useCallback(async (isRefresh = false) => {
@@ -151,6 +155,15 @@ const OtdInformAfter = () => {
     });
     return getSortedItems(filtered);
   }, [pendingItems, historyItems, activeTab, searchTerm, clientFilter, godownFilter, getSortedItems]);
+
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, clientFilter, godownFilter, activeTab]);
+
+  const totalPages = Math.ceil(filteredItems.length / ITEMS_PER_PAGE);
+  const pageStartIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const pageEndIndex = pageStartIndex + ITEMS_PER_PAGE;
+  const currentItems = filteredItems.slice(pageStartIndex, pageEndIndex);
+  const paginationStart = filteredItems.length === 0 ? 0 : pageStartIndex + 1;
+  const paginationEnd = Math.min(pageEndIndex, filteredItems.length);
 
   useEffect(() => {
     console.log(`InformAfter - Active Tab: ${activeTab}, Selected Rows Count: ${Object.keys(selectedRows).length}`);
@@ -299,7 +312,7 @@ const OtdInformAfter = () => {
 
       {/* Main Table Content */}
       <div className="erp-table-container max-w-[1200px] mx-auto">
-        <div className="hidden md:block overflow-x-auto max-h-[600px] overflow-y-auto custom-scrollbar">
+        <div className="hidden md:block overflow-x-auto custom-scrollbar">
           <table className="erp-table">
             <thead className="erp-table-thead">
               <tr>
@@ -331,7 +344,7 @@ const OtdInformAfter = () => {
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
                 <TableSkeleton cols={activeTab === 'pending' ? 10 : 9} />
-              ) : filteredItems.length === 0 ? (
+              ) : currentItems.length === 0 ? (
                 <tr>
                   <td colSpan="14" className="px-6 py-24 text-center">
                     <div className="flex flex-col items-center gap-4">
@@ -346,7 +359,7 @@ const OtdInformAfter = () => {
                   </td>
                 </tr>
               ) : (
-                filteredItems.map((item, idx) => {
+                currentItems.map((item, idx) => {
                   const isSelected = activeTab === 'pending' && !!selectedRows[item.id];
                   return (
                     <tr key={idx} className="erp-table-tr group">
@@ -372,9 +385,25 @@ const OtdInformAfter = () => {
                     </tr>
                   );
                 } ))}
+              {!isLoading && Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
+                <tr key={`empty-${i}`}><td colSpan={activeTab === 'pending' ? 11 : 10} className="h-16"></td></tr>
+              ))}
             </tbody>
           </table>
         </div>
+        {!isLoading && (
+          <div className="hidden md:block">
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filteredItems.length}
+              startIndex={paginationStart}
+              endIndex={paginationEnd}
+              onPageChange={setCurrentPage}
+              className="border-t border-slate-100"
+            />
+          </div>
+        )}
       </div>
     </div>
   );

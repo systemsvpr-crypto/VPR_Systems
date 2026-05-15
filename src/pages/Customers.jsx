@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import DeleteModal from '@/components/ui/DeleteModal';
+import Pagination from '@/components/ui/Pagination';
 import { cn } from '@/lib/utils';
 
 const ITEMS_PER_PAGE = 10;
@@ -254,20 +255,23 @@ const Customers = () => {
                                     </tr>
                                 ))
                             )}
+                            {!loading && Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
+                                <tr key={`empty-${i}`}><td colSpan="5" className="h-16"></td></tr>
+                            ))}
                         </tbody>
                     </table>
                 </div>
 
-                {totalPages > 1 && (
-                    <div className="flex items-center justify-between p-4 border-t border-slate-100">
-                        <p className="text-sm text-slate-500">
-                            Page <span className="font-medium text-slate-900">{currentPage}</span> of <span className="font-medium text-slate-900">{totalPages}</span>
-                        </p>
-                        <div className="flex items-center gap-2">
-                            <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1}>Previous</Button>
-                            <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages}>Next</Button>
-                        </div>
-                    </div>
+                {!loading && filteredCustomers.length > 0 && (
+                    <Pagination
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        totalItems={filteredCustomers.length}
+                        startIndex={(currentPage - 1) * ITEMS_PER_PAGE + 1}
+                        endIndex={Math.min(currentPage * ITEMS_PER_PAGE, filteredCustomers.length)}
+                        onPageChange={setCurrentPage}
+                        className="border-t border-slate-100"
+                    />
                 )}
             </div>
 

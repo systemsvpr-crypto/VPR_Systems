@@ -4,6 +4,9 @@ import SearchableDropdown from '../../components/SearchableDropdown';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
 import { supabase } from '../../supabase';
+import Pagination from '@/components/ui/Pagination';
+
+const ITEMS_PER_PAGE = 10;
 
 const getVal = (obj, ...possibleKeys) => {
   if (!obj || typeof obj !== 'object') return null;
@@ -105,6 +108,7 @@ const OtdDispatchPlan = () => {
   const [selectedRows, setSelectedRows] = useState({});
   const [editData, setEditData] = useState({});
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [clientFilter, setClientFilter] = useState('');
@@ -638,6 +642,16 @@ const OtdDispatchPlan = () => {
     return getSortedItems(filtered);
   }, [dispatchHistory, searchTerm, clientFilter, godownFilter, orderNoFilter, itemFilter, dateFilter, getSortedItems]);
 
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, clientFilter, godownFilter, orderNoFilter, itemFilter, dateFilter, stockLocationFilter, activeTab]);
+
+  const activeFilteredItems = activeTab === 'pending' ? filteredAndSortedOrders : filteredAndSortedHistory;
+  const totalPages = Math.ceil(activeFilteredItems.length / ITEMS_PER_PAGE);
+  const pageStartIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const pageEndIndex = pageStartIndex + ITEMS_PER_PAGE;
+  const currentItems = activeFilteredItems.slice(pageStartIndex, pageEndIndex);
+  const paginationStart = activeFilteredItems.length === 0 ? 0 : pageStartIndex + 1;
+  const paginationEnd = Math.min(pageEndIndex, activeFilteredItems.length);
+
   const getRowKey = useCallback((order) => `${order.orderNo}_${order.itemName}_${order.originalIndex}`, []);
 
   const handleCheckboxToggle = useCallback((order) => {
@@ -884,7 +898,7 @@ const OtdDispatchPlan = () => {
         {activeTab === 'pending' ? (
           <>
             {/* Desktop Table */}
-            <div className="hidden md:block relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 max-h-[460px] overflow-y-auto">
+            <div className="hidden md:block relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300">
               <table className="erp-table min-w-[1400px]">
                 <thead className="erp-table-thead">
                   <tr className="erp-table-tr">
@@ -944,7 +958,7 @@ const OtdDispatchPlan = () => {
                 <tbody className="divide-y divide-gray-200 text-sm">
                   {loadingOrders ? (
                     <TableSkeleton cols={isAnySelected ? 17 : 13} />
-                  ) : filteredAndSortedOrders.length === 0 ? (
+                  ) : currentItems.length === 0 ? (
                     <tr>
                       <td colSpan={isAnySelected ? 17 : 13} className="px-6 py-20 text-center">
                         <div className="flex flex-col items-center gap-3">
@@ -956,7 +970,7 @@ const OtdDispatchPlan = () => {
                       </td>
                     </tr>
                   ) : (
-                    filteredAndSortedOrders.map((order) => {
+                    currentItems.map((order) => {
                       const key = getRowKey(order);
                       return (
                         <tr key={key} className="erp-table-tr group">
@@ -1106,16 +1120,32 @@ const OtdDispatchPlan = () => {
                       );
                     })
                   )}
+                  {!loadingOrders && Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
+                    <tr key={`empty-${i}`}><td colSpan={isAnySelected ? 17 : 13} className="h-16"></td></tr>
+                  ))}
                 </tbody>
               </table>
               <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-100 to-transparent pointer-events-none opacity-30"></div>
             </div>
+            {!loadingOrders && (
+              <div className="hidden md:block">
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalItems={activeFilteredItems.length}
+                  startIndex={paginationStart}
+                  endIndex={paginationEnd}
+                  onPageChange={setCurrentPage}
+                  className="border-t border-slate-100"
+                />
+              </div>
+            )}
 
             {/* ---- Mobile Card View for Pending ---- */}
             <div className="md:hidden divide-y divide-gray-200">
               {loadingOrders ? (
                 <MobileSkeleton />
-              ) : filteredAndSortedOrders.length === 0 ? (
+              ) : currentItems.length === 0 ? (
                 <div className="p-8 text-center flex flex-col items-center gap-4">
                   <div className="p-4 bg-gray-50 rounded-full">
                     <ClipboardList size={32} className="text-gray-200" />
@@ -1123,7 +1153,7 @@ const OtdDispatchPlan = () => {
                   <p className="text-xs font-black text-gray-400 uppercase tracking-widest">No items found matching your filters.</p>
                 </div>
               ) : (
-                filteredAndSortedOrders.map((order) => {
+                currentItems.map((order) => {
                   const key = getRowKey(order);
                   return (
                     <div key={key} className={`p-4 space-y-4 ${selectedRows[key] ? 'bg-green-50/30' : 'bg-white'}`}>
@@ -1231,13 +1261,26 @@ const OtdDispatchPlan = () => {
                 })
               )}
             </div>
+            {!loadingOrders && (
+              <div className="md:hidden">
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalItems={activeFilteredItems.length}
+                  startIndex={paginationStart}
+                  endIndex={paginationEnd}
+                  onPageChange={setCurrentPage}
+                  className="bg-white border-t border-slate-200 rounded-t-xl shadow-sm"
+                />
+              </div>
+            )}
           </>
         ) : (
 
           // ==================== HISTORY TAB ====================
           <>
             {/* Desktop Table */}
-            <div className="hidden md:block relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 max-h-[460px] overflow-y-auto">
+            <div className="hidden md:block relative overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300">
               <table className="w-full text-left border-collapse min-w-[1200px] mx-0">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-600 font-bold sticky top-0 z-10 shadow-sm">
@@ -1270,7 +1313,7 @@ const OtdDispatchPlan = () => {
                 <tbody className="divide-y divide-gray-200 text-sm italic">
                   {loadingHistory ? (
                     <TableSkeleton cols={11} />
-                  ) : filteredAndSortedHistory.length === 0 ? (
+                  ) : currentItems.length === 0 ? (
                     <tr>
                       <td colSpan="11" className="px-6 py-20 text-center">
                         <div className="flex flex-col items-center gap-3">
@@ -1282,7 +1325,7 @@ const OtdDispatchPlan = () => {
                       </td>
                     </tr>
                   ) : (
-                    filteredAndSortedHistory.map((item, idx) => (
+                    currentItems.map((item, idx) => (
                       <tr key={idx} className="hover:bg-gray-50 transition-colors group">
                         <td className="px-6 py-4 font-medium text-gray-500">{item.orderNo}</td>
                         <td className="px-6 py-4 font-bold text-primary">{item.dispatchNo}</td>
@@ -1302,16 +1345,32 @@ const OtdDispatchPlan = () => {
                       </tr>
                     ))
                   )}
+                  {!loadingHistory && Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
+                    <tr key={`empty-${i}`}><td colSpan="11" className="h-16"></td></tr>
+                  ))}
                 </tbody>
               </table>
               <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-100 to-transparent pointer-events-none opacity-30"></div>
             </div>
+            {!loadingHistory && (
+              <div className="hidden md:block">
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalItems={activeFilteredItems.length}
+                  startIndex={paginationStart}
+                  endIndex={paginationEnd}
+                  onPageChange={setCurrentPage}
+                  className="border-t border-slate-100"
+                />
+              </div>
+            )}
 
             {/* Mobile Card View for History */}
             <div className="md:hidden divide-y divide-gray-200">
               {loadingHistory ? (
                 <MobileSkeleton />
-              ) : filteredAndSortedHistory.length === 0 ? (
+              ) : currentItems.length === 0 ? (
                 <div className="p-20 text-center flex flex-col items-center gap-4">
                   <div className="p-4 bg-gray-50 rounded-full">
                     <History size={32} className="text-gray-200" />
@@ -1319,7 +1378,7 @@ const OtdDispatchPlan = () => {
                   <p className="text-xs font-black text-gray-400 uppercase tracking-widest">History is empty</p>
                 </div>
               ) : (
-                filteredAndSortedHistory.map((item, idx) => (
+                currentItems.map((item, idx) => (
                   <div key={idx} className="p-6 space-y-4 hover:bg-slate-50 transition-colors bg-white">
                     <div className="flex justify-between items-start">
                       <div>
@@ -1356,6 +1415,19 @@ const OtdDispatchPlan = () => {
                 ))
               )}
             </div>
+            {!loadingHistory && (
+              <div className="md:hidden">
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalItems={activeFilteredItems.length}
+                  startIndex={paginationStart}
+                  endIndex={paginationEnd}
+                  onPageChange={setCurrentPage}
+                  className="bg-white border-t border-slate-200 rounded-t-xl shadow-sm"
+                />
+              </div>
+            )}
           </>
         )}
       </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } from 'react';
-import { Search, Download, RefreshCcw, ClipboardList, FileSpreadsheet, Printer, ChevronDown, ChevronRight, Filter, Package, ArrowLeft, X, ArrowUp } from 'lucide-react';
+import { Search, Download, RefreshCcw, ClipboardList, FileSpreadsheet, Printer, ChevronDown, ChevronRight, Filter, Package, ArrowLeft, ArrowUp } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase';
 import toast from 'react-hot-toast';
@@ -38,9 +38,6 @@ const StockLedger = () => {
     const [visibleMasterCount, setVisibleMasterCount] = useState(10);
     const observerRef = React.useRef(null);
     const [searchTerm, setSearchTerm] = useState('');
-    const [historyModal, setHistoryModal] = useState(null);
-    const [productHistory, setProductHistory] = useState([]);
-    const [fetchingHistory, setFetchingHistory] = useState(false);
     const [viewMode, setViewMode] = useState('closing'); // closing, opening, inward, outward
 
     const fetchGodowns = useCallback(async () => {
@@ -59,7 +56,7 @@ const StockLedger = () => {
         if (!silent) setLoading(true);
         try {
             const [prodRes, snapRes, txnRes] = await Promise.all([
-                supabase.from('products').select('*').eq('is_active', true).limit(10000),
+                supabase.from('products').select('*').eq('is_active', true).order('id').limit(10000),
                 supabase.from('daily_stock_summary').select('*').eq('date', selectedDate).limit(10000),
                 supabase.from('stock_management').select('*').eq('date', selectedDate).limit(10000)
             ]);
@@ -84,26 +81,6 @@ const StockLedger = () => {
         fetchData();
     }, [fetchData]);
 
-    const fetchProductHistory = async (product) => {
-        setFetchingHistory(true);
-        setHistoryModal(product);
-        try {
-            const { data, error } = await supabase
-                .from('daily_stock_summary')
-                .select('*')
-                .eq('product_id', product.id)
-                .order('date', { ascending: false })
-                .limit(7);
-            
-            if (error) throw error;
-            setProductHistory(data || []);
-        } catch (error) {
-            console.error('Error fetching product history:', error);
-            toast.error('Failed to fetch product history');
-        } finally {
-            setFetchingHistory(false);
-        }
-    };
 
     // Real-time subscription
     useEffect(() => {
@@ -571,15 +548,11 @@ const StockLedger = () => {
                                                 </th>
                                                 {mRow.variants.map(vName => (
                                                     <th key={vName} className={cn(
-                                                        "px-2 py-3 text-center font-bold border-b-2 border-r uppercase cursor-pointer hover:bg-slate-200/50 transition-colors group/h",
+                                                        "px-2 py-3 text-center font-bold border-b-2 border-r uppercase",
                                                         theme.bg, theme.text, theme.border
-                                                    )}
-                                                    onClick={() => fetchProductHistory(mRow.variantData[vName])}
-                                                    title="View Product History"
-                                                    >
+                                                    )}>
                                                         <div className="min-w-[90px] break-words flex flex-col items-center gap-1">
                                                             {vName}
-                                                            <ClipboardList size={10} className="opacity-0 group-hover/h:opacity-100 transition-opacity" />
                                                         </div>
                                                     </th>
                                                 ))}
@@ -645,62 +618,6 @@ const StockLedger = () => {
                 </div>
             )}
 
-            {/* Product History Modal */}
-            {historyModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
-                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setHistoryModal(null)}></div>
-                    <div className="relative bg-white rounded-2xl shadow-xl w-full sm:max-w-2xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
-                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
-                            <div>
-                                <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                                    <ClipboardList size={20} className="text-primary" />
-                                    Stock History: {historyModal.name}
-                                </h2>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{historyModal.product_id}</p>
-                            </div>
-                            <button onClick={() => setHistoryModal(null)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400">
-                                <X size={20} />
-                            </button>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                            {fetchingHistory ? (
-                                <div className="flex flex-col items-center justify-center py-12 gap-3">
-                                    <RefreshCcw size={32} className="animate-spin text-primary" />
-                                    <p className="text-sm font-medium text-slate-500">Loading history...</p>
-                                </div>
-                            ) : productHistory.length === 0 ? (
-                                <div className="text-center py-12">
-                                    <p className="text-slate-500 font-medium">No history found for this product.</p>
-                                </div>
-                            ) : (
-                                <div className="space-y-4">
-                                    <div className="grid grid-cols-5 gap-2 text-[10px] font-black text-slate-400 uppercase tracking-wider pb-2 border-b border-slate-100">
-                                        <div>Date</div>
-                                        <div className="text-center">Opening</div>
-                                        <div className="text-center text-emerald-600">Inward</div>
-                                        <div className="text-center text-rose-600">Outward</div>
-                                        <div className="text-center text-primary">Closing</div>
-                                    </div>
-                                    {productHistory.map((h, i) => (
-                                        <div key={i} className="grid grid-cols-5 gap-2 items-center py-3 border-b border-slate-50 hover:bg-slate-50/50 rounded-lg px-1 transition-colors">
-                                            <div className="text-xs font-bold text-slate-700">{h.date}</div>
-                                            <div className="text-center font-mono text-xs">{h.opening_stock}</div>
-                                            <div className="text-center font-mono text-xs font-bold text-emerald-600">+{h.in_stock}</div>
-                                            <div className="text-center font-mono text-xs font-bold text-rose-600">-{h.out_stock}</div>
-                                            <div className="text-center font-mono text-xs font-black text-primary bg-primary/5 rounded py-1">{h.closing_stock}</div>
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="p-4 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex justify-end">
-                            <Button onClick={() => setHistoryModal(null)}>Close</Button>
-                        </div>
-                    </div>
-                </div>
-            )}
 
             {/* Custom Styles for Sheet Look */}
             <style>{`

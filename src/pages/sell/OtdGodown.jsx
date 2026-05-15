@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Filter, ChevronUp, ChevronDown, RefreshCw } from 'lucide-react';
+import { Filter, ChevronUp, ChevronDown, RefreshCw, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../supabase';
+import Pagination from '@/components/ui/Pagination';
+
+const ITEMS_PER_PAGE = 10;
 
 // --- Skeleton for table rows ---
 const TableSkeleton = () => (
@@ -28,6 +31,7 @@ const OtdGodown = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [godownList, setGodownList] = useState([]);
+    const [currentPage, setCurrentPage] = useState(1);
 
     const godownTabs = useMemo(() => ['All', ...godownList], [godownList]);
 
@@ -140,6 +144,16 @@ const OtdGodown = () => {
         return getSortedItems(filtered);
     }, [items, searchTerm, godownFilter, getSortedItems]);
 
+    useEffect(() => { setCurrentPage(1); }, [searchTerm, godownFilter]);
+
+    const totalPages = Math.ceil(filteredAndSortedItems.length / ITEMS_PER_PAGE);
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const endIndex = startIndex + ITEMS_PER_PAGE;
+    const currentItems = filteredAndSortedItems.slice(startIndex, endIndex);
+
+    const paginationStart = filteredAndSortedItems.length === 0 ? 0 : startIndex + 1;
+    const paginationEnd = Math.min(endIndex, filteredAndSortedItems.length);
+
     const tabCounts = useMemo(() => godownTabs.reduce((acc, tab) => {
         if (tab === 'All') {
             acc[tab] = items.length;
@@ -174,16 +188,14 @@ const OtdGodown = () => {
                         Refresh
                     </button>
                     <div className="relative w-full sm:w-64">
+                        <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors" />
                         <input
                             type="text"
                             placeholder="Search..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded focus:ring-primary focus:border-primary shrink-0"
+                            className="w-full h-[42px] pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none text-sm transition-all"
                         />
-                        <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -205,7 +217,7 @@ const OtdGodown = () => {
             </div>
 
             <div className="bg-white rounded shadow-sm border border-gray-200 overflow-hidden max-w-[1200px] mx-auto">
-                <div className="overflow-x-auto scrollbar-thin max-h-[500px]">
+                <div className="overflow-x-auto scrollbar-thin">
                     <table className="w-full text-left border-collapse min-w-[1200px]">
                         <thead>
                             <tr className="bg-gray-50 border-b border-gray-200 text-xs uppercase text-gray-600 font-bold sticky top-0 z-10 shadow-sm">
@@ -239,12 +251,12 @@ const OtdGodown = () => {
                         <tbody className="divide-y divide-gray-200 text-sm">
                             {isLoading ? (
                                 <TableSkeleton />
-                            ) : filteredAndSortedItems.length === 0 ? (
+                            ) : currentItems.length === 0 ? (
                                 <tr>
                                     <td colSpan="9" className="px-4 py-20 text-center text-gray-400 italic font-bold text-sm">No entries found for this selection.</td>
                                 </tr>
                             ) : null}
-                            {!isLoading && filteredAndSortedItems.map((item, idx) => (
+                            {!isLoading && currentItems.map((item, idx) => (
                                 <tr key={idx} className="hover:bg-gray-50 transition-colors">
                                     <td className="px-6 py-4 font-semibold text-gray-900">{item.dispatchNo}</td>
                                     <td className="px-6 py-4 text-gray-600 text-[11px] font-medium text-center">{formatDisplayDate(item.dispatchDate)}</td>
@@ -257,9 +269,23 @@ const OtdGodown = () => {
                                     <td className="px-6 py-4 text-gray-600 text-center font-bold text-[10px]">{item.gstIncluded}</td>
                                 </tr>
                             ))}
+                            {!isLoading && Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
+                                <tr key={`empty-${i}`}><td colSpan="9" className="h-16"></td></tr>
+                            ))}
                         </tbody>
                     </table>
                 </div>
+                {!isLoading && (
+                    <Pagination
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        totalItems={filteredAndSortedItems.length}
+                        startIndex={paginationStart}
+                        endIndex={paginationEnd}
+                        onPageChange={setCurrentPage}
+                        className="border-t border-gray-200"
+                    />
+                )}
             </div>
 
             {/* Refresh progress bar */}

@@ -6,6 +6,9 @@ import SearchableDropdown from '../../components/SearchableDropdown';
 import { supabase } from '../../supabase';
 import { whatsappService } from '../../services/whatsappService';
 import { cn } from '../../lib/utils';
+import Pagination from '@/components/ui/Pagination';
+
+const ITEMS_PER_PAGE = 10;
 
 const OtdOrder = () => {
   const calculateNextOrderNo = (existingOrders) => {
@@ -41,6 +44,7 @@ const OtdOrder = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
   const [initialLoading, setInitialLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
   const [customerPhoneMap, setCustomerPhoneMap] = useState({});
   const [whatsAppModal, setWhatsAppModal] = useState({ isOpen: false, status: 'sending', clientName: '', phoneNumber: '' });
 
@@ -229,6 +233,8 @@ const OtdOrder = () => {
     setSortConfig({ key, direction });
   };
 
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, clientFilter, godownFilter]);
+
   const getSortedItems = useCallback((itemsToSort) => {
     if (!sortConfig.key) return itemsToSort;
 
@@ -291,6 +297,13 @@ const OtdOrder = () => {
     });
     return getSortedItems(filtered);
   }, [orders, searchTerm, clientFilter, godownFilter, stockDataMap, intransitDataMap, getSortedItems]);
+
+  const totalPages = Math.ceil(filteredAndSortedOrders.length / ITEMS_PER_PAGE);
+  const pageStartIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const pageEndIndex = pageStartIndex + ITEMS_PER_PAGE;
+  const currentItems = filteredAndSortedOrders.slice(pageStartIndex, pageEndIndex);
+  const paginationStart = filteredAndSortedOrders.length === 0 ? 0 : pageStartIndex + 1;
+  const paginationEnd = Math.min(pageEndIndex, filteredAndSortedOrders.length);
 
   const handleAddItem = () => {
     setFormData(prev => ({
@@ -584,7 +597,7 @@ const OtdOrder = () => {
       )}
 
       <div className="erp-table-container max-w-[1200px] mx-auto">
-        <div className="hidden md:block overflow-x-auto max-h-[600px] overflow-y-auto custom-scrollbar">
+        <div className="hidden md:block overflow-x-auto custom-scrollbar">
           <table className="erp-table">
             <thead className="erp-table-thead">
               <tr>
@@ -605,7 +618,7 @@ const OtdOrder = () => {
             <tbody className="divide-y divide-slate-100">
               {(isLoadingOrders || isRefreshingOrders) ? (
                 <TableSkeleton />
-              ) : filteredAndSortedOrders.length === 0 ? (
+              ) : currentItems.length === 0 ? (
                 <tr>
                   <td colSpan="14" className="px-6 py-24 text-center">
                     <div className="flex flex-col items-center gap-4">
@@ -620,7 +633,7 @@ const OtdOrder = () => {
                   </td>
                 </tr>
               ) : (
-                filteredAndSortedOrders.map((order, idx) => (
+                currentItems.map((order, idx) => (
                   <tr key={idx} className="erp-table-tr group">
                     <td className="erp-table-td font-bold text-primary whitespace-nowrap">
                       {order.orderNumber}
@@ -693,14 +706,30 @@ const OtdOrder = () => {
                   </tr>
                 ))
               )}
+              {!(isLoadingOrders || isRefreshingOrders) && Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
+                <tr key={`empty-${i}`}><td colSpan="14" className="h-16"></td></tr>
+              ))}
             </tbody>
           </table>
         </div>
+        {!(isLoadingOrders || isRefreshingOrders) && (
+          <div className="hidden md:block">
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filteredAndSortedOrders.length}
+              startIndex={paginationStart}
+              endIndex={paginationEnd}
+              onPageChange={setCurrentPage}
+              className="border-t border-slate-100"
+            />
+          </div>
+        )}
 
         <div className="md:hidden divide-y divide-gray-200">
           {(isLoadingOrders || isRefreshingOrders) ? (
             <MobileSkeleton />
-          ) : filteredAndSortedOrders.length === 0 ? (
+          ) : currentItems.length === 0 ? (
             <div className="p-20 text-center flex flex-col items-center gap-4">
               <div className="p-4 bg-gray-50 rounded-full">
                 <Search size={32} className="text-gray-200" />
@@ -708,7 +737,7 @@ const OtdOrder = () => {
               <p className="text-xs font-black text-gray-400 uppercase tracking-widest">No records matching your filters</p>
             </div>
           ) : (
-            filteredAndSortedOrders.map((order, idx) => (
+            currentItems.map((order, idx) => (
               <div key={idx} className="p-6 space-y-4 hover:bg-slate-50 transition-colors">
                 <div className="flex justify-between items-start">
                   <div>
@@ -760,6 +789,17 @@ const OtdOrder = () => {
                 </div>
               </div>
             ))
+          )}
+          {!(isLoadingOrders || isRefreshingOrders) && (
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filteredAndSortedOrders.length}
+              startIndex={paginationStart}
+              endIndex={paginationEnd}
+              onPageChange={setCurrentPage}
+              className="bg-white border-t border-slate-200 rounded-t-xl shadow-sm"
+            />
           )}
         </div>
       </div>

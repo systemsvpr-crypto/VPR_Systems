@@ -5,6 +5,9 @@ import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
 import { supabase } from '../../supabase';
 import { whatsappService } from '../../services/whatsappService';
+import Pagination from '@/components/ui/Pagination';
+
+const ITEMS_PER_PAGE = 10;
 
 const OtdInformBefore = () => {
     const { user } = useAuthStore();
@@ -21,6 +24,7 @@ const OtdInformBefore = () => {
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState(null);
     const [customerPhoneMap, setCustomerPhoneMap] = useState({});
+    const [currentPage, setCurrentPage] = useState(1);
     const [whatsAppModal, setWhatsAppModal] = useState({ isOpen: false, status: 'sending', currentClient: '', phoneNumber: '', progress: 0, total: 0 });
 
     const abortControllerRef = useRef(null);
@@ -217,6 +221,16 @@ const OtdInformBefore = () => {
         return getSortedItems(filtered);
     }, [historyItems, searchTerm, clientFilter, godownFilter, getSortedItems]);
 
+    useEffect(() => { setCurrentPage(1); }, [searchTerm, clientFilter, godownFilter, activeTab]);
+
+    const activeFilteredItems = activeTab === 'pending' ? filteredAndSortedPending : filteredAndSortedHistory;
+    const totalPages = Math.ceil(activeFilteredItems.length / ITEMS_PER_PAGE);
+    const pageStartIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const pageEndIndex = pageStartIndex + ITEMS_PER_PAGE;
+    const currentItems = activeFilteredItems.slice(pageStartIndex, pageEndIndex);
+    const paginationStart = activeFilteredItems.length === 0 ? 0 : pageStartIndex + 1;
+    const paginationEnd = Math.min(pageEndIndex, activeFilteredItems.length);
+
     useEffect(() => {
         console.log(`Active Tab: ${activeTab}, Selected Rows Count: ${Object.keys(selectedRows).length}`);
     }, [activeTab, selectedRows]);
@@ -391,7 +405,7 @@ const OtdInformBefore = () => {
 
             {/* Content */}
             <div className="erp-table-container max-w-[1200px] mx-auto">
-                <div className="hidden md:block overflow-x-auto max-h-[600px] overflow-y-auto custom-scrollbar">
+                <div className="hidden md:block overflow-x-auto custom-scrollbar">
                     <table className="erp-table">
                         <thead className="erp-table-thead">
                             <tr>
@@ -420,7 +434,7 @@ const OtdInformBefore = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 text-sm font-medium">
-                            {loading ? <TableSkeleton cols={activeTab === 'pending' ? 10 : 9} /> : (activeTab === 'pending' ? filteredAndSortedPending : filteredAndSortedHistory).map(item => (
+                            {loading ? <TableSkeleton cols={activeTab === 'pending' ? 10 : 9} /> : currentItems.map(item => (
                                 <tr key={item.id} className="erp-table-tr group">
                                     {activeTab === 'pending' && (
                                         <td className="erp-table-td text-center w-16">
@@ -452,9 +466,25 @@ const OtdInformBefore = () => {
                                     )}
                                 </tr>
                             ))}
+                            {!loading && Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
+                                <tr key={`empty-${i}`}><td colSpan={activeTab === 'pending' ? 10 : 9} className="h-16"></td></tr>
+                            ))}
                         </tbody>
                     </table>
                 </div>
+                {!loading && (
+                    <div className="hidden md:block">
+                        <Pagination
+                            currentPage={currentPage}
+                            totalPages={totalPages}
+                            totalItems={activeFilteredItems.length}
+                            startIndex={paginationStart}
+                            endIndex={paginationEnd}
+                            onPageChange={setCurrentPage}
+                            className="border-t border-slate-100"
+                        />
+                    </div>
+                )}
             </div>
             {isSaving && !whatsAppModal.isOpen && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-white/40 backdrop-blur-md">
                 <RefreshCw size={40} className="animate-spin text-primary" />

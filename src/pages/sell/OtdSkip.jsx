@@ -4,6 +4,9 @@ import SearchableDropdown from '../../components/SearchableDropdown';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
 import { supabase } from '../../supabase';
+import Pagination from '@/components/ui/Pagination';
+
+const ITEMS_PER_PAGE = 10;
 
 // --- Skeleton Components ---
 const TableSkeleton = ({ cols }) => (
@@ -70,6 +73,7 @@ const OtdSkip = () => {
 
   const [godowns, setGodowns] = useState([]);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+  const [currentPage, setCurrentPage] = useState(1);
 
   // --- Real-time Stock fetching from Sheets ---
   const [loadingStock, setLoadingStock] = useState(false);
@@ -452,6 +456,15 @@ const OtdSkip = () => {
     );
   }, [currentItems, searchTerm, clientFilter, godownFilter, getSortedItems, stockDataMap, intransitDataMap, activeTab, normalize]);
 
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, clientFilter, godownFilter, activeTab]);
+
+  const totalPages = Math.ceil(filteredItems.length / ITEMS_PER_PAGE);
+  const pageStartIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const pageEndIndex = pageStartIndex + ITEMS_PER_PAGE;
+  const paginatedItems = filteredItems.slice(pageStartIndex, pageEndIndex);
+  const paginationStart = filteredItems.length === 0 ? 0 : pageStartIndex + 1;
+  const paginationEnd = Math.min(pageEndIndex, filteredItems.length);
+
   const handleCheckboxToggle = (originalIdx) => {
     const isSelectedNow = !selectedRows[originalIdx];
     setSelectedRows(prev => {
@@ -629,7 +642,7 @@ const OtdSkip = () => {
       {refreshing && (<div className="fixed top-0 left-0 right-0 h-1 z-[101] bg-gray-100 overflow-hidden"><div className="h-full bg-primary animate-shimmer" style={{ width: '40%' }}></div></div>)}
 
       <div className="erp-table-container max-w-[1200px] mx-auto">
-        <div className="hidden md:block overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300 max-h-[460px] overflow-y-auto">
+        <div className="hidden md:block overflow-x-auto scrollbar-thin scrollbar-thumb-gray-300">
           <table className="erp-table min-w-[1200px]">
             <thead className="erp-table-thead">
               <tr className="erp-table-tr">
@@ -683,8 +696,8 @@ const OtdSkip = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 text-sm">
-              {loading ? (<TableSkeleton cols={activeTab === 'pending' ? 14 : 10} />) : filteredItems.length === 0 ? (<tr><td colSpan={activeTab === 'pending' ? 14 : 10} className="px-6 py-20 text-center text-gray-400 italic text-sm font-bold">No items found.</td></tr>) : null}
-              {!loading && filteredItems.map((item, idx) => {
+              {loading ? (<TableSkeleton cols={activeTab === 'pending' ? 14 : 10} />) : paginatedItems.length === 0 ? (<tr><td colSpan={activeTab === 'pending' ? 14 : 10} className="px-6 py-20 text-center text-gray-400 italic text-sm font-bold">No items found.</td></tr>) : null}
+              {!loading && paginatedItems.map((item, idx) => {
                 const originalIdx = item.originalIndex;
                 const isSelected = activeTab === 'pending' && !!selectedRows[originalIdx];
                 const edit = editData[originalIdx] || {};
@@ -764,18 +777,35 @@ const OtdSkip = () => {
                   </tr>
                 );
               })}
+              {!loading && Array.from({ length: Math.max(0, ITEMS_PER_PAGE - paginatedItems.length) }).map((_, i) => (
+                <tr key={`empty-${i}`}><td colSpan={activeTab === 'pending' ? 14 : 10} className="h-16"></td></tr>
+              ))}
             </tbody>
           </table>
         </div>
+        {!loading && (
+          <div className="hidden md:block">
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filteredItems.length}
+              startIndex={paginationStart}
+              endIndex={paginationEnd}
+              onPageChange={setCurrentPage}
+              className="border-t border-slate-100"
+            />
+          </div>
+        )}
+
         {/* Mobile View */}
         {loading && <MobileSkeleton />}
         <div className="md:hidden space-y-3 p-1">
-          {!loading && filteredItems.length === 0 && (
+          {!loading && paginatedItems.length === 0 && (
             <div className="bg-white p-10 text-center rounded-xl border border-dashed border-gray-200">
               <p className="text-gray-400 italic text-sm">No items found.</p>
             </div>
           )}
-          {!loading && filteredItems.map((item, idx) => {
+          {!loading && paginatedItems.map((item, idx) => {
             const originalIdx = item.originalIndex;
             const isSelected = activeTab === 'pending' && !!selectedRows[originalIdx];
             const edit = editData[originalIdx] || {};
@@ -928,6 +958,17 @@ const OtdSkip = () => {
               </div>
             );
           })}
+          {!loading && (
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={filteredItems.length}
+              startIndex={paginationStart}
+              endIndex={paginationEnd}
+              onPageChange={setCurrentPage}
+              className="bg-white border-t border-slate-200 rounded-t-xl shadow-sm"
+            />
+          )}
         </div>
 
       </div>

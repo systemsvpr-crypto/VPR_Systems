@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import DeleteModal from '@/components/ui/DeleteModal';
+import Pagination from '@/components/ui/Pagination';
 import { cn } from '@/lib/utils';
 import {
     Select,
@@ -889,19 +890,3 @@ const MobileProductCard = ({ product, godowns, user, onEdit, onDelete, onToggle 
     </div>
 );
 
-const Pagination = ({ currentPage, totalPages, totalItems, startIndex, endIndex, onPageChange, className }) => (
-    <div className={`flex flex-col sm:flex-row items-center justify-between p-4 gap-4 ${className}`}>
-        <p className="text-sm text-slate-500">
-            Showing <span className="font-medium text-slate-900">{startIndex}</span> to <span className="font-medium text-slate-900">{endIndex}</span> of <span className="font-medium text-slate-900">{totalItems}</span> results
-        </p>
-        <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={() => onPageChange(currentPage - 1)} disabled={currentPage === 1} className="h-9 w-9 border-slate-200">
-                <span className="text-slate-600">‹</span>
-            </Button>
-            <span className="text-sm font-medium">{currentPage} / {totalPages}</span>
-            <Button variant="outline" size="icon" onClick={() => onPageChange(currentPage + 1)} disabled={currentPage === totalPages} className="h-9 w-9 border-slate-200">
-                <span className="text-slate-600">›</span>
-            </Button>
-        </div>
-    </div>
-);

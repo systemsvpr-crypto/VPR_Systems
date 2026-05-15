@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import DeleteModal from '@/components/ui/DeleteModal';
+import Pagination from '@/components/ui/Pagination';
 import { cn } from '@/lib/utils';
 
 const ITEMS_PER_PAGE = 10;
@@ -47,6 +48,7 @@ const MasterProduct = () => {
             const { data, error } = await supabase
                 .from('master_product')
                 .select('*')
+                .eq('is_active', true)
                 .order('created_at', { ascending: false });
             if (error) throw error;
             setItems(data || []);
@@ -54,6 +56,8 @@ const MasterProduct = () => {
             const { data: products, error: prodError } = await supabase
                 .from('products')
                 .select('master_product_id')
+                .eq('is_active', true)
+                .order('id')
                 .limit(10000);
             if (prodError) throw prodError;
 
@@ -234,6 +238,13 @@ const MasterProduct = () => {
         if (!variantModal) return;
         setSavingVariants(true);
         try {
+            // Save previously linked IDs for rollback
+            const { data: prevLinked } = await supabase
+                .from('products')
+                .select('id')
+                .eq('master_product_id', variantModal.id);
+            const prevIds = (prevLinked || []).map(p => p.id);
+
             const { error: unlinkError } = await supabase
                 .from('products')
                 .update({ master_product_id: null })
@@ -245,7 +256,14 @@ const MasterProduct = () => {
                     .from('products')
                     .update({ master_product_id: variantModal.id })
                     .in('id', Array.from(selectedVariantIds));
-                if (linkError) throw linkError;
+                if (linkError) {
+                    // Rollback: restore previous links
+                    await supabase
+                        .from('products')
+                        .update({ master_product_id: variantModal.id })
+                        .in('id', prevIds);
+                    throw linkError;
+                }
             }
 
             toast.success('Variants updated');
@@ -422,20 +440,23 @@ const MasterProduct = () => {
                                     </tr>
                                 ))
                             )}
+                            {!loading && Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
+                                <tr key={`empty-${i}`}><td colSpan="4" className="h-16"></td></tr>
+                            ))}
                         </tbody>
                     </table>
                 </div>
 
-                {totalPages > 1 && (
-                    <div className="flex items-center justify-between p-4 border-t border-slate-100">
-                        <p className="text-sm text-slate-500">
-                            Page <span className="font-medium text-slate-900">{currentPage}</span> of <span className="font-medium text-slate-900">{totalPages}</span>
-                        </p>
-                        <div className="flex items-center gap-2">
-                            <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1}>Previous</Button>
-                            <Button variant="outline" size="sm" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages}>Next</Button>
-                        </div>
-                    </div>
+                {!loading && filteredItems.length > 0 && (
+                    <Pagination
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        totalItems={filteredItems.length}
+                        startIndex={(currentPage - 1) * ITEMS_PER_PAGE + 1}
+                        endIndex={Math.min(currentPage * ITEMS_PER_PAGE, filteredItems.length)}
+                        onPageChange={setCurrentPage}
+                        className="border-t border-slate-100"
+                    />
                 )}
             </div>
 

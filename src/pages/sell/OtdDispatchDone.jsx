@@ -5,6 +5,9 @@ import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
 import { supabase } from '../../supabase';
 import { whatsappService } from '../../services/whatsappService';
+import Pagination from '@/components/ui/Pagination';
+
+const ITEMS_PER_PAGE = 10;
 
 // --- Format date for display (e.g., 25-Feb-2026) ---
 const formatDisplayDate = (dateStr) => {
@@ -33,6 +36,7 @@ const OtdDispatchDone = () => {
   const [clientFilter, setClientFilter] = useState('');
   const [godownFilter, setGodownFilter] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+  const [currentPage, setCurrentPage] = useState(1);
   const [isSaving, setIsSaving] = useState(false);
 
   // --- Data state ---
@@ -167,6 +171,8 @@ const OtdDispatchDone = () => {
     setEditData({});
   }, [activeTab]);
 
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, clientFilter, godownFilter, activeTab]);
+
   const isLoading = loadingOrders || loadingHistory;
   const isRefreshing = refreshingOrders || refreshingHistory;
 
@@ -232,6 +238,14 @@ const OtdDispatchDone = () => {
     [historyItems, searchTerm, clientFilter, godownFilter, getSortedItems]
   );
 
+  const activeFilteredItems = activeTab === 'pending' ? filteredAndSortedPending : filteredAndSortedHistory;
+  const totalPages = Math.ceil(activeFilteredItems.length / ITEMS_PER_PAGE);
+  const pageStartIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const pageEndIndex = pageStartIndex + ITEMS_PER_PAGE;
+  const currentItems = activeFilteredItems.slice(pageStartIndex, pageEndIndex);
+  const paginationStart = activeFilteredItems.length === 0 ? 0 : pageStartIndex + 1;
+  const paginationEnd = Math.min(pageEndIndex, activeFilteredItems.length);
+
   const handleCheckboxToggle = useCallback((id) => {
     setSelectedRows(prev => ({ ...prev, [id]: !prev[id] }));
   }, []);
@@ -251,7 +265,6 @@ const OtdDispatchDone = () => {
     setIsSaving(true);
     try {
       const now = new Date().toISOString();
-      const selectedIds = Object.keys(selectedRows).filter(id => selectedRows[id]);
       const rowsToLog = [];
       const updates = [];
 
@@ -633,23 +646,23 @@ const OtdDispatchDone = () => {
         </div>
 
         {/* Row 2: Filters & Actions */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-t border-slate-50 pt-6">
+        <div className="flex flex-col sm:flex-row justify-between gap-4 items-start sm:items-center">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 max-w-3xl">
             <div className="relative group">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors" />
+              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors" />
               <input
                 type="text"
-                placeholder="Search Client or Item..."
+                placeholder="Search..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full h-10 pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-primary/5 focus:border-primary outline-none text-sm font-medium transition-all"
+                className="w-full h-[42px] pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none text-sm transition-all"
               />
             </div>
-            <SearchableDropdown value={clientFilter} onChange={setClientFilter} options={allUniqueClients} allLabel="All Clients" className="h-10" />
-            <SearchableDropdown value={godownFilter} onChange={setGodownFilter} options={allUniqueGodowns} allLabel="All Godowns" className="h-10" />
+            <div className="h-[42px]"><SearchableDropdown value={clientFilter} onChange={setClientFilter} options={allUniqueClients} allLabel="All Clients" className="w-full h-full" focusColor="primary" /></div>
+            <div className="h-[42px]"><SearchableDropdown value={godownFilter} onChange={setGodownFilter} options={allUniqueGodowns} allLabel="All Godowns" className="w-full h-full" focusColor="primary" /></div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button 
               onClick={handleRefresh} 
               disabled={isRefreshing || isSaving} 
@@ -690,7 +703,7 @@ const OtdDispatchDone = () => {
 
       {/* Table */}
       <div className="erp-table-container max-w-[1400px] mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="hidden md:block relative overflow-x-auto custom-scrollbar max-h-[600px] overflow-y-auto">
+        <div className="hidden md:block relative overflow-x-auto custom-scrollbar">
           <table className="erp-table">
             <thead className="erp-table-thead">
               <tr>
@@ -729,7 +742,7 @@ const OtdDispatchDone = () => {
             <tbody className="divide-y divide-slate-100">
               {loadingOrders || loadingHistory ? (
                 <TableSkeleton cols={activeTab === 'pending' ? 12 : 9} />
-              ) : (activeTab === 'pending' ? filteredAndSortedPending : filteredAndSortedHistory).length === 0 ? (
+              ) : currentItems.length === 0 ? (
                 <tr>
                   <td colSpan="14" className="px-6 py-24 text-center">
                     <div className="flex flex-col items-center gap-4">
@@ -744,7 +757,7 @@ const OtdDispatchDone = () => {
                   </td>
                 </tr>
               ) : (
-                (activeTab === 'pending' ? filteredAndSortedPending : filteredAndSortedHistory).map((item) => {
+                currentItems.map((item) => {
                   const itemId = item.id;
                   const isSelected = activeTab === 'pending' && !!selectedRows[itemId];
                   return (
@@ -884,16 +897,32 @@ const OtdDispatchDone = () => {
                   );
                 })
               )}
+              {!(loadingOrders || loadingHistory) && Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
+                <tr key={`empty-${i}`}><td colSpan="14" className="h-16"></td></tr>
+              ))}
             </tbody>
           </table>
           <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-gray-100 to-transparent pointer-events-none opacity-30"></div>
         </div>
+        {!(loadingOrders || loadingHistory) && (
+          <div className="hidden md:block">
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={activeFilteredItems.length}
+              startIndex={paginationStart}
+              endIndex={paginationEnd}
+              onPageChange={setCurrentPage}
+              className="border-t border-slate-100"
+            />
+          </div>
+        )}
 
         {/* Mobile view */}
         <div className="md:hidden">
           {loadingOrders || loadingHistory ? (
             <MobileSkeleton />
-          ) : (activeTab === 'pending' ? filteredAndSortedPending : filteredAndSortedHistory).length === 0 ? (
+          ) : currentItems.length === 0 ? (
             <div className="px-6 py-20 text-center">
               <div className="flex flex-col items-center gap-3">
                 <div className="p-4 bg-slate-50 rounded-full text-slate-200"><ClipboardList size={32} /></div>
@@ -902,7 +931,7 @@ const OtdDispatchDone = () => {
             </div>
           ) : (
             <div className="divide-y divide-slate-100 p-2">
-              {(activeTab === 'pending' ? filteredAndSortedPending : filteredAndSortedHistory).map((item) => {
+              {currentItems.map((item) => {
                 const itemId = item.id;
                 const isSelected = activeTab === 'pending' && !!selectedRows[itemId];
                 return (
@@ -960,6 +989,17 @@ const OtdDispatchDone = () => {
                 );
               })}
             </div>
+          )}
+          {!(loadingOrders || loadingHistory) && (
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={activeFilteredItems.length}
+              startIndex={paginationStart}
+              endIndex={paginationEnd}
+              onPageChange={setCurrentPage}
+              className="bg-white border-t border-slate-200 rounded-t-xl shadow-sm"
+            />
           )}
         </div>
       </div>

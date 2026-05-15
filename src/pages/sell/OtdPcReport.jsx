@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { X, Loader, Save, RefreshCcw, ChevronUp, ChevronDown } from 'lucide-react';
+import { X, Loader, Save, RefreshCcw, ChevronUp, ChevronDown, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../supabase';
+import Pagination from '@/components/ui/Pagination';
+
+const ITEMS_PER_PAGE = 10;
 
 // --- Skeleton Components ---
 const TableSkeleton = ({ cols = 9 }) => (
@@ -34,6 +37,7 @@ const OtdPcReport = () => {
         remarks: ''
     });
     const [sortConfig, setSortConfig] = useState({ key: 'orderNumber', direction: 'desc' });
+    const [currentPage, setCurrentPage] = useState(1);
 
     const formatDisplayDate = (dateStr) => {
         if (!dateStr || dateStr === '-') return '-';
@@ -153,6 +157,15 @@ const OtdPcReport = () => {
         return result;
     }, [items, searchTerm, sortConfig]);
 
+    useEffect(() => { setCurrentPage(1); }, [searchTerm]);
+
+    const totalPages = Math.ceil(sortedItems.length / ITEMS_PER_PAGE);
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const endIndex = startIndex + ITEMS_PER_PAGE;
+    const currentItems = sortedItems.slice(startIndex, endIndex);
+    const paginationStart = sortedItems.length === 0 ? 0 : startIndex + 1;
+    const paginationEnd = Math.min(endIndex, sortedItems.length);
+
     const requestSort = (key) => {
         setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
     };
@@ -181,10 +194,8 @@ const OtdPcReport = () => {
                     </button>
                 </div>
                 <div className="relative max-w-sm w-full">
-                    <input type="text" placeholder="Search..." value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-md focus:ring-2 focus:ring-primary/20 outline-none text-sm transition-all" />
-                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                    </div>
+                    <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors" />
+                    <input type="text" placeholder="Search..." value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)} className="w-full h-[42px] pl-10 pr-4 bg-slate-50 border border-slate-200 rounded-md focus:ring-2 focus:ring-primary/20 outline-none text-sm transition-all" />
                 </div>
             </div>
 
@@ -215,8 +226,8 @@ const OtdPcReport = () => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 text-[13px]">
-                            {isLoading ? <TableSkeleton cols={9} /> : sortedItems.length === 0 ? <tr><td colSpan="9" className="p-20 text-center italic text-gray-400">No pending orders in tracking.</td></tr> : (
-                                sortedItems.map((item) => (
+                            {isLoading ? <TableSkeleton cols={9} /> : currentItems.length === 0 ? <tr><td colSpan="9" className="p-20 text-center italic text-gray-400">No pending orders in tracking.</td></tr> : (
+                                currentItems.map((item) => (
                                     <tr key={item.id} className="hover:bg-gray-50/50 transition-colors border-b border-gray-50 last:border-0 h-16">
                                         <td className="px-6 py-3 text-center">
                                             <button onClick={() => openReportModal(item)} className="px-3 py-1 bg-[#68d306] text-white rounded text-xs font-bold hover:bg-[#5bb805] shadow-sm transform active:scale-95 transition-all">Update</button>
@@ -232,9 +243,23 @@ const OtdPcReport = () => {
                                     </tr>
                                 ))
                             )}
+                            {!isLoading && Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
+                                <tr key={`empty-${i}`}><td colSpan="9" className="h-16"></td></tr>
+                            ))}
                         </tbody>
                     </table>
                 </div>
+                {!isLoading && (
+                    <Pagination
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        totalItems={sortedItems.length}
+                        startIndex={paginationStart}
+                        endIndex={paginationEnd}
+                        onPageChange={setCurrentPage}
+                        className="border-t border-gray-200"
+                    />
+                )}
             </div>
 
             {/* Modal - Exactly like Screenshot 2 */}
