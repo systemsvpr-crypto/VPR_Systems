@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { BellRing, History, Save, X, ChevronUp, ChevronDown, RefreshCw, Search } from 'lucide-react';
+import { BellRing, History, Save, X, ChevronUp, ChevronDown, RefreshCw, Search, CheckCircle, XCircle } from 'lucide-react';
 import SearchableDropdown from '../../components/SearchableDropdown';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
@@ -20,6 +20,8 @@ const OtdInformBefore = () => {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState(null);
+    const [customerPhoneMap, setCustomerPhoneMap] = useState({});
+    const [whatsAppModal, setWhatsAppModal] = useState({ isOpen: false, status: 'sending', currentClient: '', phoneNumber: '', progress: 0, total: 0 });
 
     const abortControllerRef = useRef(null);
 
@@ -138,9 +140,30 @@ const OtdInformBefore = () => {
         fetchInformData();
     }, [fetchInformData]);
 
+    const fetchCustomers = useCallback(async () => {
+        try {
+            const { data, error } = await supabase
+                .from('master_customers')
+                .select('customer_name, customer_number');
+            if (error) throw error;
+            const phoneMap = {};
+            (data || []).forEach(c => {
+                if (c.customer_name) phoneMap[c.customer_name] = c.customer_number || '-';
+            });
+            setCustomerPhoneMap(phoneMap);
+        } catch (err) {
+            console.error('fetchCustomers error:', err);
+        }
+    }, []);
+
     const handleRefresh = useCallback(() => {
         fetchInformData(true);
-    }, [fetchInformData]);
+        fetchCustomers();
+    }, [fetchInformData, fetchCustomers]);
+
+    useEffect(() => {
+        fetchCustomers();
+    }, [fetchCustomers]);
 
     const allUniqueClients = useMemo(() =>
         [...new Set([...pendingItems.map(o => o.clientName), ...historyItems.map(h => h.clientName)])].sort(),
@@ -220,25 +243,46 @@ const OtdInformBefore = () => {
             return;
         }
 
-        setIsSaving(true);
-        try {
-            // Group selected items by client for bulk notification
-            const selectedItemsDetails = pendingItems.filter(item => selectedIds.includes(String(item.id)));
-            const groupedByClient = selectedItemsDetails.reduce((acc, item) => {
-                const client = item.clientName;
-                if (!acc[client]) acc[client] = [];
-                acc[client].push(item);
-                return acc;
-            }, {});
+        // Group selected items by client for bulk notification
+        const selectedItemsDetails = pendingItems.filter(item => selectedIds.includes(String(item.id)));
+        const groupedByClient = selectedItemsDetails.reduce((acc, item) => {
+            const client = item.clientName;
+            if (!acc[client]) acc[client] = [];
+            acc[client].push(item);
+            return acc;
+        }, {});
 
+        setIsSaving(true);
+        const clientCount = Object.keys(groupedByClient).length;
+        setWhatsAppModal({
+            isOpen: true,
+            status: 'sending',
+            currentClient: '',
+            phoneNumber: '',
+            progress: 0,
+            total: clientCount
+        });
+
+        try {
             const successfulIds = [];
+            let currentIdx = 0;
             
             // 1. Send WhatsApp Notifications First
             for (const clientName in groupedByClient) {
                 const items = groupedByClient[clientName];
+                const clientPhone = customerPhoneMap[clientName] || '';
+                
+                currentIdx++;
+                setWhatsAppModal(prev => ({
+                    ...prev,
+                    currentClient: clientName,
+                    phoneNumber: clientPhone,
+                    progress: currentIdx
+                }));
+
                 try {
                     console.log(`Attempting WhatsApp for ${clientName}`);
-                    await whatsappService.sendBulkDispatchNotification('9691207533', {
+                    await whatsappService.sendBulkDispatchNotification(clientPhone || '9691207533', {
                         customerName: clientName,
                         orderNumbers: items.map(i => i.orderNo),
                         items: items.map(i => ({
@@ -255,6 +299,7 @@ const OtdInformBefore = () => {
                     console.error(`WhatsApp failed for ${clientName}:`, wsError);
                     const errorMsg = wsError.response?.data?.error?.message || wsError.message || 'Unknown error';
                     toast.error(`WhatsApp failed for ${clientName}: ${errorMsg}`);
+                    // We continue with other clients even if one fails
                 }
             }
 
@@ -270,8 +315,10 @@ const OtdInformBefore = () => {
                     .in('id', successfulIds);
 
                 if (dbError) throw dbError;
+                setWhatsAppModal(prev => ({ ...prev, status: 'success' }));
                 toast.success(`${successfulIds.length} notifications confirmed and recorded.`);
             } else {
+                setWhatsAppModal(prev => ({ ...prev, status: 'error', error: 'No notifications were sent.' }));
                 toast.error('No notifications were sent. Database not updated.');
             }
 
@@ -279,6 +326,7 @@ const OtdInformBefore = () => {
             await fetchInformData(true);
         } catch (error) {
             console.error('Operation failed:', error);
+            setWhatsAppModal(prev => ({ ...prev, status: 'error', error: error.message }));
             toast.error('Operation failed: ' + error.message);
         } finally {
             setIsSaving(false);
@@ -408,9 +456,82 @@ const OtdInformBefore = () => {
                     </table>
                 </div>
             </div>
-            {isSaving && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-white/40 backdrop-blur-md">
+            {isSaving && !whatsAppModal.isOpen && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-white/40 backdrop-blur-md">
                 <RefreshCw size={40} className="animate-spin text-primary" />
             </div>}
+
+            {/* WhatsApp Status Modal */}
+            {whatsAppModal.isOpen && (
+                <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300" />
+                    <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 flex flex-col items-center text-center animate-in zoom-in-95 duration-200">
+                        {whatsAppModal.status === 'sending' ? (
+                            <>
+                                <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-6 relative">
+                                    <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+                                    <RefreshCw size={32} className="text-primary animate-pulse" />
+                                </div>
+                                <h3 className="text-xl font-bold text-slate-900 mb-2">Sending Notifications</h3>
+                                <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-4">
+                                    Client {whatsAppModal.progress} of {whatsAppModal.total}
+                                </p>
+                                <p className="text-slate-500 mb-6">
+                                    Notifying <span className="font-bold text-slate-900">{whatsAppModal.currentClient}</span> at <span className="font-bold text-primary">{whatsAppModal.phoneNumber || 'N/A'}</span>
+                                </p>
+                                <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                                    <div 
+                                        className="h-full bg-primary transition-all duration-500" 
+                                        style={{ width: `${(whatsAppModal.progress / whatsAppModal.total) * 100}%` }}
+                                    />
+                                </div>
+                            </>
+                        ) : whatsAppModal.status === 'success' ? (
+                            <>
+                                <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-6">
+                                    <CheckCircle size={40} className="text-green-600 animate-bounce" />
+                                </div>
+                                <h3 className="text-xl font-bold text-slate-900 mb-2">Notifications Sent!</h3>
+                                <p className="text-slate-500 mb-8">
+                                    Bulk WhatsApp messages successfully sent to all selected clients.
+                                </p>
+                                <button
+                                    onClick={() => setWhatsAppModal({ ...whatsAppModal, isOpen: false })}
+                                    className="w-full py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition-colors shadow-lg shadow-green-200"
+                                >
+                                    Great, Thanks!
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mb-6">
+                                    <XCircle size={40} className="text-red-600" />
+                                </div>
+                                <h3 className="text-xl font-bold text-slate-900 mb-2">Sending Completed with Errors</h3>
+                                <p className="text-slate-500 mb-8">
+                                    {whatsAppModal.error || "Some notifications could not be sent. Please check individual toast messages for details."}
+                                </p>
+                                <button
+                                    onClick={() => setWhatsAppModal({ ...whatsAppModal, isOpen: false })}
+                                    className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-colors"
+                                >
+                                    Close
+                                </button>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            <style>{`
+                @keyframes progress-loading {
+                    0% { transform: translateX(-100%); }
+                    100% { transform: translateX(100%); }
+                }
+                .animate-progress-loading {
+                    animation: progress-loading 1.5s infinite linear;
+                    width: 50%;
+                }
+            `}</style>
         </div>
     );
 };

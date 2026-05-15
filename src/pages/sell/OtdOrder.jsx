@@ -41,6 +41,8 @@ const OtdOrder = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
   const [initialLoading, setInitialLoading] = useState(true);
+  const [customerPhoneMap, setCustomerPhoneMap] = useState({});
+  const [whatsAppModal, setWhatsAppModal] = useState({ isOpen: false, status: 'sending', clientName: '', phoneNumber: '' });
 
   // --- External Sheets Data ---
   const [loadingStock, setLoadingStock] = useState(false);
@@ -170,9 +172,15 @@ const OtdOrder = () => {
     try {
       const [productsData, customersData, godownsData] = await Promise.all([
         fetchAllRows('products', 'name, godown_id', 'name'),
-        fetchAllRows('master_customers', 'customer_name', 'customer_name'),
+        fetchAllRows('master_customers', 'customer_name, customer_number', 'customer_name'),
         fetchAllRows('godowns', 'name, godown_id', 'name'),
       ]);
+
+      const phoneMap = {};
+      customersData.forEach(c => {
+        if (c.customer_name) phoneMap[c.customer_name] = c.customer_number || '-';
+      });
+      setCustomerPhoneMap(phoneMap);
 
       const mapping = {};
       productsData.forEach(p => {
@@ -407,16 +415,27 @@ const OtdOrder = () => {
 
       if (error) throw error;
 
+      // Show WhatsApp Sending Dialog
+      const clientPhone = customerPhoneMap[formData.clientName] || '';
+      setWhatsAppModal({
+        isOpen: true,
+        status: 'sending',
+        clientName: formData.clientName,
+        phoneNumber: clientPhone
+      });
+
       // Send WhatsApp Notification
       try {
-        await whatsappService.sendOrderCreationNotification('9691207533', {
+        await whatsappService.sendOrderCreationNotification(clientPhone || '9691207533', {
           customerName: formData.clientName,
           orderNo: formData.orderNo,
           items: formData.items,
           orderDate: formData.orderDate
         });
+        setWhatsAppModal(prev => ({ ...prev, status: 'success' }));
       } catch (wsError) {
         console.error('WhatsApp failed:', wsError);
+        setWhatsAppModal(prev => ({ ...prev, status: 'error', error: wsError.message }));
         toast.error(`WhatsApp notification failed: ${wsError.message}`);
       }
 
@@ -945,6 +964,62 @@ const OtdOrder = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* WhatsApp Status Modal */}
+      {whatsAppModal.isOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300" />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 flex flex-col items-center text-center animate-in zoom-in-95 duration-200">
+            {whatsAppModal.status === 'sending' ? (
+              <>
+                <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-6 relative">
+                   <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+                   <RefreshCw size={32} className="text-primary animate-pulse" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">Sending WhatsApp Notification</h3>
+                <p className="text-slate-500 mb-6">
+                  Notifying <span className="font-bold text-slate-900">{whatsAppModal.clientName}</span> at <span className="font-bold text-primary">{whatsAppModal.phoneNumber || 'N/A'}</span>
+                </p>
+                <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                  <div className="h-full bg-primary animate-progress-loading" />
+                </div>
+              </>
+            ) : whatsAppModal.status === 'success' ? (
+              <>
+                <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-6">
+                   <CheckCircle size={40} className="text-green-600 animate-bounce" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">Notification Sent!</h3>
+                <p className="text-slate-500 mb-8">
+                  WhatsApp message successfully sent to <span className="font-bold text-slate-900">{whatsAppModal.clientName}</span>
+                </p>
+                <button
+                  onClick={() => setWhatsAppModal({ ...whatsAppModal, isOpen: false })}
+                  className="w-full py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition-colors shadow-lg shadow-green-200"
+                >
+                  Great, Thanks!
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mb-6">
+                   <XCircle size={40} className="text-red-600" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">Sending Failed</h3>
+                <p className="text-slate-500 mb-8">
+                  {whatsAppModal.error || "Could not send notification."}
+                </p>
+                <button
+                  onClick={() => setWhatsAppModal({ ...whatsAppModal, isOpen: false })}
+                  className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-colors"
+                >
+                  Close
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
