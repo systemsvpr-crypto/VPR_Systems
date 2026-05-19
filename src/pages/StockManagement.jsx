@@ -162,16 +162,10 @@ const StockManagement = () => {
         resetForm();
     };
 
-    const generateEntryId = async () => {
-        try {
-            const { data, error } = await supabase.rpc('generate_stock_entry_id');
-            if (error) throw error;
-            setFormData(prev => ({ ...prev, entry_id: data }));
-        } catch (error) {
-            const count = entries.length + 1;
-            const date = new Date().toISOString().split('T')[0].replace(/-/g, '');
-            setFormData(prev => ({ ...prev, entry_id: `STK-${date}-${count.toString().padStart(4, '0')}` }));
-        }
+    const generateEntryId = () => {
+        const count = entries.length + 1;
+        const date = new Date().toISOString().split('T')[0].replace(/-/g, '');
+        setFormData(prev => ({ ...prev, entry_id: `STK-${date}-${count.toString().padStart(4, '0')}` }));
     };
 
     const handleInputChange = (e) => {
@@ -501,48 +495,50 @@ const StockManagement = () => {
                             <StatItem label="Total Entries" value={entries.length} />
                         </div>
 
-                        <div className="flex items-center gap-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full lg:w-auto">
                             <div className="relative w-full sm:w-64">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
                                 <Input
                                     type="text"
                                     placeholder="Search entries..."
-                                    className="pl-9"
+                                    className="pl-9 w-full bg-white"
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                 />
                             </div>
 
-                            <Select value={filterType} onValueChange={setFilterType}>
-                                <SelectTrigger className="w-[150px] h-10">
-                                    <SelectValue placeholder="All Types" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectGroup>
-                                        <SelectLabel>Type</SelectLabel>
-                                        <SelectItem value="all">All Types</SelectItem>
-                                        <SelectItem value="in">Stock In</SelectItem>
-                                        <SelectItem value="out">Stock Out</SelectItem>
-                                    </SelectGroup>
-                                </SelectContent>
-                            </Select>
+                            <div className="grid grid-cols-2 gap-2 w-full sm:w-auto">
+                                <Select value={filterType} onValueChange={setFilterType}>
+                                    <SelectTrigger className="w-full sm:w-[150px] h-10 bg-white">
+                                        <SelectValue placeholder="All Types" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectGroup>
+                                            <SelectLabel>Type</SelectLabel>
+                                            <SelectItem value="all">All Types</SelectItem>
+                                            <SelectItem value="in">Stock In</SelectItem>
+                                            <SelectItem value="out">Stock Out</SelectItem>
+                                        </SelectGroup>
+                                    </SelectContent>
+                                </Select>
 
-                            <Select value={filterGodown} onValueChange={setFilterGodown}>
-                                <SelectTrigger className="w-[160px] h-10">
-                                    <SelectValue placeholder="Godown" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectGroup>
-                                        <SelectItem value="all">All Godowns</SelectItem>
-                                        {godowns.map(g => (
-                                            <SelectItem key={g.godown_id} value={g.godown_id}>{g.name}</SelectItem>
-                                        ))}
-                                    </SelectGroup>
-                                </SelectContent>
-                            </Select>
+                                <Select value={filterGodown} onValueChange={setFilterGodown}>
+                                    <SelectTrigger className="w-full sm:w-[160px] h-10 bg-white">
+                                        <SelectValue placeholder="Godown" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectGroup>
+                                            <SelectItem value="all">All Godowns</SelectItem>
+                                            {godowns.map(g => (
+                                                <SelectItem key={g.godown_id} value={g.godown_id}>{g.name}</SelectItem>
+                                            ))}
+                                        </SelectGroup>
+                                    </SelectContent>
+                                </Select>
+                            </div>
 
                             {!loading && (
-                                <Button onClick={() => handleOpenModal()} className="gap-2 px-4 shadow-sm font-medium">
+                                <Button onClick={() => handleOpenModal()} className="w-full sm:w-auto gap-2 px-4 shadow-sm font-medium shrink-0 h-10">
                                     <Plus size={20} />
                                     <span>New Entry</span>
                                 </Button>
