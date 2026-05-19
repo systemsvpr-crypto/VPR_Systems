@@ -50,6 +50,9 @@ const ProtectedRoute = ({ children }) => {
     // stock-management visible if user has any sub-tab access
     (currentPath === 'stock-management' &&
       ['products', 'godowns', 'transporters'].some(p => allowedPages.includes(p))) ||
+    // stock-movement visible if user has stock-movement, live-stock, or stock-management access
+    (currentPath === 'stock-movement' &&
+      ['stock-movement', 'live-stock', 'live-stock-dashboard', 'stock-management'].some(p => allowedPages.includes(p))) ||
     // master visible if user has any sub-tab access
     (currentPath === 'master' &&
       ['products', 'product-type', 'godowns', 'transporters', 'customers', 'vendors'].some(p => allowedPages.includes(p))) ||
