@@ -21,23 +21,32 @@ const ProtectedRoute = ({ children }) => {
 
   const isSuperAdmin = roleUpper === 'SUPER ADMIN' || roleUpper === 'SUPER_ADMIN';
 
+  // Normalize current path (strip leading slash)
+  const currentPath = pathname === '/' ? '/' : pathname.substring(1);
+
+  // The settings page is restricted to Admin or Super Admin only
+  const isSettingsPath = currentPath === 'settings' || currentPath.startsWith('settings/');
+
+  if (isSettingsPath) {
+    if (isAdmin || isSuperAdmin) {
+      return <>{children}</>;
+    } else {
+      return <Navigate to="/my-profile" replace />;
+    }
+  }
+
   // SUPER ADMIN bypasses ALL permission checks — full access to everything
   if (isSuperAdmin) {
     return <>{children}</>;
   }
 
-  // Admins NO LONGER bypass permission checks — they must have specific page_access
-  // unless it's a core page like profile or the home root.
-
-  // Non-admins: check page_access array
+  // Non-admins and Admins check page_access array for other pages
   const allowedPages = Array.isArray(user.page_access) ? user.page_access : [];
-
-  // Normalize current path (strip leading slash)
-  const currentPath = pathname === '/' ? '/' : pathname.substring(1);
 
   const isAllowed =
     currentPath === '/' ||
     allowedPages.includes(currentPath) ||
+    currentPath === 'my-profile' ||
     // stock-management visible if user has any sub-tab access
     (currentPath === 'stock-management' &&
       ['products', 'godowns', 'transporters'].some(p => allowedPages.includes(p))) ||

@@ -54,6 +54,127 @@ const Products = ({ isTab = false }) => {
     const [stats, setStats] = useState({ total: 0, active: 0 });
     const [totalFiltered, setTotalFiltered] = useState(0);
 
+    // Bulk Edit Opening Balances States
+    const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+    const [allProductsForBulk, setAllProductsForBulk] = useState([]);
+    const [bulkOpenings, setBulkOpenings] = useState({});
+    const [loadingBulkProducts, setLoadingBulkProducts] = useState(false);
+    const [bulkSearch, setBulkSearch] = useState('');
+    const [savingBulk, setSavingBulk] = useState(false);
+
+    const handleOpenBulkModal = async () => {
+        setLoadingBulkProducts(true);
+        setIsBulkModalOpen(true);
+        setBulkSearch('');
+        try {
+            const { data, error } = await supabase
+                .from('products')
+                .select('*')
+                .eq('is_active', true)
+                .order('name', { ascending: true })
+                .limit(10000);
+            if (error) throw error;
+            setAllProductsForBulk(data || []);
+            
+            const initialOpenings = {};
+            (data || []).forEach(p => {
+                initialOpenings[p.product_id] = p.opening_quantity || 0;
+            });
+            setBulkOpenings(initialOpenings);
+        } catch (err) {
+            toast.error('Failed to load products');
+            setIsBulkModalOpen(false);
+        } finally {
+            setLoadingBulkProducts(false);
+        }
+    };
+
+    const handleBulkSaveOpenings = async () => {
+        setSavingBulk(true);
+        try {
+            const { data: txns, error: txnError } = await supabase
+                .from('stock_management')
+                .select('product_id, transaction_type, quantity, godown_id, from_location')
+                .limit(100000);
+            if (txnError) throw txnError;
+
+            const txnsByProduct = {};
+            (txns || []).forEach(t => {
+                if (!txnsByProduct[t.product_id]) {
+                    txnsByProduct[t.product_id] = [];
+                }
+                txnsByProduct[t.product_id].push(t);
+            });
+
+            const changedList = Object.keys(bulkOpenings).map(productId => {
+                const prod = allProductsForBulk.find(p => p.product_id === productId);
+                const newOpening = parseFloat(bulkOpenings[productId]) || 0;
+                return { prod, newOpening };
+            }).filter(item => item.prod && item.prod.opening_quantity !== item.newOpening);
+
+            if (changedList.length === 0) {
+                toast.success('No changes to save');
+                setIsBulkModalOpen(false);
+                return;
+            }
+
+            for (const item of changedList) {
+                const { prod, newOpening } = item;
+                const targetGodown = prod.godown_id;
+                const prodTxns = txnsByProduct[prod.product_id] || [];
+
+                let in_stock = 0;
+                let out_stock = 0;
+                prodTxns.forEach(t => {
+                    if (t.godown_id === targetGodown && t.transaction_type === 'in') {
+                        in_stock += parseFloat(t.quantity) || 0;
+                    }
+                    if (t.godown_id === targetGodown && t.transaction_type === 'out') {
+                        out_stock += parseFloat(t.quantity) || 0;
+                    }
+                    if (t.from_location === targetGodown) {
+                        out_stock += parseFloat(t.quantity) || 0;
+                    }
+                });
+
+                const mux = parseFloat(prod.mux) || 0;
+                const newClosing = newOpening + in_stock - out_stock;
+                const newQuantity = (newClosing * mux).toFixed(3);
+
+                const { error: updateError } = await supabase
+                    .from('products')
+                    .update({
+                        opening_quantity: newOpening,
+                        closing_quantity: newClosing,
+                        quantity: parseFloat(newQuantity),
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('product_id', prod.product_id);
+                
+                if (updateError) throw updateError;
+            }
+
+            toast.success('All opening quantities updated successfully!');
+            setIsBulkModalOpen(false);
+            fetchProducts();
+            fetchStats();
+        } catch (err) {
+            console.error('Error saving bulk openings:', err);
+            toast.error(`Failed to save: ${err.message}`);
+        } finally {
+            setSavingBulk(false);
+        }
+    };
+
+    const filteredBulkProducts = useMemo(() => {
+        if (!bulkSearch) return allProductsForBulk;
+        const term = bulkSearch.toLowerCase();
+        return allProductsForBulk.filter(p => 
+            p.name?.toLowerCase().includes(term) ||
+            p.product_id?.toLowerCase().includes(term)
+        );
+    }, [allProductsForBulk, bulkSearch]);
+
     useEffect(() => {
         fetchStats();
         const fetchGodowns = async () => {
@@ -373,10 +494,20 @@ const Products = ({ isTab = false }) => {
                         </Select>
 
                         {!loading && (
-                            <Button onClick={() => handleOpenModal()} className="gap-2 px-4 shadow-sm font-medium">
-                                <Plus size={20} />
-                                <span>Add Product</span>
-                            </Button>
+                            <div className="flex gap-2 shrink-0">
+                                <Button 
+                                    onClick={handleOpenBulkModal} 
+                                    variant="outline" 
+                                    className="gap-2 px-4 shadow-sm font-medium border-slate-200 hover:bg-slate-50"
+                                >
+                                    <Layers size={18} className="text-primary" />
+                                    <span>Bulk Opening Qty</span>
+                                </Button>
+                                <Button onClick={() => handleOpenModal()} className="gap-2 px-4 shadow-sm font-medium">
+                                    <Plus size={20} />
+                                    <span>Add Product</span>
+                                </Button>
+                            </div>
                         )}
                     </div>
                 </div>
@@ -658,6 +789,113 @@ const Products = ({ isTab = false }) => {
                 itemLabel={itemToDelete?.name}
                 loading={isDeleting}
             />
+
+            {isBulkModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsBulkModalOpen(false)}></div>
+                    <div className="relative bg-white rounded-2xl shadow-xl w-full sm:max-w-4xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200 overflow-hidden">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0 bg-slate-50/50 rounded-t-2xl">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+                                    <Layers size={22} />
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-bold text-slate-800">Bulk Edit Opening Balances</h2>
+                                    <p className="text-xs text-slate-500">Update opening quantities for multiple products simultaneously.</p>
+                                </div>
+                            </div>
+                            <Button variant="ghost" size="icon" type="button" onClick={() => setIsBulkModalOpen(false)} className="rounded-full text-slate-400 hover:text-slate-600 transition-colors">
+                                <X size={20} />
+                            </Button>
+                        </div>
+
+                        <div className="p-4 border-b border-slate-100 bg-white shrink-0 flex flex-col sm:flex-row gap-3 items-center">
+                            <div className="relative w-full sm:w-72">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
+                                <Input
+                                    type="text"
+                                    placeholder="Search products..."
+                                    className="pl-9 h-10"
+                                    value={bulkSearch}
+                                    onChange={(e) => setBulkSearch(e.target.value)}
+                                />
+                            </div>
+                            <div className="text-xs text-slate-400 font-medium sm:ml-auto">
+                                Showing {filteredBulkProducts.length} of {allProductsForBulk.length} products
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                            {loadingBulkProducts ? (
+                                <div className="text-center py-12 text-slate-500 text-sm">Loading products...</div>
+                            ) : filteredBulkProducts.length === 0 ? (
+                                <div className="text-center py-12 text-slate-500 text-sm">No products found.</div>
+                            ) : (
+                                <div className="erp-table-container">
+                                    <table className="erp-table">
+                                        <thead className="erp-table-thead">
+                                            <tr className="erp-table-tr">
+                                                <th className="erp-table-th">Product Details</th>
+                                                <th className="erp-table-th">Godown</th>
+                                                <th className="erp-table-th">MUX</th>
+                                                <th className="erp-table-th align-center text-center">Opening Qty</th>
+                                                <th className="erp-table-th align-right text-right">Computed Qty</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {filteredBulkProducts.map((product) => {
+                                                const currentVal = bulkOpenings[product.product_id] ?? 0;
+                                                const muxVal = parseFloat(product.mux) || 0;
+                                                const computedWeight = (currentVal * muxVal).toFixed(3);
+
+                                                return (
+                                                    <tr key={product.product_id} className="erp-table-tr">
+                                                        <td className="erp-table-td">
+                                                            <div className="font-bold text-slate-900 text-sm">{product.name}</div>
+                                                            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{product.product_id}</div>
+                                                        </td>
+                                                        <td className="erp-table-td text-[11px] font-bold text-slate-500 uppercase">
+                                                            {godowns.find(g => g.godown_id === product.godown_id)?.name || product.godown_id || '-'}
+                                                        </td>
+                                                        <td className="erp-table-td text-slate-500 font-mono text-sm">
+                                                            {product.mux || '0'}
+                                                        </td>
+                                                        <td className="erp-table-td text-center">
+                                                            <Input
+                                                                type="number"
+                                                                value={currentVal}
+                                                                onChange={(e) => {
+                                                                    const val = e.target.value;
+                                                                    setBulkOpenings(prev => ({
+                                                                        ...prev,
+                                                                        [product.product_id]: val === '' ? '' : parseFloat(val)
+                                                                    }));
+                                                                }}
+                                                                className="w-32 h-10 border-slate-200 focus:bg-white text-center font-bold mx-auto"
+                                                                placeholder="0"
+                                                            />
+                                                        </td>
+                                                        <td className="erp-table-td align-right text-right font-black text-primary">
+                                                            {computedWeight} KG
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="p-4 sm:px-6 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex justify-end gap-3 shrink-0">
+                            <Button type="button" variant="outline" onClick={() => setIsBulkModalOpen(false)}>Cancel</Button>
+                            <Button onClick={handleBulkSaveOpenings} disabled={savingBulk || loadingBulkProducts}>
+                                {savingBulk ? 'Saving changes...' : 'Save All Opening Qty'}
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

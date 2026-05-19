@@ -632,7 +632,13 @@ const Settings = () => {
                                                 <label className="block text-sm font-medium text-slate-700">Page Access</label>
                                                 <div className="flex gap-2 text-xs">
                                                     <Button variant="link" size="sm" type="button" onClick={() => {
-                                                        const allPageIds = PAGES.flatMap(cat => cat.items.map(p => p.id));
+                                                        const roleUpper = formData.role?.toUpperCase();
+                                                        const isUserRole = roleUpper === 'USER';
+                                                        const allPageIds = PAGES.flatMap(cat => 
+                                                            cat.items
+                                                                .filter(p => !isUserRole || p.id !== 'settings')
+                                                                .map(p => p.id)
+                                                        );
                                                         setFormData(prev => ({ ...prev, page_access: allPageIds }));
                                                     }} className="text-primary h-auto p-0">Select All</Button>
                                                     <span className="text-slate-300">|</span>
@@ -640,55 +646,65 @@ const Settings = () => {
                                                 </div>
                                             </div>
                                             <div className="flex flex-col gap-6 bg-slate-50 p-4 rounded-lg border border-slate-200">
-                                                {PAGES.map(cat => (
-                                                    <div key={cat.category} className="space-y-3">
-                                                        <div className="flex items-center gap-2 border-b border-slate-200 pb-1">
-                                                            <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">{cat.category}</h4>
-                                                            <div className="flex gap-2 text-[10px]">
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        const catIds = cat.items.map(i => i.id);
-                                                                        setFormData(prev => ({
-                                                                            ...prev,
-                                                                            page_access: [...new Set([...(prev.page_access || []), ...catIds])]
-                                                                        }));
-                                                                    }}
-                                                                    className="text-primary hover:underline"
-                                                                >
-                                                                    Select All
-                                                                </button>
-                                                                <span className="text-slate-300">|</span>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        const catIds = cat.items.map(i => i.id);
-                                                                        setFormData(prev => ({
-                                                                            ...prev,
-                                                                            page_access: (prev.page_access || []).filter(id => !catIds.includes(id))
-                                                                        }));
-                                                                    }}
-                                                                    className="text-slate-400 hover:underline"
-                                                                >
-                                                                    Clear
-                                                                </button>
+                                                {PAGES.map(cat => {
+                                                    const roleUpper = formData.role?.toUpperCase();
+                                                    const isUserRole = roleUpper === 'USER';
+                                                    const filteredItems = isUserRole 
+                                                        ? cat.items.filter(item => item.id !== 'settings')
+                                                        : cat.items;
+
+                                                    if (filteredItems.length === 0) return null;
+
+                                                    return (
+                                                        <div key={cat.category} className="space-y-3">
+                                                            <div className="flex items-center gap-2 border-b border-slate-200 pb-1">
+                                                                 <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">{cat.category}</h4>
+                                                                 <div className="flex gap-2 text-[10px]">
+                                                                     <button
+                                                                         type="button"
+                                                                         onClick={() => {
+                                                                             const catIds = filteredItems.map(i => i.id);
+                                                                             setFormData(prev => ({
+                                                                                 ...prev,
+                                                                                 page_access: [...new Set([...(prev.page_access || []), ...catIds])]
+                                                                             }));
+                                                                         }}
+                                                                         className="text-primary hover:underline"
+                                                                     >
+                                                                         Select All
+                                                                     </button>
+                                                                     <span className="text-slate-300">|</span>
+                                                                     <button
+                                                                         type="button"
+                                                                         onClick={() => {
+                                                                             const catIds = filteredItems.map(i => i.id);
+                                                                             setFormData(prev => ({
+                                                                                 ...prev,
+                                                                                 page_access: (prev.page_access || []).filter(id => !catIds.includes(id))
+                                                                             }));
+                                                                         }}
+                                                                         className="text-slate-400 hover:underline"
+                                                                     >
+                                                                         Clear
+                                                                     </button>
+                                                                 </div>
+                                                            </div>
+                                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+                                                                {filteredItems.map(page => (
+                                                                    <label key={page.id} className="flex items-center gap-2 cursor-pointer group">
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={formData.page_access?.includes(page.id) || false}
+                                                                            onChange={() => handlePageAccessToggle(page.id)}
+                                                                            className="rounded text-primary focus:ring-primary w-4 h-4"
+                                                                        />
+                                                                        <span className="text-sm text-slate-600 group-hover:text-slate-900 transition-colors">{page.label}</span>
+                                                                    </label>
+                                                                ))}
                                                             </div>
                                                         </div>
-                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
-                                                            {cat.items.map(page => (
-                                                                <label key={page.id} className="flex items-center gap-2 cursor-pointer group">
-                                                                    <input
-                                                                        type="checkbox"
-                                                                        checked={formData.page_access?.includes(page.id) || false}
-                                                                        onChange={() => handlePageAccessToggle(page.id)}
-                                                                        className="rounded text-primary focus:ring-primary w-4 h-4"
-                                                                    />
-                                                                    <span className="text-sm text-slate-600 group-hover:text-slate-900 transition-colors">{page.label}</span>
-                                                                </label>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                ))}
+                                                    );
+                                                })}
                                             </div>
                                         </div>
 

@@ -222,37 +222,7 @@ const MyProfile = () => {
           </h1>
           <p className="text-slate-500 mt-1 text-sm font-medium">Manage your professional identity and security settings.</p>
         </div>
-        <div className="flex items-center gap-3">
-          {isEditing ? (
-            <>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setIsEditing(false);
-                  setFormData({ ...profileData, password: '' });
-                }}
-                className="px-6 py-2.5 h-auto text-slate-600 bg-white border-slate-200 rounded-xl hover:bg-slate-50 font-bold transition-all"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleSave}
-                className="gap-2 px-6 py-2.5 h-auto bg-primary text-primary-foreground rounded-xl hover:bg-primary/90 shadow-md shadow-primary/20 font-bold transition-all"
-              >
-                <Save size={18} />
-                <span>Save Changes</span>
-              </Button>
-            </>
-          ) : (
-            <Button
-              onClick={() => setIsEditing(true)}
-              className="gap-2 px-6 py-2.5 h-auto bg-white text-primary border border-primary/20 rounded-xl hover:bg-primary/5 shadow-sm font-bold transition-all"
-            >
-              <Edit2 size={18} />
-              <span>Edit Profile</span>
-            </Button>
-          )}
-        </div>
+
       </div>
 
       <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">

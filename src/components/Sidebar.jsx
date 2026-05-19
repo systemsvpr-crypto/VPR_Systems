@@ -115,7 +115,18 @@ const Sidebar = ({ onClose }) => {
   const isSuperAdmin = roleUpper === 'SUPER ADMIN' || roleUpper === 'SUPER_ADMIN';
 
   const hasAccess = (pageId) => {
-    // SUPER ADMIN always has access
+    // Settings page is restricted to Admin or Super Admin only
+    if (pageId === 'settings') {
+      const currentRole = (user?.role || '').toUpperCase().trim();
+      return (
+        currentRole === 'ADMIN' ||
+        currentRole === 'SUPER ADMIN' ||
+        currentRole === 'SUPER_ADMIN' ||
+        user?.Admin === 'Yes'
+      );
+    }
+
+    // SUPER ADMIN always has access to all other pages
     if (isSuperAdmin) return true;
 
     // Core pages accessible to everyone logged in
