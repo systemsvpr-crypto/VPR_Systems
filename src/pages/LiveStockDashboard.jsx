@@ -327,25 +327,25 @@ const LiveStockDashboard = () => {
             <main className="flex-1 p-4 lg:p-8 space-y-6 max-w-[1600px] mx-auto w-full animate-in fade-in duration-700">
                 {/* Global Controls */}
                 <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-4 flex flex-col lg:flex-row items-center gap-4">
-                    <div className="flex flex-1 items-center gap-4 w-full">
-                        <div className="relative flex-1">
+                    <div className="flex flex-col sm:flex-row flex-1 items-center gap-4 w-full">
+                        <div className="relative w-full sm:flex-1">
                             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                             <Input
                                 type="text"
                                 placeholder="Search products, IDs or attributes..."
-                                className="pl-11 h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all rounded-xl text-sm font-medium"
+                                className="pl-11 h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all rounded-xl text-sm font-medium w-full"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
                         </div>
                         
-                        <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-1 h-11 shrink-0">
-                            <div className="px-3 border-r border-slate-200 flex items-center gap-2">
+                        <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-1 h-11 w-full sm:w-auto justify-between sm:justify-start shrink-0">
+                            <div className="flex-1 sm:flex-initial px-3 border-r border-slate-200 flex items-center justify-center sm:justify-start gap-2">
                                 <MapPin size={14} className="text-primary" />
                                 <select
                                     value={filterGodown}
                                     onChange={(e) => setFilterGodown(e.target.value)}
-                                    className="bg-transparent text-xs font-black text-slate-700 focus:outline-none uppercase tracking-wider min-w-[140px]"
+                                    className="bg-transparent text-xs font-black text-slate-700 focus:outline-none uppercase tracking-wider min-w-[120px] sm:min-w-[140px] cursor-pointer"
                                 >
                                     <option value="">ALL GODOWNS</option>
                                     {godowns.map(g => (
@@ -353,21 +353,21 @@ const LiveStockDashboard = () => {
                                     ))}
                                 </select>
                             </div>
-                            <div className="w-[140px]">
+                            <div className="flex-1 sm:flex-initial w-[130px] sm:w-[140px]">
                                 <DatePicker
                                     value={summaryDate}
                                     onChange={(e) => setSummaryDate(e.target.value)}
                                     name="summaryDate"
-                                    className="border-none bg-transparent h-9 text-xs font-bold text-slate-700"
+                                    className="border-none bg-transparent h-9 text-xs font-bold text-slate-700 text-center sm:text-left"
                                 />
                             </div>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0 w-full lg:w-auto">
                         <button
                             onClick={handleExport}
-                            className="h-11 px-6 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10 flex items-center gap-2 group"
+                            className="h-11 px-6 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10 flex items-center justify-center gap-2 group w-full lg:w-auto"
                         >
                             <Download size={16} className="group-hover:-translate-y-0.5 transition-transform" />
                             Export Report

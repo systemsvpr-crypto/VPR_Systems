@@ -40,30 +40,34 @@ const StockLedger = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [viewMode, setViewMode] = useState('closing'); // closing, opening, inward, outward
 
-    const fetchGodowns = useCallback(async () => {
-        const { data } = await supabase.from('godowns').select('*').eq('is_active', true).order('name');
-        setGodowns(data || []);
-    }, []);
-
-    const fetchMasterProducts = useCallback(async () => {
-        const { data } = await supabase.from('master_product').select('*').eq('is_active', true).order('name');
-        const mpMap = {};
-        (data || []).forEach(mp => { mpMap[mp.id] = mp.name; });
-        setMasterProducts(mpMap);
-    }, []);
-
     const fetchData = useCallback(async (silent = false) => {
         if (!silent) setLoading(true);
         try {
-            const [prodRes, snapRes, txnRes] = await Promise.all([
+            const promises = [
                 supabase.from('products').select('*').eq('is_active', true).order('id').limit(10000),
                 supabase.from('daily_stock_summary').select('*').eq('date', selectedDate).limit(10000),
                 supabase.from('stock_management').select('*').eq('date', selectedDate).limit(10000)
-            ]);
+            ];
 
-            setProducts(prodRes.data || []);
-            setDailySnapshots(snapRes.data || []);
-            setTransactions(txnRes.data || []);
+            const shouldFetchMetadata = !silent;
+            if (shouldFetchMetadata) {
+                promises.push(supabase.from('godowns').select('*').eq('is_active', true).order('name'));
+                promises.push(supabase.from('master_product').select('*').eq('is_active', true).order('name'));
+            }
+
+            const results = await Promise.all(promises);
+
+            setProducts(results[0].data || []);
+            setDailySnapshots(results[1].data || []);
+            setTransactions(results[2].data || []);
+
+            if (shouldFetchMetadata && results[3] && results[4]) {
+                setGodowns(results[3].data || []);
+                
+                const mpMap = {};
+                (results[4].data || []).forEach(mp => { mpMap[mp.id] = mp.name; });
+                setMasterProducts(mpMap);
+            }
         } catch (error) {
             console.error('Error fetching ledger data:', error);
             if (!silent) toast.error('Failed to fetch stock ledger data');
@@ -71,11 +75,6 @@ const StockLedger = () => {
             if (!silent) setLoading(false);
         }
     }, [selectedDate]);
-
-    useEffect(() => {
-        fetchGodowns();
-        fetchMasterProducts();
-    }, [fetchGodowns, fetchMasterProducts]);
 
     useEffect(() => {
         fetchData();
@@ -381,10 +380,18 @@ const StockLedger = () => {
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center py-20">
-                <div className="flex flex-col items-center gap-3">
-                    <RefreshCcw size={32} className="animate-spin text-primary" />
-                    <p className="text-sm font-medium text-slate-500">Fetching live stock data...</p>
+            <div className="h-screen w-full flex items-center justify-center bg-[#f8fafc]">
+                <div className="flex flex-col items-center gap-4 p-8 bg-white/60 backdrop-blur-md border border-slate-200/50 rounded-3xl shadow-xl animate-in fade-in duration-300">
+                    <div className="relative">
+                        <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin w-12 h-12" />
+                        <div className="w-12 h-12 rounded-full border border-slate-100 flex items-center justify-center text-primary shadow-sm bg-white">
+                            <RefreshCcw size={20} className="animate-spin text-primary" style={{ animationDuration: '3s' }} />
+                        </div>
+                    </div>
+                    <div className="text-center space-y-1">
+                        <p className="text-sm font-black text-slate-800 tracking-tight uppercase">Loading Live Ledger</p>
+                        <p className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">Fetching live stock data...</p>
+                    </div>
                 </div>
             </div>
         );
@@ -434,27 +441,29 @@ const StockLedger = () => {
                 <div className="space-y-6 print:space-y-4">
                 {/* Single Row Controls Bar */}
                 <div className="flex flex-col lg:flex-row items-center gap-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm print:hidden">
-                    <div className="flex items-center gap-3 w-full lg:w-auto">
-                        <div className="w-[160px] shrink-0">
-                            <DatePicker
-                                value={selectedDate}
-                                onChange={(e) => setSelectedDate(e.target.value)}
-                                name="ledgerDate"
-                            />
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full lg:w-auto">
+                        <div className="flex gap-3 w-full sm:w-auto">
+                            <div className="w-1/2 sm:w-[160px] shrink-0">
+                                <DatePicker
+                                    value={selectedDate}
+                                    onChange={(e) => setSelectedDate(e.target.value)}
+                                    name="ledgerDate"
+                                />
+                            </div>
+                            <select
+                                value={selectedGodown}
+                                onChange={(e) => setSelectedGodown(e.target.value)}
+                                className="w-1/2 sm:w-[160px] sm:min-w-[140px] h-10 px-3 rounded-lg border border-slate-300 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/20 bg-white font-bold text-slate-700"
+                            >
+                                <option value="all">All Godowns</option>
+                                {godowns.map(g => (
+                                    <option key={g.godown_id} value={g.godown_id}>{g.name}</option>
+                                ))}
+                            </select>
                         </div>
-                        <select
-                            value={selectedGodown}
-                            onChange={(e) => setSelectedGodown(e.target.value)}
-                            className="h-10 px-3 rounded-lg border border-slate-300 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/20 bg-white font-bold text-slate-700 min-w-[140px]"
-                        >
-                            <option value="all">All Godowns</option>
-                            {godowns.map(g => (
-                                <option key={g.godown_id} value={g.godown_id}>{g.name}</option>
-                            ))}
-                        </select>
 
                         {/* View Mode Switcher */}
-                        <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 ml-1">
+                        <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 w-full sm:w-auto justify-between sm:justify-start">
                             {[
                                 { id: 'closing', label: 'Closing', icon: Package },
                                 { id: 'opening', label: 'Opening', icon: RefreshCcw },
@@ -465,14 +474,14 @@ const StockLedger = () => {
                                     key={mode.id}
                                     onClick={() => setViewMode(mode.id)}
                                     className={cn(
-                                        "px-2 py-1.5 rounded-md text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5",
+                                        "flex-1 sm:flex-initial px-2.5 py-1.5 rounded-md text-[10px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1.5",
                                         viewMode === mode.id 
                                             ? "bg-white text-primary shadow-sm" 
                                             : "text-slate-400 hover:text-slate-600"
                                     )}
                                 >
                                     <mode.icon size={12} className={cn(mode.color)} style={mode.rotate ? { transform: `rotate(${mode.rotate}deg)` } : {}} />
-                                    <span className="hidden xl:inline">{mode.label}</span>
+                                    <span className="hidden sm:inline">{mode.label}</span>
                                 </button>
                             ))}
                         </div>
