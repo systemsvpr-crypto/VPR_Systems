@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Edit2, X, Package, Trash2, ToggleLeft, ToggleRight, Layers, Tag, Weight, FileText, CheckCircle2, Info } from 'lucide-react';
+import { Search, Plus, Edit2, X, Package, Trash2, ToggleLeft, ToggleRight, Layers, Tag, Weight, FileText, CheckCircle2, Info, MapPin, RefreshCw } from 'lucide-react';
 import { supabase } from '../supabase';
 import useAuthStore from '../store/authStore';
 import toast from 'react-hot-toast';
@@ -61,32 +61,93 @@ const Products = ({ isTab = false }) => {
     const [loadingBulkProducts, setLoadingBulkProducts] = useState(false);
     const [bulkSearch, setBulkSearch] = useState('');
     const [savingBulk, setSavingBulk] = useState(false);
+    const [bulkPage, setBulkPage] = useState(1);
+    const [hasMoreBulk, setHasMoreBulk] = useState(true);
+    const [totalBulkCount, setTotalBulkCount] = useState(0);
 
-    const handleOpenBulkModal = async () => {
+    // Bulk Edit Godown States
+    const [isBulkGodownModalOpen, setIsBulkGodownModalOpen] = useState(false);
+    const [bulkGodowns, setBulkGodowns] = useState({});
+    const [bulkGodownGlobal, setBulkGodownGlobal] = useState('');
+
+    const fetchBulkProductsChunk = async (page = 1, isReset = false, search = '') => {
+        if (page === 1 && !isReset) return;
         setLoadingBulkProducts(true);
-        setIsBulkModalOpen(true);
-        setBulkSearch('');
         try {
-            const { data, error } = await supabase
+            let query = supabase
                 .from('products')
-                .select('*')
+                .select('*', { count: 'exact' })
                 .eq('is_active', true)
-                .order('name', { ascending: true })
-                .limit(10000);
-            if (error) throw error;
-            setAllProductsForBulk(data || []);
+                .order('name', { ascending: true });
             
-            const initialOpenings = {};
-            (data || []).forEach(p => {
-                initialOpenings[p.product_id] = p.opening_quantity || 0;
+            if (search) {
+                query = query.or(`name.ilike.%${search}%,product_id.ilike.%${search}%`);
+            }
+            
+            const from = (page - 1) * 100;
+            const to = from + 100 - 1;
+            
+            const { data, error, count } = await query.range(from, to);
+            if (error) throw error;
+            
+            if (count !== null) {
+                setTotalBulkCount(count);
+            }
+            
+            setAllProductsForBulk(prev => {
+                const updatedList = isReset ? (data || []) : [...prev, ...(data || [])];
+                
+                // Keep track of user's local edits in state so they aren't wiped
+                // when loading more products
+                setBulkOpenings(prevOpenings => {
+                    const nextOpenings = { ...prevOpenings };
+                    (data || []).forEach(p => {
+                        if (nextOpenings[p.product_id] === undefined) {
+                            nextOpenings[p.product_id] = p.opening_quantity || 0;
+                        }
+                    });
+                    return nextOpenings;
+                });
+
+                setBulkGodowns(prevGodowns => {
+                    const nextGodowns = { ...prevGodowns };
+                    (data || []).forEach(p => {
+                        if (nextGodowns[p.product_id] === undefined) {
+                            nextGodowns[p.product_id] = p.godown_id || '';
+                        }
+                    });
+                    return nextGodowns;
+                });
+                
+                return updatedList;
             });
-            setBulkOpenings(initialOpenings);
+            
+            setHasMoreBulk((data || []).length === 100);
+            setBulkPage(page);
         } catch (err) {
-            toast.error('Failed to load products');
-            setIsBulkModalOpen(false);
+            console.error('Failed to load bulk chunk:', err);
+            toast.error('Failed to load more products');
         } finally {
             setLoadingBulkProducts(false);
         }
+    };
+
+    const handleBulkScroll = (e) => {
+        if (loadingBulkProducts || !hasMoreBulk) return;
+        const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+        if (scrollHeight - scrollTop - clientHeight < 120) {
+            fetchBulkProductsChunk(bulkPage + 1, false, bulkSearch);
+        }
+    };
+
+    const handleOpenBulkModal = () => {
+        setAllProductsForBulk([]);
+        setBulkOpenings({});
+        setBulkSearch('');
+        setBulkPage(1);
+        setHasMoreBulk(true);
+        setIsBulkModalOpen(true);
+        fetchBulkProductsChunk(1, true, '');
     };
 
     const handleBulkSaveOpenings = async () => {
@@ -166,6 +227,110 @@ const Products = ({ isTab = false }) => {
         }
     };
 
+    const handleOpenBulkGodownModal = () => {
+        setAllProductsForBulk([]);
+        setBulkGodowns({});
+        setBulkSearch('');
+        setBulkGodownGlobal('');
+        setBulkPage(1);
+        setHasMoreBulk(true);
+        setIsBulkGodownModalOpen(true);
+        fetchBulkProductsChunk(1, true, '');
+    };
+
+    const handleApplyGlobalGodown = () => {
+        if (!bulkGodownGlobal) {
+            toast.error('Please select a godown first');
+            return;
+        }
+        const updated = { ...bulkGodowns };
+        filteredBulkProducts.forEach(p => {
+            updated[p.product_id] = bulkGodownGlobal;
+        });
+        setBulkGodowns(updated);
+        toast.success(`Set godown for ${filteredBulkProducts.length} filtered products!`);
+    };
+
+    const handleBulkSaveGodowns = async () => {
+        setSavingBulk(true);
+        try {
+            const changedList = Object.keys(bulkGodowns).map(productId => {
+                const prod = allProductsForBulk.find(p => p.product_id === productId);
+                const newGodownId = bulkGodowns[productId];
+                return { prod, newGodownId };
+            }).filter(item => item.prod && item.prod.godown_id !== item.newGodownId && item.newGodownId);
+
+            if (changedList.length === 0) {
+                toast.success('No changes to save');
+                setIsBulkGodownModalOpen(false);
+                return;
+            }
+
+            const changedProductIds = changedList.map(item => item.prod.product_id);
+
+            const { data: txns, error: txnError } = await supabase
+                .from('stock_management')
+                .select('product_id, transaction_type, quantity, godown_id, from_location')
+                .in('product_id', changedProductIds);
+
+            if (txnError) throw txnError;
+
+            const txnsByProduct = {};
+            (txns || []).forEach(t => {
+                if (!txnsByProduct[t.product_id]) {
+                    txnsByProduct[t.product_id] = [];
+                }
+                txnsByProduct[t.product_id].push(t);
+            });
+
+            for (const item of changedList) {
+                const { prod, newGodownId } = item;
+                const prodTxns = txnsByProduct[prod.product_id] || [];
+
+                let in_stock = 0;
+                let out_stock = 0;
+                prodTxns.forEach(t => {
+                    if (t.godown_id === newGodownId && t.transaction_type === 'in') {
+                        in_stock += parseFloat(t.quantity) || 0;
+                    }
+                    if (t.godown_id === newGodownId && t.transaction_type === 'out') {
+                        out_stock += parseFloat(t.quantity) || 0;
+                    }
+                    if (t.from_location === newGodownId) {
+                        out_stock += parseFloat(t.quantity) || 0;
+                    }
+                });
+
+                const opening = parseFloat(prod.opening_quantity) || 0;
+                const mux = parseFloat(prod.mux) || 0;
+                const newClosing = opening + in_stock - out_stock;
+                const newQuantity = (newClosing * mux).toFixed(3);
+
+                const { error: updateError } = await supabase
+                    .from('products')
+                    .update({
+                        godown_id: newGodownId,
+                        closing_quantity: newClosing,
+                        quantity: parseFloat(newQuantity),
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('product_id', prod.product_id);
+                
+                if (updateError) throw updateError;
+            }
+
+            toast.success('All product godowns updated successfully!');
+            setIsBulkGodownModalOpen(false);
+            fetchProducts();
+            fetchStats();
+        } catch (err) {
+            console.error('Error saving bulk godowns:', err);
+            toast.error(`Failed to save: ${err.message}`);
+        } finally {
+            setSavingBulk(false);
+        }
+    };
+
     const filteredBulkProducts = useMemo(() => {
         if (!bulkSearch) return allProductsForBulk;
         const term = bulkSearch.toLowerCase();
@@ -174,6 +339,14 @@ const Products = ({ isTab = false }) => {
             p.product_id?.toLowerCase().includes(term)
         );
     }, [allProductsForBulk, bulkSearch]);
+
+    useEffect(() => {
+        if (!isBulkModalOpen && !isBulkGodownModalOpen) return;
+        const timer = setTimeout(() => {
+            fetchBulkProductsChunk(1, true, bulkSearch);
+        }, 350);
+        return () => clearTimeout(timer);
+    }, [bulkSearch]);
 
     useEffect(() => {
         fetchStats();
@@ -466,44 +639,53 @@ const Products = ({ isTab = false }) => {
                         />
                     </div>
 
-                    <div className="flex items-center gap-3">
-                        <div className="relative w-full sm:w-64">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
-                            <Input
-                                type="text"
-                                placeholder="Search products..."
-                                className="pl-9"
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                            />
+                    <div className="flex flex-col md:flex-row md:items-center gap-3 w-full lg:w-auto">
+                        <div className="flex flex-col sm:flex-row gap-2 w-full">
+                            <div className="relative w-full sm:w-64">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
+                                <Input
+                                    type="text"
+                                    placeholder="Search products..."
+                                    className="pl-9 w-full bg-white"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                />
+                            </div>
+
+                            <Select value={filterStatus} onValueChange={setFilterStatus}>
+                                <SelectTrigger className="w-full sm:w-[140px] h-10 bg-white">
+                                    <SelectValue placeholder="All Status" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectGroup>
+                                        <SelectLabel>Status</SelectLabel>
+                                        <SelectItem value="all">All Status</SelectItem>
+                                        <SelectItem value="active">Active</SelectItem>
+                                        <SelectItem value="inactive">Inactive</SelectItem>
+                                    </SelectGroup>
+                                </SelectContent>
+                            </Select>
                         </div>
 
-
-                        <Select value={filterStatus} onValueChange={setFilterStatus}>
-                            <SelectTrigger className="w-[140px] h-10">
-                                <SelectValue placeholder="All Status" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectGroup>
-                                    <SelectLabel>Status</SelectLabel>
-                                    <SelectItem value="all">All Status</SelectItem>
-                                    <SelectItem value="active">Active</SelectItem>
-                                    <SelectItem value="inactive">Inactive</SelectItem>
-                                </SelectGroup>
-                            </SelectContent>
-                        </Select>
-
                         {!loading && (
-                            <div className="flex gap-2 shrink-0">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 md:flex gap-2 w-full sm:w-auto shrink-0">
                                 <Button 
                                     onClick={handleOpenBulkModal} 
                                     variant="outline" 
-                                    className="gap-2 px-4 shadow-sm font-medium border-slate-200 hover:bg-slate-50"
+                                    className="w-full md:w-auto gap-2 px-4 shadow-sm font-medium border-slate-200 hover:bg-slate-50 h-10"
                                 >
                                     <Layers size={18} className="text-primary" />
                                     <span>Bulk Opening Qty</span>
                                 </Button>
-                                <Button onClick={() => handleOpenModal()} className="gap-2 px-4 shadow-sm font-medium">
+                                <Button 
+                                    onClick={handleOpenBulkGodownModal} 
+                                    variant="outline" 
+                                    className="w-full md:w-auto gap-2 px-4 shadow-sm font-medium border-slate-200 hover:bg-slate-50 h-10"
+                                >
+                                    <MapPin size={18} className="text-primary" />
+                                    <span>Bulk Godown Edit</span>
+                                </Button>
+                                <Button onClick={() => handleOpenModal()} className="w-full md:w-auto gap-2 px-4 shadow-sm font-medium h-10">
                                     <Plus size={20} />
                                     <span>Add Product</span>
                                 </Button>
@@ -820,47 +1002,108 @@ const Products = ({ isTab = false }) => {
                                     onChange={(e) => setBulkSearch(e.target.value)}
                                 />
                             </div>
-                            <div className="text-xs text-slate-400 font-medium sm:ml-auto">
-                                Showing {filteredBulkProducts.length} of {allProductsForBulk.length} products
+                            <div className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full sm:ml-auto shrink-0 border border-slate-200 uppercase tracking-wider">
+                                Loaded {allProductsForBulk.length} of {totalBulkCount} total products
                             </div>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                            {loadingBulkProducts ? (
-                                <div className="text-center py-12 text-slate-500 text-sm">Loading products...</div>
+                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar" onScroll={handleBulkScroll}>
+                            {allProductsForBulk.length === 0 && loadingBulkProducts ? (
+                                <div className="py-24 flex flex-col items-center justify-center gap-3">
+                                    <RefreshCw className="animate-spin text-primary" size={28} />
+                                    <span className="text-sm font-bold text-slate-500 uppercase tracking-wider">Loading products...</span>
+                                </div>
                             ) : filteredBulkProducts.length === 0 ? (
-                                <div className="text-center py-12 text-slate-500 text-sm">No products found.</div>
+                                <div className="text-center py-12 text-slate-500 text-sm font-bold">No products found.</div>
                             ) : (
-                                <div className="erp-table-container">
-                                    <table className="erp-table">
-                                        <thead className="erp-table-thead">
-                                            <tr className="erp-table-tr">
-                                                <th className="erp-table-th">Product Details</th>
-                                                <th className="erp-table-th">Godown</th>
-                                                <th className="erp-table-th">MUX</th>
-                                                <th className="erp-table-th align-center text-center">Opening Qty</th>
-                                                <th className="erp-table-th align-right text-right">Computed Qty</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100">
-                                            {filteredBulkProducts.map((product) => {
-                                                const currentVal = bulkOpenings[product.product_id] ?? 0;
-                                                const muxVal = parseFloat(product.mux) || 0;
-                                                const computedWeight = (currentVal * muxVal).toFixed(3);
+                                <div className="space-y-4">
+                                    {/* Desktop View */}
+                                    <div className="hidden md:block erp-table-container">
+                                        <div className="overflow-x-auto custom-scrollbar">
+                                            <table className="erp-table">
+                                                <thead className="erp-table-thead">
+                                                    <tr className="erp-table-tr">
+                                                        <th className="erp-table-th">Product Details</th>
+                                                        <th className="erp-table-th">Godown</th>
+                                                        <th className="erp-table-th">MUX</th>
+                                                        <th className="erp-table-th align-center text-center">Opening Qty</th>
+                                                        <th className="erp-table-th align-right text-right">Computed Qty</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-100">
+                                                    {filteredBulkProducts.map((product) => {
+                                                        const currentVal = bulkOpenings[product.product_id] ?? 0;
+                                                        const muxVal = parseFloat(product.mux) || 0;
+                                                        const computedWeight = (currentVal * muxVal).toFixed(3);
 
-                                                return (
-                                                    <tr key={product.product_id} className="erp-table-tr">
-                                                        <td className="erp-table-td">
-                                                            <div className="font-bold text-slate-900 text-sm">{product.name}</div>
-                                                            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{product.product_id}</div>
-                                                        </td>
-                                                        <td className="erp-table-td text-[11px] font-bold text-slate-500 uppercase">
-                                                            {godowns.find(g => g.godown_id === product.godown_id)?.name || product.godown_id || '-'}
-                                                        </td>
-                                                        <td className="erp-table-td text-slate-500 font-mono text-sm">
-                                                            {product.mux || '0'}
-                                                        </td>
-                                                        <td className="erp-table-td text-center">
+                                                        return (
+                                                            <tr key={product.product_id} className="erp-table-tr">
+                                                                <td className="erp-table-td">
+                                                                    <div className="font-bold text-slate-900 text-sm">{product.name}</div>
+                                                                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{product.product_id}</div>
+                                                                </td>
+                                                                <td className="erp-table-td text-[11px] font-bold text-slate-500 uppercase">
+                                                                    {godowns.find(g => g.godown_id === product.godown_id)?.name || product.godown_id || '-'}
+                                                                </td>
+                                                                <td className="erp-table-td text-slate-500 font-mono text-sm">
+                                                                    {product.mux || '0'}
+                                                                </td>
+                                                                <td className="erp-table-td text-center">
+                                                                    <Input
+                                                                        type="number"
+                                                                        value={currentVal}
+                                                                        onChange={(e) => {
+                                                                            const val = e.target.value;
+                                                                            setBulkOpenings(prev => ({
+                                                                                ...prev,
+                                                                                [product.product_id]: val === '' ? '' : parseFloat(val)
+                                                                            }));
+                                                                        }}
+                                                                        className="w-32 h-10 border-slate-200 focus:bg-white text-center font-bold mx-auto"
+                                                                        placeholder="0"
+                                                                    />
+                                                                </td>
+                                                                <td className="erp-table-td align-right text-right font-black text-primary">
+                                                                    {computedWeight} KG
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+
+                                    {/* Mobile View */}
+                                    <div className="space-y-3 md:hidden">
+                                        {filteredBulkProducts.map((product) => {
+                                            const currentVal = bulkOpenings[product.product_id] ?? 0;
+                                            const muxVal = parseFloat(product.mux) || 0;
+                                            const computedWeight = (currentVal * muxVal).toFixed(3);
+
+                                            return (
+                                                <div key={product.product_id} className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">
+                                                    <div>
+                                                        <div className="font-bold text-slate-900 text-sm">{product.name}</div>
+                                                        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{product.product_id}</div>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-2 text-xs">
+                                                        <div>
+                                                            <span className="block text-slate-400 font-bold uppercase tracking-wider text-[9px]">Godown</span>
+                                                            <span className="font-bold text-slate-700 uppercase">
+                                                                {godowns.find(g => g.godown_id === product.godown_id)?.name || product.godown_id || '-'}
+                                                            </span>
+                                                        </div>
+                                                        <div>
+                                                            <span className="block text-slate-400 font-bold uppercase tracking-wider text-[9px]">MUX</span>
+                                                            <span className="font-bold text-slate-700 font-mono">
+                                                                {product.mux || '0'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-200">
+                                                        <div className="flex-1 max-w-[140px]">
+                                                            <span className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Opening Qty</span>
                                                             <Input
                                                                 type="number"
                                                                 value={currentVal}
@@ -871,18 +1114,26 @@ const Products = ({ isTab = false }) => {
                                                                         [product.product_id]: val === '' ? '' : parseFloat(val)
                                                                     }));
                                                                 }}
-                                                                className="w-32 h-10 border-slate-200 focus:bg-white text-center font-bold mx-auto"
+                                                                className="w-full h-10 border-slate-200 focus:bg-white text-center font-bold bg-white"
                                                                 placeholder="0"
                                                             />
-                                                        </td>
-                                                        <td className="erp-table-td align-right text-right font-black text-primary">
-                                                            {computedWeight} KG
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <span className="block text-slate-400 font-bold uppercase tracking-wider text-[9px]">Computed Qty</span>
+                                                            <span className="font-black text-primary text-sm">{computedWeight} KG</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    {loadingBulkProducts && (
+                                        <div className="py-4 flex items-center justify-center gap-2 bg-slate-50/50 border border-slate-100 rounded-xl animate-fadeIn">
+                                            <RefreshCw className="animate-spin text-primary" size={16} />
+                                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Fetching more products...</span>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -891,6 +1142,190 @@ const Products = ({ isTab = false }) => {
                             <Button type="button" variant="outline" onClick={() => setIsBulkModalOpen(false)}>Cancel</Button>
                             <Button onClick={handleBulkSaveOpenings} disabled={savingBulk || loadingBulkProducts}>
                                 {savingBulk ? 'Saving changes...' : 'Save All Opening Qty'}
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isBulkGodownModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsBulkGodownModalOpen(false)}></div>
+                    <div className="relative bg-white rounded-2xl shadow-xl w-full sm:max-w-4xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200 overflow-hidden">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0 bg-slate-50/50 rounded-t-2xl">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+                                    <MapPin size={22} />
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-bold text-slate-800">Bulk Edit Default Godowns</h2>
+                                    <p className="text-xs text-slate-500">Update default godown assignments for multiple products simultaneously.</p>
+                                </div>
+                            </div>
+                            <Button variant="ghost" size="icon" type="button" onClick={() => setIsBulkGodownModalOpen(false)} className="rounded-full text-slate-400 hover:text-slate-600 transition-colors">
+                                <X size={20} />
+                            </Button>
+                        </div>
+
+                        <div className="p-4 border-b border-slate-100 bg-white shrink-0 flex flex-col md:flex-row gap-4 items-center justify-between">
+                            <div className="relative w-full sm:w-72">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
+                                <Input
+                                    type="text"
+                                    placeholder="Search products..."
+                                    className="pl-9 h-10"
+                                    value={bulkSearch}
+                                    onChange={(e) => setBulkSearch(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full shrink-0 border border-slate-200 uppercase tracking-wider">
+                                Loaded {allProductsForBulk.length} of {totalBulkCount} total products
+                            </div>
+
+                            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl p-1 shrink-0 w-full sm:w-auto">
+                                <select
+                                    value={bulkGodownGlobal}
+                                    onChange={(e) => setBulkGodownGlobal(e.target.value)}
+                                    className="bg-transparent text-xs font-bold text-slate-700 focus:outline-none uppercase tracking-wider px-3 py-1.5 min-w-[160px] cursor-pointer"
+                                >
+                                    <option value="">Select Godown</option>
+                                    {godowns.map(g => (
+                                        <option key={g.godown_id} value={g.godown_id}>{g.name.toUpperCase()}</option>
+                                    ))}
+                                </select>
+                                <Button 
+                                    type="button" 
+                                    size="sm" 
+                                    onClick={handleApplyGlobalGodown}
+                                    className="text-[10px] font-black uppercase tracking-wider h-8"
+                                >
+                                    Apply to Filtered
+                                </Button>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar" onScroll={handleBulkScroll}>
+                            {allProductsForBulk.length === 0 && loadingBulkProducts ? (
+                                <div className="py-24 flex flex-col items-center justify-center gap-3">
+                                    <RefreshCw className="animate-spin text-primary" size={28} />
+                                    <span className="text-sm font-bold text-slate-500 uppercase tracking-wider">Loading products...</span>
+                                </div>
+                            ) : filteredBulkProducts.length === 0 ? (
+                                <div className="text-center py-12 text-slate-500 text-sm font-bold">No products found.</div>
+                            ) : (
+                                <div className="space-y-4">
+                                    {/* Desktop View */}
+                                    <div className="hidden md:block erp-table-container">
+                                        <div className="overflow-x-auto custom-scrollbar">
+                                            <table className="erp-table">
+                                                <thead className="erp-table-thead">
+                                                    <tr className="erp-table-tr">
+                                                        <th className="erp-table-th">Product Details</th>
+                                                        <th className="erp-table-th">Current Default Godown</th>
+                                                        <th className="erp-table-th">New Default Godown</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-100">
+                                                    {filteredBulkProducts.map((product) => {
+                                                        const currentVal = bulkGodowns[product.product_id] ?? '';
+
+                                                        return (
+                                                            <tr key={product.product_id} className="erp-table-tr">
+                                                                <td className="erp-table-td">
+                                                                    <div className="font-bold text-slate-900 text-sm">{product.name}</div>
+                                                                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{product.product_id}</div>
+                                                                </td>
+                                                                <td className="erp-table-td text-[11px] font-bold text-slate-400 uppercase">
+                                                                    {godowns.find(g => g.godown_id === product.godown_id)?.name || product.godown_id || '-'}
+                                                                </td>
+                                                                <td className="erp-table-td">
+                                                                    <select
+                                                                        value={currentVal}
+                                                                        onChange={(e) => {
+                                                                            const val = e.target.value;
+                                                                            setBulkGodowns(prev => ({
+                                                                                ...prev,
+                                                                                [product.product_id]: val
+                                                                            }));
+                                                                        }}
+                                                                        className="w-full sm:w-64 h-10 rounded-lg border border-slate-200 bg-white text-sm outline-none transition-all duration-200 focus:ring-2 focus:ring-primary/20 px-3 cursor-pointer uppercase font-bold"
+                                                                    >
+                                                                        <option value="">Select Godown</option>
+                                                                        {godowns.map(g => (
+                                                                            <option key={g.godown_id} value={g.godown_id}>
+                                                                                {g.name.toUpperCase()}
+                                                                            </option>
+                                                                        ))}
+                                                                    </select>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+
+                                    {/* Mobile View */}
+                                    <div className="space-y-3 md:hidden">
+                                        {filteredBulkProducts.map((product) => {
+                                            const currentVal = bulkGodowns[product.product_id] ?? '';
+
+                                            return (
+                                                <div key={product.product_id} className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">
+                                                    <div>
+                                                        <div className="font-bold text-slate-900 text-sm">{product.name}</div>
+                                                        <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{product.product_id}</div>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-2 text-xs">
+                                                        <div>
+                                                            <span className="block text-slate-400 font-bold uppercase tracking-wider text-[9px]">Current Default Godown</span>
+                                                            <span className="font-bold text-slate-700 uppercase">
+                                                                {godowns.find(g => g.godown_id === product.godown_id)?.name || product.godown_id || '-'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="space-y-1 pt-2 border-t border-slate-200">
+                                                        <span className="block text-slate-400 font-bold uppercase tracking-wider text-[9px]">New Default Godown</span>
+                                                        <select
+                                                            value={currentVal}
+                                                            onChange={(e) => {
+                                                                const val = e.target.value;
+                                                                setBulkGodowns(prev => ({
+                                                                    ...prev,
+                                                                    [product.product_id]: val
+                                                                }));
+                                                            }}
+                                                            className="w-full h-10 rounded-lg border border-slate-200 bg-white text-sm outline-none transition-all duration-200 focus:ring-2 focus:ring-primary/20 px-3 cursor-pointer uppercase font-bold"
+                                                        >
+                                                            <option value="">Select Godown</option>
+                                                            {godowns.map(g => (
+                                                                <option key={g.godown_id} value={g.godown_id}>
+                                                                    {g.name.toUpperCase()}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+
+                                    {loadingBulkProducts && (
+                                        <div className="py-4 flex items-center justify-center gap-2 bg-slate-50/50 border border-slate-100 rounded-xl animate-fadeIn">
+                                            <RefreshCw className="animate-spin text-primary" size={16} />
+                                            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Fetching more products...</span>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="p-4 sm:px-6 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex justify-end gap-3 shrink-0">
+                            <Button type="button" variant="outline" onClick={() => setIsBulkGodownModalOpen(false)}>Cancel</Button>
+                            <Button onClick={handleBulkSaveGodowns} disabled={savingBulk || loadingBulkProducts}>
+                                {savingBulk ? 'Saving changes...' : 'Save All Godowns'}
                             </Button>
                         </div>
                     </div>
