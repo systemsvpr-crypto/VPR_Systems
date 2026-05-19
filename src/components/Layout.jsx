@@ -6,6 +6,7 @@ import Header from './Header';
 const Layout = () => {
   const location = useLocation();
   const isLiveStock = location.pathname === '/live-stock';
+  const isStockMovement = location.pathname === '/stock-movement';
   const isFixedPage = false; // location.pathname.includes('settings');
 
   if (isLiveStock) {
@@ -18,17 +19,19 @@ const Layout = () => {
     );
   }
 
+  const hideGlobalHeader = isStockMovement;
+
   return (
     <div className="flex h-screen bg-gray-50 font-sans text-slate-900 selection:bg-primary/20">
       <Sidebar />
 
       {/* Main content wrapper */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden relative">
-        <Header />
+        {!hideGlobalHeader && <Header />}
 
         {/* Scrollable content area */}
-        <main className={`flex-1 flex flex-col p-4 sm:p-6 lg:p-8 custom-scrollbar ${isFixedPage ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-          <div className="flex-1 w-full max-w-7xl mx-auto flex flex-col">
+        <main className={`flex-1 flex flex-col custom-scrollbar ${isFixedPage ? 'overflow-hidden' : 'overflow-y-auto'} ${hideGlobalHeader ? 'p-0' : 'p-4 sm:p-6 lg:p-8'}`}>
+          <div className={`flex-1 w-full flex flex-col ${hideGlobalHeader ? 'max-w-none' : 'max-w-7xl mx-auto'}`}>
             <Outlet />
           </div>
         </main>

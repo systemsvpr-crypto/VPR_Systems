@@ -100,6 +100,7 @@ const Sidebar = ({ onClose }) => {
   const MENU_ITEMS = [
     { path: '/live-stock-dashboard', icon: LayoutDashboard, label: 'Live Stock Dashboard', id: 'live-stock-dashboard' },
     { path: '/live-stock', icon: ClipboardList, label: 'Live Stock Ledger', id: 'live-stock' },
+    { path: '/stock-movement', icon: ArrowRightLeft, label: 'Stock Movement Logs', id: 'stock-movement' },
     { path: '/stock-management', icon: TrendingUp, label: 'Stock', id: 'stock-management' },
     { path: '/sell', icon: BadgeDollarSign, label: 'Sales', id: 'sell' },
     { path: '/purchase', icon: ShoppingCart, label: 'Purchase', id: 'purchase-dashboard' },
@@ -162,6 +163,11 @@ const Sidebar = ({ onClose }) => {
       if (hasAccess('stock-management')) {
         acc.push(item);
       }
+    } else if (item.id === 'stock-movement') {
+      // Show Stock Movement Logs if user has access to stock-movement, live-stock, or stock-management
+      if (hasAccess('stock-movement') || hasAccess('live-stock') || hasAccess('stock-management')) {
+        acc.push(item);
+      }
     } else if (item.id === 'master') {
       // Show Master Config if user has access to any master tabs
       const MASTER_TABS = ['products', 'product-type', 'godowns', 'transporters', 'customers', 'vendors'];
@@ -199,7 +205,7 @@ return (
   <>
     {/* Mobile menu button */}
     <button
-      className={`md:hidden fixed top-4 left-4 z-50 p-2 text-slate-500 hover:text-slate-700 transition-all duration-300 ${isOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+      className={`md:hidden fixed top-4 left-4 z-[99] p-2 text-slate-500 hover:text-slate-700 transition-all duration-300 ${isOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
       onClick={() => setIsOpen(true)}
     >
       <Menu className="w-6 h-6" />
@@ -207,7 +213,7 @@ return (
 
     {/* Tablet menu button */}
     <button
-      className={`hidden md:block lg:hidden fixed top-4 left-4 z-50 p-2 text-slate-500 hover:text-slate-700 transition-all duration-300 ${isOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+      className={`hidden md:block lg:hidden fixed top-4 left-4 z-[99] p-2 text-slate-500 hover:text-slate-700 transition-all duration-300 ${isOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
       onClick={() => setIsOpen(true)}
     >
       <Menu className="w-6 h-6" />
