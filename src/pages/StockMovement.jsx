@@ -1175,8 +1175,9 @@ const StockMovement = () => {
                                                         </tr>
                                                         {isExpanded && (
                                                             <tr>
-                                                                <td colSpan="7" className="bg-slate-50/50 p-6 border-y border-slate-100">
-                                                                    <div className="space-y-4 pl-12 pr-6">
+                                                                <td className="bg-slate-50/50 border-y border-slate-100"></td>
+                                                                <td colSpan="6" className="bg-slate-50/50 p-6 pl-0 border-y border-slate-100">
+                                                                    <div className="space-y-4 pr-6">
                                                                         <div className="flex items-center justify-between border-b border-slate-200/80 pb-2">
                                                                             <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest">Specific Product Variants under {mp.name}</h4>
                                                                             <span className="text-[10px] text-slate-400 font-bold uppercase">Click a variant to view its transaction history</span>
@@ -1238,12 +1239,12 @@ const StockMovement = () => {
                                         return (
                                             <div key={mp.id || index} className="p-4 bg-white hover:bg-slate-50/30 transition-colors">
                                                 <div 
-                                                    className="flex items-start justify-between cursor-pointer gap-2"
+                                                    className="flex items-start justify-between cursor-pointer gap-4"
                                                     onClick={() => toggleMasterExpand(mp.id)}
                                                 >
-                                                    <div className="space-y-1">
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="font-extrabold text-slate-800 text-sm leading-tight">
+                                                    <div className="space-y-1 flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                            <span className="font-extrabold text-slate-800 text-sm leading-tight break-words">
                                                                 {mp.name}
                                                             </span>
                                                             <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 text-slate-500 font-black text-[9px] rounded-full shrink-0">
@@ -1286,11 +1287,11 @@ const StockMovement = () => {
                                                                         <div 
                                                                             key={cp.product_id}
                                                                             onClick={() => handleOpenDrilldown({ product_id: cp.product_id, godown_id: filterGodown })}
-                                                                            className="bg-slate-50/50 p-3 rounded-xl border border-slate-200 hover:border-primary transition-all duration-200 cursor-pointer flex justify-between items-center group/item"
+                                                                            className="bg-slate-50/50 p-3 rounded-xl border border-slate-200 hover:border-primary transition-all duration-200 cursor-pointer flex justify-between items-center gap-3 group/item"
                                                                         >
-                                                                            <div className="space-y-0.5">
-                                                                                <div className="flex items-center gap-1.5">
-                                                                                    <p className="text-xs font-bold text-slate-800">{cp.name}</p>
+                                                                            <div className="space-y-0.5 flex-1 min-w-0">
+                                                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                                                    <p className="text-xs font-bold text-slate-800 break-words">{cp.name}</p>
                                                                                     {cp.product_type && (
                                                                                         <span className="px-1 py-0.5 bg-white border border-slate-200 text-slate-500 font-black text-[8px] rounded uppercase shrink-0">
                                                                                             {cp.product_type}
@@ -1299,7 +1300,7 @@ const StockMovement = () => {
                                                                                 </div>
                                                                                 <p className="text-[8px] text-slate-400 font-mono">SKU: {cp.product_id}</p>
                                                                             </div>
-                                                                            <div className="flex items-center gap-3 text-right">
+                                                                            <div className="flex items-center gap-3 text-right shrink-0">
                                                                                 <div className="space-y-0.5">
                                                                                     <p className="text-[9px] font-black text-emerald-600">In: +{cpStats.in.toLocaleString()}</p>
                                                                                     <p className="text-[9px] font-black text-amber-600">Out: -{cpStats.out.toLocaleString()}</p>
