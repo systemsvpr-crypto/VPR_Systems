@@ -14,6 +14,7 @@ CREATE TABLE public.app_orders (
   intransit_qty integer DEFAULT 0,
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now()),
   submittedby text,
+  master_product_name text,
   CONSTRAINT app_orders_pkey PRIMARY KEY (id)
 );
 CREATE TABLE public.daily_stock_summary (

@@ -58,6 +58,7 @@ const Products = ({ isTab = false }) => {
     const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
     const [allProductsForBulk, setAllProductsForBulk] = useState([]);
     const [bulkOpenings, setBulkOpenings] = useState({});
+    const [bulkGodownFilter, setBulkGodownFilter] = useState('all');
     const [loadingBulkProducts, setLoadingBulkProducts] = useState(false);
     const [bulkSearch, setBulkSearch] = useState('');
     const [savingBulk, setSavingBulk] = useState(false);
@@ -84,8 +85,8 @@ const Products = ({ isTab = false }) => {
                 query = query.or(`name.ilike.%${search}%,product_id.ilike.%${search}%`);
             }
             
-            const from = (page - 1) * 100;
-            const to = from + 100 - 1;
+            const from = (page - 1) * 5000;
+            const to = from + 5000 - 1;
             
             const { data, error, count } = await query.range(from, to);
             if (error) throw error;
@@ -103,7 +104,7 @@ const Products = ({ isTab = false }) => {
                     const nextOpenings = { ...prevOpenings };
                     (data || []).forEach(p => {
                         if (nextOpenings[p.product_id] === undefined) {
-                            nextOpenings[p.product_id] = p.opening_quantity || 0;
+                            nextOpenings[p.product_id] = p.closing_quantity || 0;
                         }
                     });
                     return nextOpenings;
@@ -122,7 +123,7 @@ const Products = ({ isTab = false }) => {
                 return updatedList;
             });
             
-            setHasMoreBulk((data || []).length === 100);
+            setHasMoreBulk((data || []).length === 5000);
             setBulkPage(page);
         } catch (err) {
             console.error('Failed to load bulk chunk:', err);
@@ -144,6 +145,7 @@ const Products = ({ isTab = false }) => {
         setAllProductsForBulk([]);
         setBulkOpenings({});
         setBulkSearch('');
+        setBulkGodownFilter('all');
         setBulkPage(1);
         setHasMoreBulk(true);
         setIsBulkModalOpen(true);
@@ -153,10 +155,25 @@ const Products = ({ isTab = false }) => {
     const handleBulkSaveOpenings = async () => {
         setSavingBulk(true);
         try {
+            const changedList = Object.keys(bulkOpenings).map(productId => {
+                const prod = allProductsForBulk.find(p => p.product_id === productId);
+                const newClosing = parseFloat(bulkOpenings[productId]) || 0;
+                const newGodownId = bulkGodowns[productId] || prod?.godown_id;
+                return { prod, newClosing, newGodownId };
+            }).filter(item => item.prod && (item.prod.closing_quantity !== item.newClosing || item.prod.godown_id !== item.newGodownId));
+
+            if (changedList.length === 0) {
+                toast.success('No changes to save');
+                setIsBulkModalOpen(false);
+                return;
+            }
+
+            const changedProductIds = changedList.map(item => item.prod.product_id);
+
             const { data: txns, error: txnError } = await supabase
                 .from('stock_management')
                 .select('product_id, transaction_type, quantity, godown_id, from_location')
-                .limit(100000);
+                .in('product_id', changedProductIds);
             if (txnError) throw txnError;
 
             const txnsByProduct = {};
@@ -167,21 +184,9 @@ const Products = ({ isTab = false }) => {
                 txnsByProduct[t.product_id].push(t);
             });
 
-            const changedList = Object.keys(bulkOpenings).map(productId => {
-                const prod = allProductsForBulk.find(p => p.product_id === productId);
-                const newOpening = parseFloat(bulkOpenings[productId]) || 0;
-                return { prod, newOpening };
-            }).filter(item => item.prod && item.prod.opening_quantity !== item.newOpening);
-
-            if (changedList.length === 0) {
-                toast.success('No changes to save');
-                setIsBulkModalOpen(false);
-                return;
-            }
-
             for (const item of changedList) {
-                const { prod, newOpening } = item;
-                const targetGodown = prod.godown_id;
+                const { prod, newClosing, newGodownId } = item;
+                const targetGodown = newGodownId;
                 const prodTxns = txnsByProduct[prod.product_id] || [];
 
                 let in_stock = 0;
@@ -199,7 +204,7 @@ const Products = ({ isTab = false }) => {
                 });
 
                 const mux = parseFloat(prod.mux) || 0;
-                const newClosing = newOpening + in_stock - out_stock;
+                const newOpening = newClosing - in_stock + out_stock;
                 const newQuantity = (newClosing * mux).toFixed(3);
 
                 const { error: updateError } = await supabase
@@ -207,6 +212,7 @@ const Products = ({ isTab = false }) => {
                     .update({
                         opening_quantity: newOpening,
                         closing_quantity: newClosing,
+                        godown_id: targetGodown,
                         quantity: parseFloat(newQuantity),
                         updated_at: new Date().toISOString()
                     })
@@ -215,12 +221,12 @@ const Products = ({ isTab = false }) => {
                 if (updateError) throw updateError;
             }
 
-            toast.success('All opening quantities updated successfully!');
+            toast.success('All stock updated successfully!');
             setIsBulkModalOpen(false);
             fetchProducts();
             fetchStats();
         } catch (err) {
-            console.error('Error saving bulk openings:', err);
+            console.error('Error saving bulk stock:', err);
             toast.error(`Failed to save: ${err.message}`);
         } finally {
             setSavingBulk(false);
@@ -232,6 +238,7 @@ const Products = ({ isTab = false }) => {
         setBulkGodowns({});
         setBulkSearch('');
         setBulkGodownGlobal('');
+        setBulkGodownFilter('all');
         setBulkPage(1);
         setHasMoreBulk(true);
         setIsBulkGodownModalOpen(true);
@@ -332,13 +339,22 @@ const Products = ({ isTab = false }) => {
     };
 
     const filteredBulkProducts = useMemo(() => {
-        if (!bulkSearch) return allProductsForBulk;
-        const term = bulkSearch.toLowerCase();
-        return allProductsForBulk.filter(p => 
-            p.name?.toLowerCase().includes(term) ||
-            p.product_id?.toLowerCase().includes(term)
-        );
-    }, [allProductsForBulk, bulkSearch]);
+        let result = allProductsForBulk;
+        
+        if (bulkGodownFilter && bulkGodownFilter !== 'all') {
+            result = result.filter(p => p.godown_id === bulkGodownFilter);
+        }
+
+        if (bulkSearch) {
+            const term = bulkSearch.toLowerCase();
+            result = result.filter(p => 
+                p.name?.toLowerCase().includes(term) ||
+                p.product_id?.toLowerCase().includes(term)
+            );
+        }
+        
+        return result;
+    }, [allProductsForBulk, bulkSearch, bulkGodownFilter]);
 
     useEffect(() => {
         if (!isBulkModalOpen && !isBulkGodownModalOpen) return;
@@ -675,7 +691,7 @@ const Products = ({ isTab = false }) => {
                                     className="w-full md:w-auto gap-2 px-4 shadow-sm font-medium border-slate-200 hover:bg-slate-50 h-10"
                                 >
                                     <Layers size={18} className="text-primary" />
-                                    <span>Bulk Opening Qty</span>
+                                    <span>Bulk Stock Update</span>
                                 </Button>
                                 <Button 
                                     onClick={handleOpenBulkGodownModal} 
@@ -982,8 +998,8 @@ const Products = ({ isTab = false }) => {
                                     <Layers size={22} />
                                 </div>
                                 <div>
-                                    <h2 className="text-xl font-bold text-slate-800">Bulk Edit Opening Balances</h2>
-                                    <p className="text-xs text-slate-500">Update opening quantities for multiple products simultaneously.</p>
+                                    <h2 className="text-xl font-bold text-slate-800">Bulk Stock Update</h2>
+                                    <p className="text-xs text-slate-500">Update closing quantities and godowns for multiple products simultaneously.</p>
                                 </div>
                             </div>
                             <Button variant="ghost" size="icon" type="button" onClick={() => setIsBulkModalOpen(false)} className="rounded-full text-slate-400 hover:text-slate-600 transition-colors">
@@ -1002,6 +1018,20 @@ const Products = ({ isTab = false }) => {
                                     onChange={(e) => setBulkSearch(e.target.value)}
                                 />
                             </div>
+                            <Select value={bulkGodownFilter} onValueChange={setBulkGodownFilter}>
+                                <SelectTrigger className="w-full sm:w-48 h-10 bg-white">
+                                    <SelectValue placeholder="All Godowns" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectGroup>
+                                        <SelectLabel>Godown</SelectLabel>
+                                        <SelectItem value="all">All Godowns</SelectItem>
+                                        {godowns.map(g => (
+                                            <SelectItem key={g.godown_id} value={g.godown_id}>{g.name}</SelectItem>
+                                        ))}
+                                    </SelectGroup>
+                                </SelectContent>
+                            </Select>
                             <div className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full sm:ml-auto shrink-0 border border-slate-200 uppercase tracking-wider">
                                 Loaded {allProductsForBulk.length} of {totalBulkCount} total products
                             </div>
@@ -1026,7 +1056,7 @@ const Products = ({ isTab = false }) => {
                                                         <th className="erp-table-th">Product Details</th>
                                                         <th className="erp-table-th">Godown</th>
                                                         <th className="erp-table-th">MUX</th>
-                                                        <th className="erp-table-th align-center text-center">Opening Qty</th>
+                                                        <th className="erp-table-th align-center text-center">Closing Qty</th>
                                                         <th className="erp-table-th align-right text-right">Computed Qty</th>
                                                     </tr>
                                                 </thead>
@@ -1043,7 +1073,22 @@ const Products = ({ isTab = false }) => {
                                                                     <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{product.product_id}</div>
                                                                 </td>
                                                                 <td className="erp-table-td text-[11px] font-bold text-slate-500 uppercase">
-                                                                    {godowns.find(g => g.godown_id === product.godown_id)?.name || product.godown_id || '-'}
+                                                                    <select
+                                                                        value={bulkGodowns[product.product_id] || product.godown_id || ''}
+                                                                        onChange={(e) => {
+                                                                            const val = e.target.value;
+                                                                            setBulkGodowns(prev => ({
+                                                                                ...prev,
+                                                                                [product.product_id]: val
+                                                                            }));
+                                                                        }}
+                                                                        className="w-full bg-transparent border-none outline-none font-bold uppercase tracking-wider text-slate-700 cursor-pointer"
+                                                                    >
+                                                                        <option value="">Select Godown</option>
+                                                                        {godowns.map(g => (
+                                                                            <option key={g.godown_id} value={g.godown_id}>{g.name}</option>
+                                                                        ))}
+                                                                    </select>
                                                                 </td>
                                                                 <td className="erp-table-td text-slate-500 font-mono text-sm">
                                                                     {product.mux || '0'}
@@ -1090,9 +1135,22 @@ const Products = ({ isTab = false }) => {
                                                     <div className="grid grid-cols-2 gap-2 text-xs">
                                                         <div>
                                                             <span className="block text-slate-400 font-bold uppercase tracking-wider text-[9px]">Godown</span>
-                                                            <span className="font-bold text-slate-700 uppercase">
-                                                                {godowns.find(g => g.godown_id === product.godown_id)?.name || product.godown_id || '-'}
-                                                            </span>
+                                                            <select
+                                                                value={bulkGodowns[product.product_id] || product.godown_id || ''}
+                                                                onChange={(e) => {
+                                                                    const val = e.target.value;
+                                                                    setBulkGodowns(prev => ({
+                                                                        ...prev,
+                                                                        [product.product_id]: val
+                                                                    }));
+                                                                }}
+                                                                className="w-full bg-slate-100 border-none outline-none text-[10px] font-bold uppercase tracking-wider text-slate-700 cursor-pointer rounded px-1 py-0.5 mt-1"
+                                                            >
+                                                                <option value="">Select</option>
+                                                                {godowns.map(g => (
+                                                                    <option key={g.godown_id} value={g.godown_id}>{g.name}</option>
+                                                                ))}
+                                                            </select>
                                                         </div>
                                                         <div>
                                                             <span className="block text-slate-400 font-bold uppercase tracking-wider text-[9px]">MUX</span>
@@ -1103,7 +1161,7 @@ const Products = ({ isTab = false }) => {
                                                     </div>
                                                     <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-200">
                                                         <div className="flex-1 max-w-[140px]">
-                                                            <span className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Opening Qty</span>
+                                                            <span className="block text-slate-400 font-bold uppercase tracking-wider text-[9px] mb-1">Closing Qty</span>
                                                             <Input
                                                                 type="number"
                                                                 value={currentVal}
@@ -1141,7 +1199,7 @@ const Products = ({ isTab = false }) => {
                         <div className="p-4 sm:px-6 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex justify-end gap-3 shrink-0">
                             <Button type="button" variant="outline" onClick={() => setIsBulkModalOpen(false)}>Cancel</Button>
                             <Button onClick={handleBulkSaveOpenings} disabled={savingBulk || loadingBulkProducts}>
-                                {savingBulk ? 'Saving changes...' : 'Save All Opening Qty'}
+                                {savingBulk ? 'Saving changes...' : 'Save Bulk Stock'}
                             </Button>
                         </div>
                     </div>
@@ -1167,19 +1225,35 @@ const Products = ({ isTab = false }) => {
                             </Button>
                         </div>
 
-                        <div className="p-4 border-b border-slate-100 bg-white shrink-0 flex flex-col md:flex-row gap-4 items-center justify-between">
-                            <div className="relative w-full sm:w-72">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
-                                <Input
-                                    type="text"
-                                    placeholder="Search products..."
-                                    className="pl-9 h-10"
-                                    value={bulkSearch}
-                                    onChange={(e) => setBulkSearch(e.target.value)}
-                                />
+                        <div className="p-4 border-b border-slate-100 bg-white shrink-0 flex flex-col lg:flex-row gap-4 items-center justify-between">
+                            <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+                                <div className="relative w-full sm:w-64">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
+                                    <Input
+                                        type="text"
+                                        placeholder="Search products..."
+                                        className="pl-9 h-10"
+                                        value={bulkSearch}
+                                        onChange={(e) => setBulkSearch(e.target.value)}
+                                    />
+                                </div>
+                                <Select value={bulkGodownFilter} onValueChange={setBulkGodownFilter}>
+                                    <SelectTrigger className="w-full sm:w-40 h-10 bg-white">
+                                        <SelectValue placeholder="All Godowns" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectGroup>
+                                            <SelectLabel>Godown</SelectLabel>
+                                            <SelectItem value="all">All Godowns</SelectItem>
+                                            {godowns.map(g => (
+                                                <SelectItem key={g.godown_id} value={g.godown_id}>{g.name}</SelectItem>
+                                            ))}
+                                        </SelectGroup>
+                                    </SelectContent>
+                                </Select>
                             </div>
 
-                            <div className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full shrink-0 border border-slate-200 uppercase tracking-wider">
+                            <div className="hidden xl:block text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-full shrink-0 border border-slate-200 uppercase tracking-wider">
                                 Loaded {allProductsForBulk.length} of {totalBulkCount} total products
                             </div>
 

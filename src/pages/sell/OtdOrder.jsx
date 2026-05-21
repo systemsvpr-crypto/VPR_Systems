@@ -409,6 +409,37 @@ const OtdOrder = () => {
       return;
     }
 
+    const hasStockErrors = formData.items.some(item => {
+      if (!item.itemName || !item.godownName || !item.qty) return false;
+      const itemKey = normalize(item.itemName);
+      const godownKey = normalize(item.godownName);
+      const stockArr = stockDataMap[itemKey] || [];
+      const stockObj = stockArr.find(st => normalize(st.godown) === godownKey);
+      const availableStock = stockObj ? stockObj.stock : 0;
+      return Number(item.qty) > availableStock;
+    });
+
+    if (hasStockErrors) {
+      toast.error('One or more items exceed available stock. Please correct them before submitting.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    const hasDuplicateErrors = formData.items.some((item, index) => {
+      if (!item.itemName || !item.godownName) return false;
+      return formData.items.some((otherItem, otherIndex) => 
+        otherIndex !== index && 
+        normalize(otherItem.itemName) === normalize(item.itemName) && 
+        normalize(otherItem.godownName) === normalize(item.godownName)
+      );
+    });
+
+    if (hasDuplicateErrors) {
+      toast.error('Duplicate items found. You cannot select the same product from the same godown multiple times.');
+      setIsSubmitting(false);
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const rowsToInsert = formData.items.map(item => ({
@@ -877,10 +908,24 @@ const OtdOrder = () => {
                   </div>
 
                   <div className="space-y-4">
-                    {formData.items.map((item, index) => (
+                    {formData.items.map((item, index) => {
+                      const itemKey = item.itemName ? normalize(item.itemName) : null;
+                      const godownKey = item.godownName ? normalize(item.godownName) : null;
+                      const stockArr = itemKey ? (stockDataMap[itemKey] || []) : [];
+                      const stockObj = godownKey ? stockArr.find(st => normalize(st.godown) === godownKey) : null;
+                      const availableStock = stockObj ? stockObj.stock : 0;
+                      const hasStockError = Boolean(itemKey && godownKey && item.qty && Number(item.qty) > availableStock);
+                      
+                      const usedGodownsForThisItem = formData.items
+                        .map((otherItem, otherIndex) => (otherIndex !== index && otherItem.itemName && normalize(otherItem.itemName) === itemKey) ? normalize(otherItem.godownName) : null)
+                        .filter(Boolean);
+                      const hasDuplicateError = Boolean(itemKey && godownKey && usedGodownsForThisItem.includes(godownKey));
+                      const hasError = hasStockError || hasDuplicateError;
+
+                      return (
                       <div
                         key={index}
-                        className="relative flex flex-col gap-4 p-5 bg-white border border-gray-200 rounded shadow-sm hover:border-primary/30 transition-all duration-300 animate-in fade-in slide-in-from-top-4 ease-out"
+                        className={cn("relative flex flex-col gap-4 p-5 bg-white border rounded shadow-sm transition-all duration-300 animate-in fade-in slide-in-from-top-4 ease-out", hasError ? "border-red-300" : "border-gray-200 hover:border-primary/30")}
                         style={{ animationDuration: '400ms' }}
                       >
                         <div className="grid grid-cols-1 sm:grid-cols-12 gap-5 items-start">
@@ -925,7 +970,7 @@ const OtdOrder = () => {
                             <SearchableDropdown
                               value={item.godownName}
                               onChange={(val) => handleItemChange(index, 'godownName', val)}
-                              options={godowns}
+                              options={itemKey ? stockArr.filter(st => st.stock > 0 && !usedGodownsForThisItem.includes(normalize(st.godown))).map(st => st.godown) : godowns}
                               placeholder="Select Godown"
                               showAll={false}
                             />
@@ -941,7 +986,7 @@ const OtdOrder = () => {
                               className="w-full px-3 py-2 bg-white border border-gray-200 rounded focus:ring-2 focus:ring-primary focus:border-transparent outline-none text-sm transition-all shadow-sm"
                             />
                           </div>
-                          <div className="sm:col-span-3 flex gap-3 items-end">
+                          <div className="sm:col-span-3 flex gap-3 items-start">
                             <div className="flex-1 space-y-1.5">
                               <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Quantity</label>
                               <input
@@ -950,14 +995,32 @@ const OtdOrder = () => {
                                 placeholder="0"
                                 value={item.qty}
                                 onChange={(e) => handleItemChange(index, 'qty', e.target.value)}
-                                className="w-full px-3 py-2 bg-white border border-gray-200 rounded focus:ring-2 focus:ring-primary focus:border-transparent outline-none text-sm font-bold text-gray-900 transition-all shadow-sm"
+                                className={cn("w-full px-3 py-2 bg-white border rounded outline-none text-sm font-bold transition-all shadow-sm", hasError ? "border-red-400 text-red-600 focus:ring-2 focus:ring-red-400 focus:border-transparent" : "border-gray-200 text-gray-900 focus:ring-2 focus:ring-primary focus:border-transparent")}
                               />
+                              {hasStockError && !hasDuplicateError && (
+                                <p className="text-[10px] text-red-500 font-bold leading-tight mt-1.5 bg-red-50 p-1.5 rounded border border-red-100">
+                                  This stock has availability of {availableStock} in this godown so this order cannot be created like this.
+                                </p>
+                              )}
+                              {hasDuplicateError && (
+                                <p className="text-[10px] text-red-500 font-bold leading-tight mt-1.5 bg-red-50 p-1.5 rounded border border-red-100">
+                                  Duplicate selection! You have already selected this product from this godown.
+                                </p>
+                              )}
+                              {!hasError && item.godownName && item.qty && Number(item.qty) > 0 && (
+                                <div className="mt-1 text-[10px] text-slate-500 flex items-center gap-1">
+                                  <span>Stock Preview ({item.godownName}):</span>
+                                  <span className="font-medium text-slate-700">
+                                    {availableStock} → {availableStock - Number(item.qty)}
+                                  </span>
+                                </div>
+                              )}
                             </div>
                             {formData.items.length > 1 && (
                               <button
                                 type="button"
                                 onClick={() => handleRemoveItem(index)}
-                                className="shrink-0 p-2.5 text-red-500 hover:text-white hover:bg-red-500 transition-colors bg-red-50 rounded border border-red-100"
+                                className="shrink-0 p-2.5 mt-[22px] text-red-500 hover:text-white hover:bg-red-500 transition-colors bg-red-50 rounded border border-red-100"
                                 title="Remove Item"
                               >
                                 <X size={16} />
@@ -966,7 +1029,8 @@ const OtdOrder = () => {
                           </div>
                         </div>
                       </div>
-                    ))}
+                    );
+                  })}
                   </div>
 
                   <div className="pt-2">

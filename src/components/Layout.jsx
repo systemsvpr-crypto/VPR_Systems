@@ -19,7 +19,8 @@ const Layout = () => {
     );
   }
 
-  const hideGlobalHeader = isStockMovement;
+  const isStockManagement = location.pathname === '/stock-management';
+  const hideGlobalHeader = isStockMovement || isStockManagement;
 
   return (
     <div className="flex h-screen bg-gray-50 font-sans text-slate-900 selection:bg-primary/20">

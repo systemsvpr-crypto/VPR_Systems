@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-    MapPin,
-    LayoutGrid,
     Truck,
     Package,
     ArrowDown,
     ArrowUp,
+    ArrowRight,
     Search,
     Plus,
     X,
     Edit2,
     Trash2,
-    Shield
+    Shield,
+    RefreshCw,
+    ArrowLeft
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
@@ -51,6 +53,7 @@ const DEFAULT_FORM_DATA = {
 };
 
 const StockManagement = () => {
+    const navigate = useNavigate();
     const [entries, setEntries] = useState([]);
     const [godowns, setGodowns] = useState([]);
     const [products, setProducts] = useState([]);
@@ -198,19 +201,16 @@ const StockManagement = () => {
         if (formData.transaction_type === 'out') {
             sourceGodownId = formData.godown_id;
         } else if (formData.transaction_type === 'in' && formData.from_location) {
-            // Check if from_location is a godown
             const isGodown = godowns.some(g => g.godown_id === formData.from_location);
             if (isGodown) sourceGodownId = formData.from_location;
         }
 
         if (sourceGodownId) {
-            // Find the stock of this product in the source godown
-            // We match by name since product_id is unique per godown
             const sourceStock = products.find(p => p.name === selectedProdData.name && p.godown_id === sourceGodownId);
             const availableQty = parseFloat(sourceStock?.closing_quantity) || 0;
             
             if (availableQty < selectedQty) {
-                toast.error(`Insufficient stock in ${godowns.find(g => g.godown_id === sourceGodownId)?.name || 'source godown'}. Available: ${availableQty}`);
+                toast.error(`Insufficient stock. Maximum available is ${availableQty}`);
                 return;
             }
         }
@@ -235,10 +235,11 @@ const StockManagement = () => {
     };
 
     const updateProductQty = (productId, qty) => {
-        const qtyNum = parseInt(qty) || 0;
+        let qtyNum = qty === '' ? '' : parseInt(qty) || 0;
+        if (qtyNum !== '' && qtyNum < 0) qtyNum = 0;
+
         const selectedProdData = products.find(p => p.product_id === productId);
         
-        // Stock Validation
         let sourceGodownId = null;
         if (formData.transaction_type === 'out') {
             sourceGodownId = formData.godown_id;
@@ -247,13 +248,13 @@ const StockManagement = () => {
             if (isGodown) sourceGodownId = formData.from_location;
         }
 
-        if (sourceGodownId && selectedProdData) {
+        if (sourceGodownId && selectedProdData && qtyNum !== '') {
             const sourceStock = products.find(p => p.name === selectedProdData.name && p.godown_id === sourceGodownId);
             const availableQty = parseFloat(sourceStock?.closing_quantity) || 0;
             
-            if (availableQty < qtyNum) {
-                toast.error(`Insufficient stock. Available: ${availableQty}`);
-                return;
+            if (qtyNum > availableQty) {
+                qtyNum = availableQty;
+                toast.error(`Maximum available stock is ${availableQty}`);
             }
         }
 
@@ -292,26 +293,19 @@ const StockManagement = () => {
         try {
             if (editingEntry) {
                 const singleItem = formData.productItems[0];
+                const qty = singleItem.quantity;
+                const wasTransfer = editingEntry.from_location && editingEntry.transaction_type === 'in';
+                const isTransfer = formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK';
+
+                // Fetch current stock for display values
                 const { data: productData } = await supabase
                     .from('products')
-                    .select('closing_quantity, mux')
+                    .select('closing_quantity')
                     .eq('product_id', singleItem.product_id)
                     .single();
-
                 const currentStock = parseFloat(productData?.closing_quantity) || 0;
-                const mux = parseFloat(productData?.mux) || 0;
-                const qty = singleItem.quantity;
-                let newStock;
-
-                if (formData.transaction_type === 'in') {
-                    newStock = currentStock + qty;
-                } else {
-                    if (currentStock < qty) {
-                        toast.error('Insufficient stock');
-                        return;
-                    }
-                    newStock = currentStock - qty;
-                }
+                const displayClosing = formData.transaction_type === 'in'
+                    ? currentStock + qty : Math.max(0, currentStock - qty);
 
                 const { productItems, ...formDataWithoutItems } = formData;
                 const entryData = {
@@ -319,10 +313,10 @@ const StockManagement = () => {
                     product_id: singleItem.product_id,
                     quantity: qty,
                     opening_stock: currentStock,
-                    closing_stock: newStock,
+                    closing_stock: displayClosing,
                     transporter_id: formData.transaction_type === 'in' ? (formData.transporter_id || null) : null,
                     lr_number: formData.transaction_type === 'in' ? (formData.lr_number || null) : null,
-                    from_location: formData.transaction_type === 'in' ? (formData.from_location || null) : null,
+                    from_location: formData.transaction_type === 'in' && formData.from_location !== 'NEW_STOCK' ? (formData.from_location || null) : null,
                 };
 
                 const { error } = await supabase
@@ -331,29 +325,131 @@ const StockManagement = () => {
                     .eq('entry_id', editingEntry.entry_id);
                 if (error) throw error;
 
-                // Update products table directly
-                await supabase
-                    .from('products')
-                    .update({ 
-                        closing_quantity: newStock, 
-                        quantity: (newStock * mux).toFixed(3),
-                        updated_at: new Date().toISOString() 
-                    })
-                    .eq('product_id', singleItem.product_id);
+                // Handle source-out row for transfers
+                const oldSourceEntryId = editingEntry.entry_id + '-SRC';
+                if (wasTransfer && !isTransfer) {
+                    // Was a transfer, no longer is — delete the old source-out row
+                    await supabase.from('stock_management').delete().eq('entry_id', oldSourceEntryId);
+                } else if (isTransfer) {
+                    // Find source product
+                    const destProduct = products.find(p => p.product_id === singleItem.product_id);
+                    const sourceProduct = destProduct ? products.find(p => p.name === destProduct.name && p.godown_id === formData.from_location) : null;
+                    if (sourceProduct) {
+                        const { data: srcData } = await supabase
+                            .from('products')
+                            .select('closing_quantity, mux')
+                            .eq('product_id', sourceProduct.product_id)
+                            .single();
+                        const srcCurrentStock = parseFloat(srcData?.closing_quantity) || 0;
+                        const srcMux = parseFloat(srcData?.mux) || 0;
+                        const srcNewStock = Math.max(0, srcCurrentStock - qty);
+
+                        if (wasTransfer) {
+                            // Update existing source-out row
+                            await supabase
+                                .from('stock_management')
+                                .update({
+                                    quantity: qty,
+                                    closing_stock: srcNewStock,
+                                    date: formData.date,
+                                    updated_at: new Date().toISOString()
+                                })
+                                .eq('entry_id', oldSourceEntryId);
+                        } else {
+                            // Create new source-out row
+                            await supabase.from('stock_management').insert([{
+                                entry_id: oldSourceEntryId,
+                                godown_id: formData.from_location,
+                                product_id: sourceProduct.product_id,
+                                transaction_type: 'out',
+                                quantity: qty,
+                                opening_stock: srcCurrentStock,
+                                closing_stock: srcNewStock,
+                                reference_number: formData.reference_number,
+                                date: formData.date,
+                                notes: `Transfer out to ${godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id}`,
+                            }]);
+                        }
+
+                        // Update source product stock
+                        await supabase
+                            .from('products')
+                            .update({
+                                closing_quantity: srcNewStock,
+                                quantity: (srcNewStock * srcMux).toFixed(3),
+                                updated_at: new Date().toISOString()
+                            })
+                            .eq('product_id', sourceProduct.product_id);
+                    }
+                }
+
+                // Recalculate destination product stock from history
+                await recalculateProductStock(singleItem.product_id);
 
                 toast.success('Entry updated successfully');
             } else {
                 const baseEntryId = formData.entry_id;
+
+                let nextCount = 1;
+                const { data: lastProd } = await supabase
+                    .from('products')
+                    .select('product_id')
+                    .order('product_id', { ascending: false })
+                    .limit(1);
+                
+                if (lastProd && lastProd.length > 0 && lastProd[0].product_id) {
+                    const match = lastProd[0].product_id.match(/\d+$/);
+                    if (match) {
+                        nextCount = parseInt(match[0], 10) + 1;
+                    }
+                }
 
                 for (let i = 0; i < formData.productItems.length; i++) {
                     const item = formData.productItems[i];
                     const entryIdSuffix = formData.productItems.length > 1 ? `-${i + 1}` : '';
                     const entryId = baseEntryId + entryIdSuffix;
 
+                    let targetProductId = item.product_id;
+                    const submittedProduct = products.find(p => p.product_id === targetProductId);
+
+                    if (formData.transaction_type === 'in' && submittedProduct) {
+                        if (submittedProduct.godown_id !== formData.godown_id) {
+                            const destProduct = products.find(p => p.name === submittedProduct.name && p.godown_id === formData.godown_id);
+                            if (destProduct) {
+                                targetProductId = destProduct.product_id;
+                            } else {
+                                const newProductId = `PROD-${nextCount.toString().padStart(4, '0')}`;
+                                nextCount++;
+
+                                const { data: newProd, error: createErr } = await supabase
+                                    .from('products')
+                                    .insert([{
+                                        product_id: newProductId,
+                                        godown_id: formData.godown_id,
+                                        godown_name: godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id,
+                                        name: submittedProduct.name,
+                                        description: submittedProduct.description || null,
+                                        unit: submittedProduct.unit || 'units',
+                                        mux: submittedProduct.mux || 1,
+                                        opening_quantity: 0,
+                                        closing_quantity: 0,
+                                        quantity: 0,
+                                        master_product_id: submittedProduct.master_product_id || null,
+                                        product_type: submittedProduct.product_type || null
+                                    }])
+                                    .select()
+                                    .single();
+                                
+                                if (createErr) throw createErr;
+                                targetProductId = newProd.product_id;
+                            }
+                        }
+                    }
+
                     const { data: productData } = await supabase
                         .from('products')
                         .select('closing_quantity, mux')
-                        .eq('product_id', item.product_id)
+                        .eq('product_id', targetProductId)
                         .single();
 
                     const currentStock = parseFloat(productData?.closing_quantity) || 0;
@@ -367,7 +463,7 @@ const StockManagement = () => {
                         closingStock = newStock;
                     } else {
                         if (currentStock < qty) {
-                            toast.error(`Insufficient stock for ${getProductName(item.product_id)}`);
+                            toast.error(`Insufficient stock for ${getProductName(targetProductId)}`);
                             return;
                         }
                         newStock = currentStock - qty;
@@ -378,7 +474,7 @@ const StockManagement = () => {
                     const entryData = {
                         entry_id: entryId,
                         godown_id: formData.godown_id,
-                        product_id: item.product_id,
+                        product_id: targetProductId,
                         transaction_type: formData.transaction_type,
                         quantity: qty,
                         opening_stock: openingStock,
@@ -388,7 +484,7 @@ const StockManagement = () => {
                         notes: formData.notes,
                         transporter_id: formData.transaction_type === 'in' ? (formData.transporter_id || null) : null,
                         lr_number: formData.transaction_type === 'in' ? (formData.lr_number || null) : null,
-                        from_location: formData.transaction_type === 'in' ? (formData.from_location || null) : null,
+                        from_location: formData.transaction_type === 'in' && formData.from_location !== 'NEW_STOCK' ? (formData.from_location || null) : null,
                         freight_amount: formData.transaction_type === 'in' && formData.freight_amount ? parseFloat(formData.freight_amount) : null,
                     };
 
@@ -405,16 +501,66 @@ const StockManagement = () => {
                             quantity: (newStock * mux).toFixed(3),
                             updated_at: new Date().toISOString() 
                         })
-                        .eq('product_id', item.product_id);
+                        .eq('product_id', targetProductId);
 
                     await supabase.from('stock_notifications').insert([{
                         notification_type: formData.transaction_type === 'in' ? 'stock_in' : 'stock_out',
                         title: `Stock ${formData.transaction_type === 'in' ? 'IN' : 'OUT'}`,
                         message: `${qty} units ${formData.transaction_type === 'in' ? 'received' : 'dispatched'} at ${godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id}`,
-                        product_id: item.product_id,
+                        product_id: targetProductId,
                         godown_id: formData.godown_id,
                         related_id: entryId
                     }]);
+
+                    // If this is a transfer (stock in from another godown), also decrement source godown stock
+                    if (formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK') {
+                        const destProduct = products.find(p => p.product_id === targetProductId);
+                        if (destProduct || targetProductId) {
+                            const productName = destProduct ? destProduct.name : submittedProduct?.name;
+                            const sourceProduct = products.find(p => p.name === productName && p.godown_id === formData.from_location);
+                            if (sourceProduct) {
+                                const { data: srcData } = await supabase
+                                    .from('products')
+                                    .select('closing_quantity, mux')
+                                    .eq('product_id', sourceProduct.product_id)
+                                    .single();
+
+                                const srcCurrentStock = parseFloat(srcData?.closing_quantity) || 0;
+                                const srcMux = parseFloat(srcData?.mux) || 0;
+                                const srcNewStock = Math.max(0, srcCurrentStock - qty);
+                                const sourceEntryId = entryId + '-SRC';
+
+                                // Create source-out entry
+                                const { error: srcErr } = await supabase
+                                    .from('stock_management')
+                                    .insert([{
+                                        entry_id: sourceEntryId,
+                                        godown_id: formData.from_location,
+                                        product_id: sourceProduct.product_id,
+                                        transaction_type: 'out',
+                                        quantity: qty,
+                                        opening_stock: srcCurrentStock,
+                                        closing_stock: srcNewStock,
+                                        reference_number: formData.reference_number,
+                                        date: formData.date,
+                                        notes: `Transfer out to ${godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id}`,
+                                        transporter_id: formData.transporter_id || null,
+                                        lr_number: formData.lr_number || null,
+                                    }]);
+                                if (srcErr) throw srcErr;
+
+                                // Update source product stock
+                                await supabase
+                                    .from('products')
+                                    .update({
+                                        closing_quantity: srcNewStock,
+                                        quantity: (srcNewStock * srcMux).toFixed(3),
+                                        updated_at: new Date().toISOString()
+                                    })
+                                    .eq('product_id', sourceProduct.product_id);
+                            }
+                        }
+                    }
                 }
 
                 toast.success(`${formData.productItems.length} entries created successfully`);
@@ -437,11 +583,35 @@ const StockManagement = () => {
         if (!itemToDelete) return;
         setIsDeleting(true);
         try {
+            const entry = itemToDelete;
+            const wasTransfer = entry.from_location && entry.transaction_type === 'in';
+
+            // If this was a transfer, also delete the paired source-out row
+            if (wasTransfer) {
+                const sourceEntryId = entry.entry_id + '-SRC';
+                const { data: srcRow } = await supabase
+                    .from('stock_management')
+                    .select('product_id')
+                    .eq('entry_id', sourceEntryId)
+                    .maybeSingle();
+                if (srcRow) {
+                    await supabase.from('stock_management').delete().eq('entry_id', sourceEntryId);
+                    if (srcRow.product_id) {
+                        await recalculateProductStock(srcRow.product_id);
+                    }
+                }
+            }
+
+            // Delete the main entry
             const { error } = await supabase
                 .from('stock_management')
                 .delete()
-                .eq('entry_id', itemToDelete.entry_id);
+                .eq('entry_id', entry.entry_id);
             if (error) throw error;
+
+            // Recalculate the affected product's stock from history
+            await recalculateProductStock(entry.product_id);
+
             toast.success('Entry deleted successfully');
             fetchData();
             setIsDeleteModalOpen(false);
@@ -456,6 +626,41 @@ const StockManagement = () => {
 
     const getGodownName = (id) => godowns.find(g => g.godown_id === id)?.name || id;
     const getProductName = (id) => products.find(p => p.product_id === id)?.name || id;
+
+    const recalculateProductStock = async (productId) => {
+        if (!productId) return;
+        try {
+            const { data: product, error: prodErr } = await supabase
+                .from('products')
+                .select('opening_quantity, mux')
+                .eq('product_id', productId)
+                .single();
+            if (prodErr || !product) return;
+            const opening = parseFloat(product.opening_quantity) || 0;
+            const mux = parseFloat(product.mux) || 0;
+            const { data: transactions } = await supabase
+                .from('stock_management')
+                .select('transaction_type, quantity')
+                .eq('product_id', productId);
+            let running = opening;
+            (transactions || []).forEach(t => {
+                const qty = parseFloat(t.quantity) || 0;
+                if (t.transaction_type === 'in') running += qty;
+                else running -= qty;
+            });
+            running = Math.max(0, running);
+            await supabase
+                .from('products')
+                .update({
+                    closing_quantity: running,
+                    quantity: (running * mux).toFixed(3),
+                    updated_at: new Date().toISOString()
+                })
+                .eq('product_id', productId);
+        } catch (err) {
+            console.error(`Error recalculating stock for ${productId}:`, err);
+        }
+    };
 
     const filteredEntries = useMemo(() => {
         return entries.filter(e => {
@@ -474,118 +679,185 @@ const StockManagement = () => {
     }, [filteredEntries, currentPage]);
 
     const availableProducts = useMemo(() => {
-        // Return all products not already added to the form
-        return products.filter(p => 
-            !formData.productItems.some(item => item.product_id === p.product_id)
-        );
-    }, [products, formData.productItems]);
+        const isTransfer = formData.transaction_type === 'in' && formData.from_location;
+        const isNewStock = formData.from_location === 'NEW_STOCK';
+        const targetGodownId = isTransfer && !isNewStock ? formData.from_location : formData.godown_id;
+        
+        if (!targetGodownId && !isNewStock) return [];
+        
+        if (isNewStock) {
+            const uniqueProducts = [];
+            const seenNames = new Set();
+            for (const p of products) {
+                if (!seenNames.has(p.name)) {
+                    seenNames.add(p.name);
+                    const destProduct = products.find(dp => dp.name === p.name && dp.godown_id === formData.godown_id);
+                    const prodToUse = destProduct || p;
+                    uniqueProducts.push({
+                        ...prodToUse,
+                        _destProductId: prodToUse.product_id
+                    });
+                }
+            }
+            return uniqueProducts.filter(p => !formData.productItems.some(item => item.product_id === p.product_id));
+        }
+
+        return products.filter(p => {
+            if (p.godown_id !== targetGodownId) return false;
+            
+            let destProductId = p.product_id;
+            if (isTransfer) {
+                const destProduct = products.find(dp => dp.name === p.name && dp.godown_id === formData.godown_id);
+                if (destProduct) {
+                    destProductId = destProduct.product_id;
+                } else {
+                    destProductId = p.product_id;
+                }
+            }
+
+            if (formData.productItems.some(item => item.product_id === destProductId)) return false;
+
+            if (formData.transaction_type === 'out' || isTransfer) {
+                if ((parseFloat(p.closing_quantity) || 0) <= 0) return false;
+            }
+            
+            p._destProductId = destProductId;
+            return true;
+        });
+    }, [products, formData.productItems, formData.godown_id, formData.transaction_type, formData.from_location]);
+
+    const maxQtyForSelected = useMemo(() => {
+        if (!selectedProduct) return null;
+        const destProduct = products.find(p => p.product_id === selectedProduct);
+        if (!destProduct) return null;
+
+        if (formData.transaction_type === 'out') {
+            return parseFloat(destProduct.closing_quantity) || 0;
+        } else if (formData.transaction_type === 'in' && formData.from_location) {
+            if (formData.from_location === 'NEW_STOCK') return null;
+            const sourceProduct = products.find(p => p.name === destProduct.name && p.godown_id === formData.from_location);
+            return parseFloat(sourceProduct?.closing_quantity) || 0;
+        }
+        return null;
+    }, [selectedProduct, formData.transaction_type, formData.from_location, products]);
 
     return (
-        <div className="flex flex-col gap-4 pb-6">
-            <div>
-                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
-                    Stock <span className="text-primary font-black">Management</span>
-                </h1>
-                <p className="text-slate-500 mt-1 text-sm font-medium">Manage and track inventory transactions efficiently.</p>
+        <div className="min-h-screen flex flex-col bg-[#F8FAFC]">
+            {/* Header */}
+            <div className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm px-6 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                    <button 
+                        onClick={() => navigate(-1)}
+                        className="p-2 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-all text-slate-600"
+                        title="Go Back"
+                    >
+                        <ArrowLeft size={18} />
+                    </button>
+                    <div>
+                        <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                            <Package className="text-primary" size={20} />
+                            Stock Management
+                        </h1>
+                        <p className="text-sm font-medium text-slate-500 mt-0.5">
+                            Manage product entries and godown stock
+                        </p>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                    <button 
+                        onClick={() => fetchData()} 
+                        disabled={loading}
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-white text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 border border-slate-200 transition-all disabled:opacity-50 shadow-sm"
+                    >
+                        <RefreshCw size={14} className={loading ? 'animate-spin text-primary' : ''} />
+                        Refresh
+                    </button>
+                    <button 
+                        onClick={() => handleOpenModal()}
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-primary/95 transition-all"
+                    >
+                        <Plus size={14} />
+                        New Entry
+                    </button>
+                </div>
             </div>
 
-            <div className="flex flex-col gap-4 mt-2">
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 shrink-0">
-                        <div className="hidden xl:flex items-center gap-6">
-                            <StatItem label="Total Entries" value={entries.length} />
-                        </div>
-
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full lg:w-auto">
-                            <div className="relative w-full sm:w-64">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
-                                <Input
-                                    type="text"
-                                    placeholder="Search entries..."
-                                    className="pl-9 w-full bg-white"
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                />
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-2 w-full sm:w-auto">
-                                <Select value={filterType} onValueChange={setFilterType}>
-                                    <SelectTrigger className="w-full sm:w-[150px] h-10 bg-white">
-                                        <SelectValue placeholder="All Types" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectGroup>
-                                            <SelectLabel>Type</SelectLabel>
-                                            <SelectItem value="all">All Types</SelectItem>
-                                            <SelectItem value="in">Stock In</SelectItem>
-                                            <SelectItem value="out">Stock Out</SelectItem>
-                                        </SelectGroup>
-                                    </SelectContent>
-                                </Select>
-
-                                <Select value={filterGodown} onValueChange={setFilterGodown}>
-                                    <SelectTrigger className="w-full sm:w-[160px] h-10 bg-white">
-                                        <SelectValue placeholder="Godown" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectGroup>
-                                            <SelectItem value="all">All Godowns</SelectItem>
-                                            {godowns.map(g => (
-                                                <SelectItem key={g.godown_id} value={g.godown_id}>{g.name}</SelectItem>
-                                            ))}
-                                        </SelectGroup>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-
-                            {!loading && (
-                                <Button onClick={() => handleOpenModal()} className="w-full sm:w-auto gap-2 px-4 shadow-sm font-medium shrink-0 h-10">
-                                    <Plus size={20} />
-                                    <span>New Entry</span>
-                                </Button>
-                            )}
+            <div className="flex-1 p-6 space-y-6 max-w-[1600px] w-full mx-auto pb-24">
+                {/* Simple Row Filter Bar */}
+                <div className="flex items-end gap-4 flex-wrap w-full mb-4">
+                    <div className="space-y-1 flex-[2] min-w-[250px] lg:max-w-[400px]">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Search Records</label>
+                        <div className="relative">
+                            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <Input
+                                type="text"
+                                placeholder="Search by entry ID or product ID..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="pl-9 h-10 bg-white border-slate-200 rounded-lg focus-visible:ring-primary text-sm font-medium w-full"
+                            />
                         </div>
                     </div>
 
-                    {/* Mobile View */}
-                    <div className="md:hidden space-y-3">
+                    <div className="space-y-1 flex-1 min-w-[180px] lg:max-w-[200px]">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Type</label>
+                        <select
+                            value={filterType}
+                            onChange={(e) => setFilterType(e.target.value)}
+                            className="w-full h-10 px-3 rounded-lg border border-slate-200 text-sm font-medium focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none bg-white hover:bg-slate-50 transition-all text-slate-700 cursor-pointer"
+                        >
+                            <option value="all">All Types</option>
+                            <option value="in">Stock In</option>
+                            <option value="out">Stock Out</option>
+                        </select>
+                    </div>
+
+                    <div className="space-y-1 flex-1 min-w-[180px] lg:max-w-[200px]">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Godown</label>
+                        <select
+                            value={filterGodown}
+                            onChange={(e) => setFilterGodown(e.target.value)}
+                            className="w-full h-10 px-3 rounded-lg border border-slate-200 text-sm font-medium focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none bg-white hover:bg-slate-50 transition-all text-slate-700 cursor-pointer"
+                        >
+                            <option value="all">All Godowns</option>
+                            {godowns.map(g => (
+                                <option key={g.godown_id} value={g.godown_id}>{g.name}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+
+                {/* Standard Table View */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                    <div className="overflow-x-auto custom-scrollbar min-h-[500px]">
                         {loading ? (
-                            <div className="text-center py-10 text-slate-500">Loading...</div>
-                        ) : currentItems.length === 0 ? (
-                            <div className="text-center py-10 text-slate-500">No entries found.</div>
+                            <div className="py-24 flex flex-col items-center justify-center gap-3">
+                                <RefreshCw className="animate-spin text-primary" size={28} />
+                                <p className="text-sm font-semibold text-slate-500">Loading entries...</p>
+                            </div>
                         ) : (
-                            currentItems.map((e) => (
-                                <MobileEntryCard
-                                    key={e.entry_id}
-                                    entry={e}
-                                    user={user}
-                                    getGodownName={getGodownName}
-                                    getProductName={getProductName}
-                                    onEdit={() => handleOpenModal(e)}
-                                    onDelete={() => handleDelete(e)}
-                                />
-                            ))
-                        )}
-                    </div>
-
-                    {/* Desktop View */}
-                    <div className="hidden md:flex erp-table-container flex-col">
-                        <div className="overflow-x-auto custom-scrollbar">
-                            <table className="erp-table">
-                                <thead className="erp-table-thead">
-                                    <tr className="erp-table-tr">
-                                        <HeaderCell>Transaction & ID</HeaderCell>
-                                        <HeaderCell>Product</HeaderCell>
-                                        <HeaderCell>Location</HeaderCell>
-                                        <HeaderCell align="center">Quantity</HeaderCell>
-                                        <HeaderCell align="center">Stock Change</HeaderCell>
-                                        <HeaderCell align="right">Actions</HeaderCell>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {loading ? (
-                                        <EmptyRow message="Loading..." />
-                                    ) : currentItems.length === 0 ? (
-                                        <EmptyRow message="No entries found." />
+                            <table className="w-full text-left border-collapse min-w-[1200px]">
+                            <thead>
+                                <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase font-bold text-slate-500">
+                                    <th className="px-6 py-4 whitespace-nowrap">Date / Entry ID</th>
+                                    <th className="px-6 py-4 whitespace-nowrap">Product</th>
+                                    <th className="px-6 py-4 whitespace-nowrap">Stock Reduced From</th>
+                                    <th className="px-6 py-4 whitespace-nowrap">Stock Added To</th>
+                                    <th className="px-6 py-4 whitespace-nowrap text-right">Quantity</th>
+                                    <th className="px-6 py-4 whitespace-nowrap text-right">Stock Impact</th>
+                                    <th className="px-6 py-4 whitespace-nowrap text-center">Actions</th>
+                                </tr>
+                            </thead>
+                                <tbody className="divide-y divide-slate-100 text-sm">
+                                    {currentItems.length === 0 ? (
+                                        <tr className="h-[73px]">
+                                            <td colSpan="7">
+                                                <div className="py-24 flex flex-col items-center justify-center gap-3">
+                                                    <p className="text-sm font-semibold text-slate-500">No entries found.</p>
+                                                </div>
+                                            </td>
+                                        </tr>
                                     ) : (
                                         currentItems.map((e) => (
                                             <EntryRow
@@ -600,56 +872,80 @@ const StockManagement = () => {
                                         ))
                                     )}
                                     {Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
-                                        <tr key={`empty-${i}`}><td colSpan="8" className="h-16"></td></tr>
+                                        <tr key={`empty-${i}`} className="h-[73px]"><td colSpan="7"></td></tr>
                                     ))}
                                 </tbody>
                             </table>
-                        </div>
-
-                        {!loading && filteredEntries.length > 0 && (
-                            <Pagination
-                                currentPage={currentPage}
-                                totalPages={totalPages}
-                                totalItems={filteredEntries.length}
-                                startIndex={(currentPage - 1) * ITEMS_PER_PAGE + 1}
-                                endIndex={Math.min(currentPage * ITEMS_PER_PAGE, filteredEntries.length)}
-                                onPageChange={setCurrentPage}
-                                className="border-t border-slate-100"
-                            />
                         )}
                     </div>
 
                     {!loading && filteredEntries.length > 0 && (
-                        <div className="md:hidden shrink-0 mt-auto">
-                            <Pagination
-                                currentPage={currentPage}
-                                totalPages={totalPages}
-                                totalItems={filteredEntries.length}
-                                startIndex={(currentPage - 1) * ITEMS_PER_PAGE + 1}
-                                endIndex={Math.min(currentPage * ITEMS_PER_PAGE, filteredEntries.length)}
-                                onPageChange={setCurrentPage}
-                                className="bg-white border-t border-slate-200 rounded-t-xl shadow-sm"
-                            />
+                        <div className="p-4 border-t border-slate-100 bg-white flex flex-col sm:flex-row items-center justify-between gap-4">
+                            <span className="text-sm font-medium text-slate-500">
+                                Showing <span className="font-semibold text-slate-700">{(currentPage - 1) * ITEMS_PER_PAGE + 1}</span> to <span className="font-semibold text-slate-700">{Math.min(currentPage * ITEMS_PER_PAGE, filteredEntries.length)}</span> of <span className="font-semibold text-slate-700">{filteredEntries.length}</span> records
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                                <button
+                                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                                    disabled={currentPage === 1}
+                                    className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-all"
+                                >
+                                    Previous
+                                </button>
+                                <div className="flex items-center gap-1 px-2">
+                                    {Array.from({ length: Math.min(5, totalPages) }).map((_, i) => {
+                                        let pageNum = currentPage;
+                                        if (totalPages <= 5) pageNum = i + 1;
+                                        else if (currentPage <= 3) pageNum = i + 1;
+                                        else if (currentPage >= totalPages - 2) pageNum = totalPages - 4 + i;
+                                        else pageNum = currentPage - 2 + i;
+                                        return (
+                                            <button
+                                                key={pageNum}
+                                                onClick={() => setCurrentPage(pageNum)}
+                                                className={cn(
+                                                    "w-8 h-8 rounded-lg text-sm font-bold transition-all",
+                                                    currentPage === pageNum
+                                                        ? "bg-primary text-white"
+                                                        : "bg-white text-slate-600 hover:bg-slate-50 hover:text-primary"
+                                                )}
+                                            >
+                                                {pageNum}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                <button
+                                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                                    disabled={currentPage === totalPages}
+                                    className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-all"
+                                >
+                                    Next
+                                </button>
+                            </div>
                         </div>
                     )}
-                    {/* Modal */}
-                    {isModalOpen && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-                            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={handleCloseModal}></div>
-                            <div className="relative bg-white rounded-2xl shadow-xl w-full sm:max-w-2xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
-                                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
-                                    <h2 className="text-xl font-bold text-slate-800">
-                                        {editingEntry ? 'Edit Entry' : 'New Stock Entry'}
-                                    </h2>
-                                    <Button variant="ghost" size="icon" type="button" onClick={handleCloseModal} className="rounded-full text-slate-400 hover:text-slate-600">
-                                        <X size={20} />
-                                    </Button>
-                                </div>
+                </div>
+            </div>
 
-                                <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
-                                    <form onSubmit={handleSubmit} className="space-y-5">
-                                        <div className="space-y-2">
-                                            <label className="block text-sm font-semibold text-slate-700">Transaction Type <span className="text-red-500">*</span></label>
+            {isModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={handleCloseModal}></div>
+                    <div className="relative bg-white rounded-2xl shadow-xl w-full sm:max-w-5xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
+                            <h2 className="text-xl font-bold text-slate-800">
+                                {editingEntry ? 'Edit Entry' : 'New Stock Entry'}
+                            </h2>
+                            <Button variant="ghost" size="icon" type="button" onClick={handleCloseModal} className="rounded-full text-slate-400 hover:text-slate-600">
+                                <X size={20} />
+                            </Button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
+                            <form onSubmit={handleSubmit} className="flex flex-col md:flex-row gap-8">
+                                <div className="w-full md:w-[350px] space-y-5 shrink-0">
+                                    <div className="space-y-2">
+                                        <label className="block text-sm font-semibold text-slate-700">Transaction Type <span className="text-red-500">*</span></label>
                                             <div className="flex gap-3">
                                                 <button
                                                     type="button"
@@ -688,13 +984,42 @@ const StockManagement = () => {
                                             />
                                         </div>
 
+                                        {formData.transaction_type === 'in' && (
+                                            <div className="space-y-1.5">
+                                                <label className="block text-sm font-medium text-slate-700">From Location <span className="text-red-500">*</span></label>
+                                                <SearchableSelect
+                                                    options={[
+                                                        { value: 'NEW_STOCK', label: '✨ New Stock (From System)' },
+                                                        ...godowns.filter(g => g.godown_id !== formData.godown_id).map(g => ({ value: g.godown_id, label: g.name }))
+                                                    ]}
+                                                    value={formData.from_location}
+                                                    onChange={(val) => setFormData(prev => ({ ...prev, from_location: val, productItems: [] }))}
+                                                    placeholder="Select Location"
+                                                    searchPlaceholder="Search locations..."
+                                                    error={errors.from_location}
+                                                />
+                                            </div>
+                                        )}
+
                                         <div className="space-y-1.5">
-                                            <label className="block text-sm font-medium text-slate-700">Godown <span className="text-red-500">*</span></label>
+                                            <label className="block text-sm font-medium text-slate-700">
+                                                {formData.transaction_type === 'in' ? 'To Godown' : 'From Godown'} <span className="text-red-500">*</span>
+                                            </label>
                                             <SearchableSelect
-                                                options={godowns.map(g => ({ value: g.godown_id, label: g.name }))}
+                                                options={godowns.filter(g => g.godown_id !== formData.from_location).map(g => ({ value: g.godown_id, label: g.name }))}
                                                 value={formData.godown_id}
-                                                onChange={(val) => setFormData(prev => ({ ...prev, godown_id: val }))}
-                                                placeholder="Select Godown"
+                                                onChange={(val) => {
+                                                    setFormData(prev => {
+                                                        const isSource = prev.transaction_type === 'out' || (prev.transaction_type === 'in' && !prev.from_location);
+                                                        return { 
+                                                            ...prev, 
+                                                            godown_id: val, 
+                                                            productItems: isSource ? [] : prev.productItems 
+                                                        };
+                                                    });
+                                                    setSelectedProduct('');
+                                                }}
+                                                placeholder={`Select ${formData.transaction_type === 'in' ? 'To Godown' : 'From Godown'}`}
                                                 searchPlaceholder="Search godowns..."
                                                 error={errors.godown_id}
                                             />
@@ -726,18 +1051,6 @@ const StockManagement = () => {
                                                     error={errors.lr_number}
                                                 />
 
-                                                <div className="space-y-1.5">
-                                                    <label className="block text-sm font-medium text-slate-700">From Location <span className="text-red-500">*</span></label>
-                                                    <SearchableSelect
-                                                        options={godowns.map(g => ({ value: g.godown_id, label: g.name }))}
-                                                        value={formData.from_location}
-                                                        onChange={(val) => setFormData(prev => ({ ...prev, from_location: val }))}
-                                                        placeholder="Select Location"
-                                                        searchPlaceholder="Search locations..."
-                                                        error={errors.from_location}
-                                                    />
-                                                </div>
-
                                                 <FormField
                                                     label="Freight Amount" name="freight_amount" type="number" value={formData.freight_amount}
                                                     onChange={handleInputChange}
@@ -745,8 +1058,8 @@ const StockManagement = () => {
                                                 />
                                             </div>
                                         )}
-
-                                        <div className="space-y-3">
+                                </div>
+                                <div className="flex-1 space-y-3 flex flex-col min-w-0">
                                             <div className="flex items-center justify-between">
                                                 <label className="block text-sm font-medium text-slate-700">
                                                     Products <span className="text-red-500">*</span>
@@ -768,50 +1081,123 @@ const StockManagement = () => {
                                             )}
 
                                             {!editingEntry && (
-                                                <div className="flex gap-2 p-3 bg-slate-50 rounded-lg border-2 border-dashed border-slate-200 hover:border-primary/50 transition-colors">
-                                                    <div className="flex-1">
-                                                        <SearchableSelect
-                                                            options={availableProducts.map(p => ({ 
-                                                                value: p.product_id, 
-                                                                label: p.name,
-                                                                stock: p.closing_quantity || 0
-                                                            }))}
-                                                            renderOption={(option) => (
-                                                                <div className="flex items-center justify-between w-full gap-4">
-                                                                    <span className="truncate">{option.label}</span>
-                                                                    <div className="flex items-center gap-1.5 shrink-0">
-                                                                        <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Stock:</span>
-                                                                        <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200/60 min-w-[2.5rem] text-center">
-                                                                            {parseFloat(option.stock).toLocaleString()}
-                                                                        </span>
+                                                <div className="flex flex-col gap-3 p-3 bg-slate-50 rounded-lg border-2 border-dashed border-slate-200 hover:border-primary/50 transition-colors">
+                                                    {((formData.transaction_type === 'in' && !formData.from_location && !formData.godown_id) || (formData.transaction_type === 'out' && !formData.godown_id)) && (
+                                                        <div className="text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-100 flex items-center gap-2">
+                                                            <span>Please select a location above to add products.</span>
+                                                        </div>
+                                                    )}
+                                                    <div className="flex gap-2">
+                                                        <div className="flex-1">
+                                                            <SearchableSelect
+                                                                dropdownWidth={450}
+                                                                options={availableProducts.map(p => {
+                                                                    return {
+                                                                        value: p._destProductId || p.product_id, 
+                                                                        label: p.name,
+                                                                        stock: p.closing_quantity || 0,
+                                                                        godownId: p.godown_id
+                                                                    };
+                                                                })}
+                                                                renderOption={(option) => {
+                                                                    const godownName = godowns.find(g => g.godown_id === option.godownId)?.name || 'Unknown Godown';
+                                                                    return (
+                                                                        <div className="flex items-center justify-between w-full gap-4">
+                                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                                <span className="text-sm font-medium truncate text-slate-800">{option.label}</span>
+                                                                                <span className="text-xs font-semibold text-slate-500 whitespace-nowrap bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                                                                                    In: {godownName}
+                                                                                </span>
+                                                                            </div>
+                                                                            <div className="flex items-center gap-1.5 shrink-0">
+                                                                                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Stock:</span>
+                                                                                <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200/60 min-w-[2.5rem] text-center">
+                                                                                    {parseFloat(option.stock).toLocaleString()}
+                                                                                </span>
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                }}
+                                                                value={selectedProduct}
+                                                                onChange={(val) => setSelectedProduct(val)}
+                                                                placeholder="Search and select product..."
+                                                                searchPlaceholder="Search products..."
+                                                                disabled={(formData.transaction_type === 'in' && !formData.from_location && !formData.godown_id) || (formData.transaction_type === 'out' && !formData.godown_id)}
+                                                            />
+                                                        </div>
+                                                        <div className="w-28">
+                                                            <Input
+                                                                type="number"
+                                                                min="1"
+                                                                value={selectedQty}
+                                                                onChange={(e) => {
+                                                                    let val = e.target.value === '' ? '' : parseInt(e.target.value) || 0;
+                                                                    if (val !== '' && maxQtyForSelected !== null && val > maxQtyForSelected) {
+                                                                        val = maxQtyForSelected;
+                                                                        toast.error(`Maximum available stock is ${maxQtyForSelected}`);
+                                                                    }
+                                                                    setSelectedQty(val);
+                                                                }}
+                                                                placeholder="Qty"
+                                                                className="h-10 text-center font-medium"
+                                                                disabled={(formData.transaction_type === 'in' && !formData.from_location && !formData.godown_id) || (formData.transaction_type === 'out' && !formData.godown_id)}
+                                                            />
+                                                        </div>
+                                                        <Button
+                                                            type="button"
+                                                            onClick={addProductItem}
+                                                            className="h-10 px-4"
+                                                            disabled={!selectedProduct || !selectedQty || ((formData.transaction_type === 'in' && !formData.from_location && !formData.godown_id) || (formData.transaction_type === 'out' && !formData.godown_id))}
+                                                        >
+                                                            <Plus size={18} />
+                                                            <span className="ml-1">Add</span>
+                                                        </Button>
+                                                    </div>
+                                                    {selectedProduct && (
+                                                        <div className="flex gap-4 px-3 py-2 bg-white rounded-md border border-slate-200 text-xs shadow-sm">
+                                                            {(() => {
+                                                                const destProduct = products.find(p => p.product_id === selectedProduct);
+                                                                const qty = parseInt(selectedQty) || 0;
+                                                                let destCurrentStock = parseFloat(destProduct?.closing_quantity) || 0;
+                                                                let destNewStock = formData.transaction_type === 'in' ? destCurrentStock + qty : destCurrentStock - qty;
+
+                                                                let sourceProduct = null;
+                                                                let sourceCurrentStock = 0;
+                                                                let sourceNewStock = 0;
+                                                                if (formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK') {
+                                                                    sourceProduct = products.find(p => p.name === destProduct?.name && p.godown_id === formData.from_location);
+                                                                    sourceCurrentStock = parseFloat(sourceProduct?.closing_quantity) || 0;
+                                                                    sourceNewStock = sourceCurrentStock - qty;
+                                                                }
+
+                                                                return (
+                                                                    <div className="flex flex-col gap-1.5 w-full">
+                                                                        <div className="text-slate-500 font-semibold uppercase text-[10px] tracking-wider">Live Stock Preview</div>
+                                                                        {formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK' && (
+                                                                            <div className="flex items-center justify-between">
+                                                                                <span className="text-rose-600 font-medium">From {getGodownName(formData.from_location)}:</span>
+                                                                                <span className="flex items-center gap-2 font-medium">
+                                                                                    <span className="text-slate-500">{sourceCurrentStock}</span>
+                                                                                    <ArrowRight size={12} className="text-slate-400" />
+                                                                                    <span className={sourceNewStock < 0 ? "text-red-500" : "text-slate-800"}>{sourceNewStock}</span>
+                                                                                </span>
+                                                                            </div>
+                                                                        )}
+                                                                        <div className="flex items-center justify-between">
+                                                                            <span className={formData.transaction_type === 'in' ? "text-emerald-600 font-medium" : "text-rose-600 font-medium"}>
+                                                                                {formData.transaction_type === 'in' ? `To ${getGodownName(formData.godown_id)}:` : `From ${getGodownName(formData.godown_id)}:`}
+                                                                            </span>
+                                                                            <span className="flex items-center gap-2 font-medium">
+                                                                                <span className="text-slate-500">{destCurrentStock}</span>
+                                                                                <ArrowRight size={12} className="text-slate-400" />
+                                                                                <span className={destNewStock < 0 ? "text-red-500" : "text-slate-800"}>{destNewStock}</span>
+                                                                            </span>
+                                                                        </div>
                                                                     </div>
-                                                                </div>
-                                                            )}
-                                                            value={selectedProduct}
-                                                            onChange={(val) => setSelectedProduct(val)}
-                                                            placeholder="Search and select product..."
-                                                            searchPlaceholder="Search products..."
-                                                        />
-                                                    </div>
-                                                    <div className="w-28">
-                                                        <Input
-                                                            type="number"
-                                                            min="1"
-                                                            value={selectedQty}
-                                                            onChange={(e) => setSelectedQty(e.target.value)}
-                                                            placeholder="Qty"
-                                                            className="h-10 text-center font-medium"
-                                                        />
-                                                    </div>
-                                                    <Button
-                                                        type="button"
-                                                        onClick={addProductItem}
-                                                        className="h-10 px-4"
-                                                        disabled={!selectedProduct || !selectedQty}
-                                                    >
-                                                        <Plus size={18} />
-                                                        <span className="ml-1">Add</span>
-                                                    </Button>
+                                                                );
+                                                            })()}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )}
 
@@ -844,7 +1230,48 @@ const StockManagement = () => {
                                                                         <p className="text-sm font-medium text-slate-900 truncate">
                                                                             {getProductName(item.product_id)}
                                                                         </p>
-                                                                        {/* SKU removed */}
+                                                                        <div className="mt-1 space-y-1">
+                                                                            {(() => {
+                                                                                const destProduct = products.find(p => p.product_id === item.product_id);
+                                                                                const qty = parseInt(item.quantity) || 0;
+                                                                                let destCurrentStock = parseFloat(destProduct?.closing_quantity) || 0;
+                                                                                let destNewStock = formData.transaction_type === 'in' ? destCurrentStock + qty : destCurrentStock - qty;
+                                                                    
+                                                                                let sourceProduct = null;
+                                                                                let sourceCurrentStock = 0;
+                                                                                let sourceNewStock = 0;
+                                                                                if (formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK') {
+                                                                                    sourceProduct = products.find(p => p.name === destProduct?.name && p.godown_id === formData.from_location);
+                                                                                    sourceCurrentStock = parseFloat(sourceProduct?.closing_quantity) || 0;
+                                                                                    sourceNewStock = sourceCurrentStock - qty;
+                                                                                }
+                                                                    
+                                                                                return (
+                                                                                    <>
+                                                                                        {formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK' && (
+                                                                                            <div className="text-[11px] flex items-center justify-between max-w-[200px]">
+                                                                                                <span className="text-rose-600 font-medium">From {getGodownName(formData.from_location)}:</span>
+                                                                                                <span className="flex items-center gap-1.5 font-medium">
+                                                                                                    <span className="text-slate-500">{sourceCurrentStock}</span>
+                                                                                                    <ArrowRight size={10} className="text-slate-400" />
+                                                                                                    <span className={sourceNewStock < 0 ? "text-red-500" : "text-slate-700"}>{sourceNewStock}</span>
+                                                                                                </span>
+                                                                                            </div>
+                                                                                        )}
+                                                                                        <div className="text-[11px] flex items-center justify-between max-w-[200px]">
+                                                                                            <span className={formData.transaction_type === 'in' ? "text-emerald-600 font-medium" : "text-rose-600 font-medium"}>
+                                                                                                {formData.transaction_type === 'in' ? `To ${getGodownName(formData.godown_id)}:` : `From ${getGodownName(formData.godown_id)}:`}
+                                                                                            </span>
+                                                                                            <span className="flex items-center gap-1.5 font-medium">
+                                                                                                <span className="text-slate-500">{destCurrentStock}</span>
+                                                                                                <ArrowRight size={10} className="text-slate-400" />
+                                                                                                <span className={destNewStock < 0 ? "text-red-500" : "text-slate-700"}>{destNewStock}</span>
+                                                                                            </span>
+                                                                                        </div>
+                                                                                    </>
+                                                                                );
+                                                                            })()}
+                                                                        </div>
                                                                     </div>
                                                                     <div className="flex items-center gap-2">
                                                                         <div className="flex items-center gap-1">
@@ -889,7 +1316,7 @@ const StockManagement = () => {
                                                 </div>
                                             )}
                                         </div>
-                                    </form>
+                            </form>
                                 </div>
 
                                 <div className="p-4 sm:px-6 border-t border-slate-100 bg-slate-50 rounded-b-2xl grid grid-cols-2 gap-3 sm:flex sm:justify-end">
@@ -898,30 +1325,23 @@ const StockManagement = () => {
                                         {editingEntry ? 'Save Changes' : 'Create Entry'}
                                     </Button>
                                 </div>
-                            </div>
-                        </div>
-                    )}
-                </div>            <DeleteModal
-                isOpen={isDeleteModalOpen}
-                onClose={() => setIsDeleteModalOpen(false)}
-                onConfirm={confirmDelete}
-                title="Delete Stock Entry"
-                description="Are you sure you want to delete this stock entry? This will permanently remove the record from history."
-                itemLabel={itemToDelete?.entry_id}
-                loading={isDeleting}
-            />
+                    </div>
+                </div>
+            )}
+                <DeleteModal
+                    isOpen={isDeleteModalOpen}
+                    onClose={() => setIsDeleteModalOpen(false)}
+                    onConfirm={confirmDelete}
+                    title="Delete Stock Entry"
+                    description="Are you sure you want to delete this stock entry? This will permanently remove the record from history."
+                    itemLabel={itemToDelete?.entry_id}
+                    loading={isDeleting}
+                />
         </div>
     );
 };
 
 export default StockManagement;
-
-const StatItem = ({ label, value }) => (
-    <div className="flex flex-col">
-        <h3 className="text-2xl font-bold text-slate-900 leading-none tracking-tight">{value}</h3>
-        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1.5">{label}</p>
-    </div>
-);
 
 const FormField = ({ label, className = "", ...props }) => (
     <div className="space-y-1.5">
@@ -931,122 +1351,84 @@ const FormField = ({ label, className = "", ...props }) => (
     </div>
 );
 
-const HeaderCell = ({ children, align = "left" }) => (
-    <th className={cn(`erp-table-th`, align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left')}>
-        {children}
-    </th>
-);
+const EntryRow = ({ entry, user, getGodownName, getProductName, onEdit, onDelete }) => {
+    const isTransfer = entry.transaction_type === 'in' && entry.from_location;
+    const isOut = entry.transaction_type === 'out';
 
-const EmptyRow = ({ message }) => (
-    <tr>
-        <td colSpan="8" className="px-4 py-8 text-center text-slate-500 text-sm">
-            {message}
-        </td>
-    </tr>
-);
-
-const EntryRow = ({ entry, user, getGodownName, getProductName, onEdit, onDelete }) => (
-    <tr className="erp-table-tr group">
-        <td className="erp-table-td">
-            <div className="flex flex-col gap-1">
+    return (
+        <tr className="hover:bg-slate-50 transition-colors group h-[73px]">
+            <td className="px-6 py-4 whitespace-nowrap">
                 <div className="flex items-center gap-2">
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase
-                        ${entry.transaction_type === 'in' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
-                        {entry.transaction_type === 'in' ? <ArrowDown size={10} /> : <ArrowUp size={10} />}
-                        {entry.transaction_type}
-                    </span>
-                    <span className="text-[11px] font-bold text-slate-400">
-                        {new Date(entry.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                    <span className={cn(
+                        "inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase",
+                        isTransfer ? "bg-blue-50 text-blue-600" : (entry.transaction_type === 'in' ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700")
+                    )}>
+                        {isTransfer ? <ArrowRight size={10} /> : (entry.transaction_type === 'in' ? <ArrowDown size={10} /> : <ArrowUp size={10} />)}
+                        {isTransfer ? 'Transfer' : entry.transaction_type}
                     </span>
                 </div>
-                <span className="font-mono text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                    {entry.entry_id}
-                </span>
-            </div>
-        </td>
-        <td className="erp-table-td">
-            <div className="flex flex-col">
-                <span className="font-bold text-slate-900 text-sm leading-tight">{getProductName(entry.product_id)}</span>
+                <div className="font-medium text-slate-700 mt-1 text-sm">{entry.date}</div>
+                <div className="font-mono text-[10px] text-slate-400 mt-0.5">{entry.entry_id}</div>
+            </td>
+            <td className="px-6 py-4 whitespace-nowrap">
+                <span className="font-semibold text-slate-800">{getProductName(entry.product_id)}</span>
                 {entry.reference_number && (
-                    <span className="text-[10px] font-medium text-slate-400 mt-0.5">Ref: {entry.reference_number}</span>
+                    <div className="text-[10px] font-medium text-slate-400 mt-0.5">Ref: {entry.reference_number}</div>
                 )}
-            </div>
-        </td>
-        <td className="erp-table-td">
-            <div className="flex items-center gap-1.5">
-                <MapPin size={12} className="text-slate-400" />
-                <span className="text-sm text-slate-600 font-semibold">{getGodownName(entry.godown_id)}</span>
-            </div>
-        </td>
-        <td className="erp-table-td text-center">
-            <span className="text-sm font-bold text-slate-900">{entry.quantity}</span>
-        </td>
-        <td className="erp-table-td text-center">
-            <div className="flex items-center justify-center gap-2">
-                <span className="text-[11px] font-medium text-slate-400">{entry.opening_stock}</span>
-                <div className="w-4 h-[1px] bg-slate-200"></div>
-                <span className="text-xs font-bold text-primary bg-primary/5 px-2 py-0.5 rounded border border-primary/10">
-                    {entry.closing_stock}
-                </span>
-            </div>
-        </td>
-        <td className="erp-table-td text-right">
-            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                <Button variant="ghost" size="icon" type="button" onClick={onEdit} className="h-8 w-8 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg" title="Edit">
-                    <Edit2 size={14} />
-                </Button>
-                {(user?.role === 'SUPER ADMIN' || user?.Admin === 'Yes') && (
-                    <Button variant="ghost" size="icon" type="button" onClick={onDelete} className="h-8 w-8 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded-lg" title="Delete">
-                        <Trash2 size={14} />
-                    </Button>
+            </td>
+            <td className="px-6 py-4 whitespace-nowrap">
+                {isTransfer || isOut ? (
+                    <span className="text-sm text-slate-700">
+                        <span className="font-semibold">{getGodownName(isTransfer ? entry.from_location : entry.godown_id)}</span>
+                        <span className="text-slate-400 mx-1.5">—</span>
+                        <span className="text-slate-500">{parseFloat(entry.opening_stock || 0).toLocaleString()} → -{parseFloat(entry.quantity).toLocaleString()} = {parseFloat(entry.closing_stock || 0).toLocaleString()}</span>
+                    </span>
+                ) : (
+                    <span className="text-sm text-slate-400 italic">External / Purchase</span>
                 )}
-            </div>
-        </td>
-    </tr>
-);
-
-const MobileEntryCard = ({ entry, user, getGodownName, getProductName, onEdit, onDelete }) => (
-    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-start justify-between">
-        <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0
-                ${entry.transaction_type === 'in' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
-                {entry.transaction_type === 'in' ? <ArrowDown size={18} /> : <ArrowUp size={18} />}
-            </div>
-            <div>
-                <h3 className="font-semibold text-slate-900 text-sm">{entry.entry_id}</h3>
-                <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-xs text-slate-500">{getProductName(entry.product_id)}</span>
-                    <span className="text-xs text-slate-400">|</span>
-                    <span className="text-xs text-slate-500">{entry.quantity} qty</span>
+            </td>
+            <td className="px-6 py-4 whitespace-nowrap">
+                {isTransfer || entry.transaction_type === 'in' ? (
+                    <span className="text-sm text-slate-700">
+                        <span className="font-semibold">{getGodownName(entry.godown_id)}</span>
+                        <span className="text-slate-400 mx-1.5">—</span>
+                        <span className="text-slate-500">{parseFloat(entry.opening_stock || 0).toLocaleString()} → +{parseFloat(entry.quantity).toLocaleString()} = {parseFloat(entry.closing_stock || 0).toLocaleString()}</span>
+                    </span>
+                ) : (
+                    <span className="text-sm text-slate-400 italic">Dispatch / Out</span>
+                )}
+            </td>
+            <td className="px-6 py-4 text-right whitespace-nowrap">
+                <span className="font-bold text-slate-700">{parseFloat(entry.quantity).toLocaleString()}</span>
+                <span className="text-xs text-slate-400 font-normal ml-1">Bags</span>
+            </td>
+            <td className="px-6 py-4 text-right whitespace-nowrap">
+                {entry.transaction_type === 'in' ? (
+                    <span className="inline-flex items-center gap-1 text-emerald-600 font-bold text-sm">
+                        <ArrowDown size={14} strokeWidth={2.5} />
+                        +{entry.quantity}
+                    </span>
+                ) : (
+                    <span className="inline-flex items-center gap-1 text-rose-600 font-bold text-sm">
+                        <ArrowUp size={14} strokeWidth={2.5} />
+                        -{entry.quantity}
+                    </span>
+                )}
+            </td>
+            <td className="px-6 py-4 text-center whitespace-nowrap">
+                <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                    <button onClick={onEdit} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-colors" title="Edit">
+                        <Edit2 size={16} />
+                    </button>
+                    {(user?.role === 'SUPER ADMIN' || user?.Admin === 'Yes') && (
+                        <button onClick={onDelete} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Delete">
+                            <Trash2 size={16} />
+                        </button>
+                    )}
                 </div>
-            </div>
-        </div>
-        <div className="flex items-center gap-1">
-            <Button variant="ghost" size="icon" onClick={onEdit} className="text-slate-400 hover:text-primary hover:bg-primary/5 rounded-full transition-colors">
-                <Edit2 size={18} />
-            </Button>
-            {user?.role === 'SUPER ADMIN' && (
-                <Button variant="ghost" size="icon" onClick={onDelete} className="text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded-full transition-colors">
-                    <Trash2 size={18} />
-                </Button>
-            )}
-        </div>
-    </div>
-);
+            </td>
+        </tr>
+    );
+};
 
-const Pagination = ({ currentPage, totalPages, totalItems, startIndex, endIndex, onPageChange, className }) => (
-    <div className={`flex flex-col sm:flex-row items-center justify-between p-4 gap-4 ${className}`}>
-        <p className="text-sm text-slate-500">
-            Showing <span className="font-medium text-slate-900">{startIndex}</span> to <span className="font-medium text-slate-900">{endIndex}</span> of <span className="font-medium text-slate-900">{totalItems}</span> results
-        </p>
-        <div className="flex items-center gap-2">
-            <Button variant="outline" size="icon" onClick={() => onPageChange(currentPage - 1)} disabled={currentPage === 1} className="h-9 w-9 border-slate-200">
-                <span className="text-slate-600">‹</span>
-            </Button>
-            <span className="text-sm font-medium">{currentPage} / {totalPages}</span>
-            <Button variant="outline" size="icon" onClick={() => onPageChange(currentPage + 1)} disabled={currentPage === totalPages} className="h-9 w-9 border-slate-200">
-                <span className="text-slate-600">›</span>
-            </Button>
-        </div>
-    </div>
-);
+

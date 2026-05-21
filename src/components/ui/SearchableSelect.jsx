@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Search, Check, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -13,11 +14,14 @@ const SearchableSelect = ({
     error = null,
     renderOption = null,
     popperPlacement = 'auto',
+    dropdownWidth = null,
 }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [search, setSearch] = useState('');
     const [placement, setPlacement] = useState('bottom');
+    const [dropdownStyle, setDropdownStyle] = useState({});
     const containerRef = useRef(null);
+    const dropdownRef = useRef(null);
     const inputRef = useRef(null);
 
     const selectedOption = options.find(opt => opt.value === value);
@@ -29,7 +33,11 @@ const SearchableSelect = ({
 
     useEffect(() => {
         const handleClickOutside = (event) => {
-            if (containerRef.current && !containerRef.current.contains(event.target)) {
+            if (
+                containerRef.current && 
+                !containerRef.current.contains(event.target) &&
+                (!dropdownRef.current || !dropdownRef.current.contains(event.target))
+            ) {
                 setIsOpen(false);
                 setSearch('');
             }
@@ -45,18 +53,53 @@ const SearchableSelect = ({
     }, [isOpen]);
 
     useEffect(() => {
-        if (isOpen && containerRef.current && popperPlacement === 'auto') {
-            const rect = containerRef.current.getBoundingClientRect();
-            const viewportHeight = window.innerHeight;
-            const dropdownHeight = 280;
-            const spaceBelow = viewportHeight - rect.bottom;
-            const spaceAbove = rect.top;
+        if (isOpen && containerRef.current) {
+            const updatePosition = () => {
+                const rect = containerRef.current.getBoundingClientRect();
+                const viewportHeight = window.innerHeight;
+                const dropdownHeight = 280;
+                const spaceBelow = viewportHeight - rect.bottom;
+                const spaceAbove = rect.top;
 
-            if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
-                setPlacement('top');
-            } else {
-                setPlacement('bottom');
-            }
+                let currentPlacement = 'bottom';
+                if (popperPlacement === 'auto') {
+                    if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
+                        currentPlacement = 'top';
+                    }
+                } else {
+                    currentPlacement = popperPlacement;
+                }
+                setPlacement(currentPlacement);
+
+                let width = rect.width;
+                let left = rect.left;
+                if (dropdownWidth) {
+                    const parsedWidth = typeof dropdownWidth === 'number' ? dropdownWidth : parseInt(dropdownWidth) || 350;
+                    width = Math.max(rect.width, parsedWidth);
+                    left = Math.min(rect.left, window.innerWidth - width - 16);
+                    left = Math.max(16, left);
+                }
+
+                setDropdownStyle({
+                    position: 'fixed',
+                    left: left,
+                    width: width,
+                    zIndex: 99999,
+                    ...(currentPlacement === 'top' 
+                        ? { bottom: viewportHeight - rect.top + 4 }
+                        : { top: rect.bottom + 4 }
+                    )
+                });
+            };
+
+            updatePosition();
+            window.addEventListener('scroll', updatePosition, true);
+            window.addEventListener('resize', updatePosition);
+            
+            return () => {
+                window.removeEventListener('scroll', updatePosition, true);
+                window.removeEventListener('resize', updatePosition);
+            };
         }
     }, [isOpen, popperPlacement]);
 
@@ -106,12 +149,15 @@ const SearchableSelect = ({
                 </div>
             </button>
 
-            {isOpen && (
-                <div className={cn(
-                    'absolute z-50 w-full bg-white rounded-lg border border-slate-200 shadow-lg overflow-hidden animate-in fade-in-0 zoom-in-95 duration-100',
-                    placement === 'bottom' ? 'mt-1' : 'mb-1',
-                    placement === 'top' && 'bottom-full origin-bottom'
-                )}>
+            {isOpen && createPortal(
+                <div 
+                    ref={dropdownRef}
+                    className={cn(
+                        'bg-white rounded-lg border border-slate-200 shadow-lg overflow-hidden animate-in fade-in-0 zoom-in-95 duration-100',
+                        placement === 'top' && 'origin-bottom'
+                    )}
+                    style={dropdownStyle}
+                >
                     <div className="p-2 border-b border-slate-100">
                         <div className="relative">
                             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -155,7 +201,8 @@ const SearchableSelect = ({
                             ))
                         )}
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
 
             {error && <p className="text-red-500 text-xs mt-1">{error}</p>}

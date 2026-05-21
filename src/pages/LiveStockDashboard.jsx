@@ -7,10 +7,14 @@ import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
 import { cn } from '@/lib/utils';
 
-const PAGE_SIZE = 50;
+const BATCH_SIZE = 1000; // Supabase max rows per request — used for Godown Distribution
+const PAGE_SIZE = 50;   // Rows per page — used for Detailed Metrics infinite scroll
 
 const LiveStockDashboard = () => {
     const [activeTab, setActiveTab] = useState('master');
+    // allProducts: full dataset (all batches) — used for Godown Distribution totals
+    const [allProducts, setAllProducts] = useState([]);
+    // products: paginated slice — used for Detailed Metrics with infinite scroll
     const [products, setProducts] = useState([]);
     const [godowns, setGodowns] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -55,22 +59,57 @@ const LiveStockDashboard = () => {
         }
     };
 
-    const fetchProducts = async (pageNumber, reset = false) => {
-        if (reset) {
-            setLoading(true);
-        } else {
-            setLoadingMore(true);
+    // ─── Fetch ALL products (batch loop) ─────────────────────────────────────
+    // Powers the Godown Distribution table — needs complete data for accurate totals.
+    const fetchAllProducts = async () => {
+        try {
+            let accumulated = [];
+            let batchIndex = 0;
+            let done = false;
+
+            while (!done) {
+                let query = supabase
+                    .from('products')
+                    .select('godown_id, product_id, closing_quantity, opening_quantity')
+                    .eq('is_active', true);
+
+                if (filterGodown) query = query.eq('godown_id', filterGodown);
+
+                const from = batchIndex * BATCH_SIZE;
+                const to   = from + BATCH_SIZE - 1;
+
+                const { data, error } = await query
+                    .order('name', { ascending: true })
+                    .range(from, to);
+
+                if (error) throw error;
+
+                accumulated = [...accumulated, ...(data || [])];
+
+                if (!data || data.length < BATCH_SIZE) done = true;
+                else batchIndex++;
+            }
+
+            setAllProducts(accumulated);
+        } catch (error) {
+            console.error('Error fetching all products:', error);
         }
+    };
+
+    // ─── Fetch paginated products ─────────────────────────────────────────────
+    // Powers the Detailed Product Metrics table with infinite scroll.
+    const fetchProducts = async (pageNumber, reset = false) => {
+        if (reset) setLoading(true);
+        else setLoadingMore(true);
 
         try {
-            let query = supabase.from('products').select('*', { count: 'exact' }).eq('is_active', true);
-            
-            if (searchTerm) {
-                query = query.or(`name.ilike.%${searchTerm}%,product_id.ilike.%${searchTerm}%`);
-            }
-            if (filterGodown) {
-                query = query.eq('godown_id', filterGodown);
-            }
+            let query = supabase
+                .from('products')
+                .select('*', { count: 'exact' })
+                .eq('is_active', true);
+
+            if (searchTerm)   query = query.or(`name.ilike.%${searchTerm}%,product_id.ilike.%${searchTerm}%`);
+            if (filterGodown) query = query.eq('godown_id', filterGodown);
 
             const { data, count, error } = await query
                 .order('name', { ascending: true })
@@ -82,12 +121,12 @@ const LiveStockDashboard = () => {
                 setProducts(data || []);
             } else {
                 setProducts(prev => {
-                    const newItems = data || [];
-                    const existingIds = new Set(prev.map(p => p.product_id));
-                    const uniqueNewItems = newItems.filter(item => !existingIds.has(item.product_id));
-                    return [...prev, ...uniqueNewItems];
+                    const existingKeys = new Set(prev.map(p => `${p.product_id}-${p.godown_id}`));
+                    const unique = (data || []).filter(item => !existingKeys.has(`${item.product_id}-${item.godown_id}`));
+                    return [...prev, ...unique];
                 });
             }
+
             setTotalProducts(count || 0);
             setHasMore((data || []).length === PAGE_SIZE && (pageNumber + 1) * PAGE_SIZE < count);
             setPage(pageNumber);
@@ -106,12 +145,15 @@ const LiveStockDashboard = () => {
 
     useEffect(() => {
         const timer = setTimeout(() => {
+            // Paginated fetch for Detailed Metrics
             fetchProducts(0, true);
+            // Full fetch for Godown Distribution (runs in background, no loading spinner)
+            fetchAllProducts();
         }, 300);
         return () => clearTimeout(timer);
     }, [searchTerm, filterGodown, summaryDate]);
 
-    // Handle Infinite Scroll
+    // Infinite Scroll — triggers paginated fetchProducts
     useEffect(() => {
         const handleScroll = () => {
             if (window.innerHeight + document.documentElement.scrollTop >= document.documentElement.offsetHeight - 100) {
@@ -120,7 +162,6 @@ const LiveStockDashboard = () => {
                 }
             }
         };
-
         window.addEventListener('scroll', handleScroll);
         return () => window.removeEventListener('scroll', handleScroll);
     }, [hasMore, loadingMore, loading, page, searchTerm, filterGodown]);
@@ -215,7 +256,7 @@ const LiveStockDashboard = () => {
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'products' },
-                () => fetchProducts(0, true)
+                () => { fetchProducts(0, true); fetchAllProducts(); }
             )
             .on(
                 'postgres_changes',
@@ -405,7 +446,8 @@ const LiveStockDashboard = () => {
                                                 const outgoingTransfers = dayTransactions.filter(t => t.from_location === godown.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
                                                 const totalIn = directIn;
                                                 const totalOut = directOut + outgoingTransfers;
-                                                const gProducts = products.filter(p => p.godown_id === godown.godown_id);
+                                                // Use allProducts (complete dataset) for accurate godown totals
+                                                const gProducts = allProducts.filter(p => p.godown_id === godown.godown_id);
                                                 const totalClosing = gProducts.reduce((sum, p) => sum + (parseFloat(p.closing_quantity) || 0), 0);
                                                 const totalOpening = totalClosing - totalIn + totalOut;
                                                 const isToday = summaryDate === new Date().toISOString().split('T')[0];
