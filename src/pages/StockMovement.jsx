@@ -30,16 +30,16 @@ const ITEMS_PER_PAGE = 10;
 
 const StockMovement = () => {
     const navigate = useNavigate();
-    
+
     // Core Data States
     const [transfers, setTransfers] = useState([]);
     const [godowns, setGodowns] = useState([]);
     const [products, setProducts] = useState([]);
-    
+
     // Loading States
     const [loadingData, setLoadingData] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
-    
+
     // Filter States
     const [startDate, setStartDate] = useState(
         new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
@@ -48,7 +48,7 @@ const StockMovement = () => {
     const [filterSourceGodown, setFilterSourceGodown] = useState('all');
     const [filterDestGodown, setFilterDestGodown] = useState('all');
     const [searchTerm, setSearchTerm] = useState('');
-    
+
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
 
@@ -61,16 +61,28 @@ const StockMovement = () => {
     // Fetch Reference Data
     const fetchMetadata = async () => {
         try {
-            const [godownsRes, productsRes] = await Promise.all([
-                supabase.from('godowns').select('godown_id, name, is_active').order('name'),
-                supabase.from('products').select('id, product_id, name, godown_id, mux, is_active, product_type')
-            ]);
-            
+            const godownsRes = await supabase.from('godowns').select('godown_id, name, is_active').order('name');
             if (godownsRes.error) throw godownsRes.error;
-            if (productsRes.error) throw productsRes.error;
-            
             setGodowns(godownsRes.data || []);
-            setProducts(productsRes.data || []);
+
+            // Fetch all products using pagination to overcome the 1000-record PostgREST limit
+            let allProducts = [];
+            let page = 0;
+            const pageSize = 1000;
+            while (true) {
+                const { data, error } = await supabase
+                    .from('products')
+                    .select('id, product_id, name, godown_id, mux, is_active, product_type')
+                    .range(page * pageSize, (page + 1) * pageSize - 1);
+
+                if (error) throw error;
+                if (!data || data.length === 0) break;
+                allProducts = allProducts.concat(data);
+                if (data.length < pageSize) break;
+                page++;
+            }
+
+            setProducts(allProducts);
         } catch (error) {
             console.error('Error fetching metadata:', error);
             toast.error('Failed to load configuration data');
@@ -81,7 +93,7 @@ const StockMovement = () => {
     const fetchMovementData = useCallback(async (isRefresh = false) => {
         if (isRefresh) setRefreshing(true);
         else setLoadingData(true);
-        
+
         try {
             let transfersQuery = supabase
                 .from('stock_management')
@@ -90,16 +102,16 @@ const StockMovement = () => {
                 .eq('transaction_type', 'in')
                 .order('date', { ascending: false })
                 .order('created_at', { ascending: false });
-                
+
             if (startDate) transfersQuery = transfersQuery.gte('date', startDate);
             if (endDate) transfersQuery = transfersQuery.lte('date', endDate);
-            
+
             const transfersRes = await transfersQuery;
-            
+
             if (transfersRes.error) throw transfersRes.error;
-            
+
             setTransfers(transfersRes.data || []);
-            
+
             if (isRefresh) toast.success('Transfer log synchronized');
         } catch (error) {
             console.error('Error fetching movement data:', error);
@@ -143,7 +155,7 @@ const StockMovement = () => {
                 if (filterSourceGodown !== 'new_stock' && t.from_location !== filterSourceGodown) return false;
             }
             if (filterDestGodown !== 'all' && t.godown_id !== filterDestGodown) return false;
-            
+
             if (searchTerm) {
                 const term = searchTerm.toLowerCase();
                 const product = productMap[t.product_id];
@@ -152,7 +164,7 @@ const StockMovement = () => {
                 const refMatch = t.reference_number?.toLowerCase().includes(term);
                 const prodNameMatch = product?.name?.toLowerCase().includes(term);
                 const prodIdMatch = t.product_id?.toLowerCase().includes(term);
-                
+
                 if (!entryMatch && !notesMatch && !refMatch && !prodNameMatch && !prodIdMatch) return false;
             }
             return true;
@@ -199,10 +211,10 @@ const StockMovement = () => {
             const worksheet = XLSX.utils.json_to_sheet(dataToExport);
             const workbook = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(workbook, worksheet, 'Transfers');
-            
+
             const wscols = Object.keys(dataToExport[0]).map(key => ({ wch: Math.max(key.length + 3, 14) }));
             worksheet['!cols'] = wscols;
-            
+
             XLSX.writeFile(workbook, `Inter_Godown_Transfers_${startDate}_to_${endDate}.xlsx`);
             toast.success('Report exported successfully');
         } catch (error) {
@@ -275,7 +287,7 @@ const StockMovement = () => {
             {/* Header */}
             <div className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm px-6 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
-                    <button 
+                    <button
                         onClick={() => navigate(-1)}
                         className="p-2 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 transition-all text-slate-600"
                         title="Go Back"
@@ -294,15 +306,15 @@ const StockMovement = () => {
                 </div>
 
                 <div className="flex items-center gap-3 w-full sm:w-auto">
-                    <button 
-                        onClick={() => fetchMovementData(true)} 
+                    <button
+                        onClick={() => fetchMovementData(true)}
                         disabled={refreshing || loadingData}
                         className="flex items-center justify-center gap-2 px-4 py-2 bg-white text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-50 border border-slate-200 transition-all disabled:opacity-50 shadow-sm"
                     >
                         <RefreshCw size={14} className={refreshing ? 'animate-spin text-primary' : ''} />
                         Refresh
                     </button>
-                    <button 
+                    <button
                         onClick={handleExportExcel}
                         className="flex items-center justify-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-semibold shadow-sm hover:bg-primary/95 transition-all"
                     >
@@ -313,7 +325,7 @@ const StockMovement = () => {
             </div>
 
             <div className="flex-1 p-6 space-y-6 max-w-[1600px] w-full mx-auto pb-24">
-                
+
                 {/* Simple Row Filter Bar */}
                 <div className="flex items-end gap-4 flex-wrap w-full mb-4">
                     <div className="space-y-1 flex-1 min-w-[140px]">
@@ -412,8 +424,8 @@ const StockMovement = () => {
                                         }
                                         const product = productMap[t.product_id];
                                         return (
-                                            <tr 
-                                                key={t.entry_id || index} 
+                                            <tr
+                                                key={t.entry_id || index}
                                                 className="hover:bg-slate-50 transition-colors group cursor-pointer h-[73px]"
                                                 onClick={() => handleOpenDrilldown(t)}
                                             >
@@ -460,54 +472,54 @@ const StockMovement = () => {
                             </table>
                         )}
                     </div>
-                    
+
                     {/* Pagination */}
                     <div className="p-4 border-t border-slate-100 bg-white flex flex-col sm:flex-row items-center justify-between gap-4">
                         <span className="text-sm font-medium text-slate-500">
                             Showing <span className="font-semibold text-slate-700">{filteredTransfers.length === 0 ? 0 : (currentPage - 1) * ITEMS_PER_PAGE + 1}</span> to <span className="font-semibold text-slate-700">{Math.min(currentPage * ITEMS_PER_PAGE, filteredTransfers.length)}</span> of <span className="font-semibold text-slate-700">{filteredTransfers.length}</span> records
                         </span>
-                            <div className="flex items-center gap-1.5">
-                                <button 
-                                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                                    disabled={currentPage === 1}
-                                    className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-all"
-                                >
-                                    Previous
-                                </button>
-                                <div className="flex items-center gap-1 px-2">
-                                    {Array.from({ length: Math.min(5, totalPages) }).map((_, i) => {
-                                        let pageNum = currentPage;
-                                        if (totalPages <= 5) pageNum = i + 1;
-                                        else if (currentPage <= 3) pageNum = i + 1;
-                                        else if (currentPage >= totalPages - 2) pageNum = totalPages - 4 + i;
-                                        else pageNum = currentPage - 2 + i;
-                                        
-                                        return (
-                                            <button
-                                                key={pageNum}
-                                                onClick={() => setCurrentPage(pageNum)}
-                                                className={cn(
-                                                    "w-8 h-8 rounded-lg text-sm font-bold transition-all",
-                                                    currentPage === pageNum 
-                                                        ? "bg-primary text-white" 
-                                                        : "bg-white text-slate-600 hover:bg-slate-50 hover:text-primary"
-                                                )}
-                                            >
-                                                {pageNum}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                                <button 
-                                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                                    disabled={currentPage === totalPages}
-                                    className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-all"
-                                >
-                                    Next
-                                </button>
+                        <div className="flex items-center gap-1.5">
+                            <button
+                                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                                disabled={currentPage === 1}
+                                className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-all"
+                            >
+                                Previous
+                            </button>
+                            <div className="flex items-center gap-1 px-2">
+                                {Array.from({ length: Math.min(5, totalPages) }).map((_, i) => {
+                                    let pageNum = currentPage;
+                                    if (totalPages <= 5) pageNum = i + 1;
+                                    else if (currentPage <= 3) pageNum = i + 1;
+                                    else if (currentPage >= totalPages - 2) pageNum = totalPages - 4 + i;
+                                    else pageNum = currentPage - 2 + i;
+
+                                    return (
+                                        <button
+                                            key={pageNum}
+                                            onClick={() => setCurrentPage(pageNum)}
+                                            className={cn(
+                                                "w-8 h-8 rounded-lg text-sm font-bold transition-all",
+                                                currentPage === pageNum
+                                                    ? "bg-primary text-white"
+                                                    : "bg-white text-slate-600 hover:bg-slate-50 hover:text-primary"
+                                            )}
+                                        >
+                                            {pageNum}
+                                        </button>
+                                    );
+                                })}
                             </div>
+                            <button
+                                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                                disabled={currentPage === totalPages}
+                                className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-all"
+                            >
+                                Next
+                            </button>
                         </div>
                     </div>
+                </div>
             </div>
 
             {/* Drilldown Modal Overlay */}
@@ -527,7 +539,7 @@ const StockMovement = () => {
                                     </p>
                                 )}
                             </div>
-                            <button 
+                            <button
                                 onClick={() => setIsDetailModalOpen(false)}
                                 className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 transition-colors"
                             >
@@ -563,7 +575,7 @@ const StockMovement = () => {
                                             {detailTransactions.map((dt, idx) => {
                                                 const isOutflow = dt.transaction_type === 'out' || dt.from_location;
                                                 const isTransfer = dt.from_location && dt.godown_id;
-                                                
+
                                                 return (
                                                     <tr key={dt.entry_id || idx} className="hover:bg-slate-50 transition-colors group">
                                                         <td className="px-4 py-3 whitespace-nowrap">
