@@ -62,6 +62,7 @@ const StockManagement = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [filterType, setFilterType] = useState('all');
     const [filterGodown, setFilterGodown] = useState('all');
+    const [filterDate, setFilterDate] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingEntry, setEditingEntry] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
@@ -114,7 +115,7 @@ const StockManagement = () => {
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchTerm, filterType, filterGodown]);
+    }, [searchTerm, filterType, filterGodown, filterDate]);
 
     const fetchAllProducts = async () => {
         let accumulated = [];
@@ -177,9 +178,16 @@ const StockManagement = () => {
     const handleOpenModal = (entry = null) => {
         if (entry) {
             setEditingEntry(entry);
+            // If this was a Stock-In with no from_location (null/empty) it was created as
+            // "New Stock (From System)". Restore the sentinel value so the form pre-selects it.
+            const resolvedFromLocation =
+                entry.transaction_type === 'in' && !entry.from_location
+                    ? 'NEW_STOCK'
+                    : (entry.from_location || '');
             setFormData({
                 ...DEFAULT_FORM_DATA,
                 ...entry,
+                from_location: resolvedFromLocation,
                 productItems: [{ product_id: entry.product_id, quantity: entry.quantity }],
             });
         } else {
@@ -302,8 +310,9 @@ const StockManagement = () => {
             newErrors.productItems = 'At least one product is required';
         }
         if (data.transaction_type === 'in') {
+            // 'NEW_STOCK' is a valid sentinel — only error if truly empty
             if (!data.from_location) newErrors.from_location = 'From Location is required';
-            if (data.godown_id && data.from_location && data.godown_id === data.from_location) {
+            if (data.godown_id && data.from_location && data.from_location !== 'NEW_STOCK' && data.godown_id === data.from_location) {
                 newErrors.from_location = 'From Location cannot be same as Godown';
             }
         }
@@ -323,7 +332,11 @@ const StockManagement = () => {
             if (editingEntry) {
                 const singleItem = formData.productItems[0];
                 const qty = singleItem.quantity;
-                const wasTransfer = editingEntry.from_location && editingEntry.transaction_type === 'in';
+                // A "transfer" is a Stock-In that came from another real godown (not NEW_STOCK)
+                const wasTransfer =
+                    editingEntry.transaction_type === 'in' &&
+                    editingEntry.from_location &&
+                    editingEntry.from_location !== 'NEW_STOCK';
                 const isTransfer = formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK';
 
                 // Fetch current stock for display values
@@ -345,7 +358,11 @@ const StockManagement = () => {
                     closing_stock: displayClosing,
                     transporter_id: formData.transaction_type === 'in' ? (formData.transporter_id || null) : null,
                     lr_number: formData.transaction_type === 'in' ? (formData.lr_number || null) : null,
-                    from_location: formData.transaction_type === 'in' && formData.from_location !== 'NEW_STOCK' ? (formData.from_location || null) : null,
+                    // 'NEW_STOCK' is a UI-only sentinel; store null in DB (FK constraint on godowns table)
+                    from_location:
+                        formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK'
+                            ? formData.from_location
+                            : null,
                 };
 
                 const { error } = await supabase
@@ -513,7 +530,11 @@ const StockManagement = () => {
                         notes: formData.notes,
                         transporter_id: formData.transaction_type === 'in' ? (formData.transporter_id || null) : null,
                         lr_number: formData.transaction_type === 'in' ? (formData.lr_number || null) : null,
-                        from_location: formData.transaction_type === 'in' && formData.from_location !== 'NEW_STOCK' ? (formData.from_location || null) : null,
+                        // 'NEW_STOCK' is a UI-only sentinel; store null in DB (FK constraint on godowns table)
+                        from_location:
+                            formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK'
+                                ? formData.from_location
+                                : null,
                         freight_amount: formData.transaction_type === 'in' && formData.freight_amount ? parseFloat(formData.freight_amount) : null,
                     };
 
@@ -706,9 +727,11 @@ const StockManagement = () => {
             ].some(field => field?.toLowerCase().includes(term));
             const matchesType = filterType === 'all' || e.transaction_type === filterType;
             const matchesGodown = filterGodown === 'all' || e.godown_id === filterGodown;
-            return matchesSearch && matchesType && matchesGodown;
+            const entryDate = e.date ? e.date.split('T')[0] : '';
+            const matchesDate = !filterDate || entryDate === filterDate;
+            return matchesSearch && matchesType && matchesGodown && matchesDate;
         });
-    }, [entries, searchTerm, filterType, filterGodown, getProductName, getGodownName]);
+    }, [entries, searchTerm, filterType, filterGodown, filterDate, getProductName, getGodownName]);
 
     const totalPages = Math.ceil(filteredEntries.length / ITEMS_PER_PAGE);
     const currentItems = useMemo(() => {
@@ -858,6 +881,27 @@ const StockManagement = () => {
                                 <option key={g.godown_id} value={g.godown_id}>{g.name}</option>
                             ))}
                         </select>
+                    </div>
+
+                    <div className="space-y-1 min-w-[180px] lg:max-w-[220px]">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Date</label>
+                        <div className="flex items-center gap-1.5">
+                            <DatePicker
+                                value={filterDate}
+                                onChange={(e) => setFilterDate(e.target.value)}
+                                placeholder="Filter by date"
+                                className="flex-1 border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium"
+                            />
+                            {filterDate && (
+                                <button
+                                    onClick={() => setFilterDate('')}
+                                    className="h-10 w-10 flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-all flex-shrink-0"
+                                    title="Clear date filter"
+                                >
+                                    <X size={14} />
+                                </button>
+                            )}
+                        </div>
                     </div>
                 </div>
 
@@ -1026,7 +1070,12 @@ const StockManagement = () => {
                                                         ...godowns.filter(g => g.godown_id !== formData.godown_id).map(g => ({ value: g.godown_id, label: g.name }))
                                                     ]}
                                                     value={formData.from_location}
-                                                    onChange={(val) => setFormData(prev => ({ ...prev, from_location: val, productItems: [] }))}
+                                                    onChange={(val) => setFormData(prev => ({ 
+                                                        ...prev, 
+                                                        from_location: val, 
+                                                        // Only reset products when creating a new entry
+                                                        productItems: editingEntry ? prev.productItems : [] 
+                                                    }))}
                                                     placeholder="Select Location"
                                                     searchPlaceholder="Search locations..."
                                                     error={errors.from_location}
@@ -1043,14 +1092,18 @@ const StockManagement = () => {
                                                 value={formData.godown_id}
                                                 onChange={(val) => {
                                                     setFormData(prev => {
-                                                        const isSource = prev.transaction_type === 'out' || (prev.transaction_type === 'in' && !prev.from_location);
+                                                        // In edit mode keep products; only clear when creating new entry
+                                                        const shouldClear = !editingEntry && (
+                                                            prev.transaction_type === 'out' ||
+                                                            (prev.transaction_type === 'in' && !prev.from_location)
+                                                        );
                                                         return { 
                                                             ...prev, 
                                                             godown_id: val, 
-                                                            productItems: isSource ? [] : prev.productItems 
+                                                            productItems: shouldClear ? [] : prev.productItems 
                                                         };
                                                     });
-                                                    setSelectedProduct('');
+                                                    if (!editingEntry) setSelectedProduct('');
                                                 }}
                                                 placeholder={`Select ${formData.transaction_type === 'in' ? 'To Godown' : 'From Godown'}`}
                                                 searchPlaceholder="Search godowns..."
@@ -1385,7 +1438,8 @@ const FormField = ({ label, className = "", ...props }) => (
 );
 
 const EntryRow = ({ entry, user, getGodownName, getProductName, onEdit, onDelete }) => {
-    const isTransfer = entry.transaction_type === 'in' && entry.from_location;
+    // A "transfer" is a Stock-In that came from a real godown (not NEW_STOCK and not null)
+    const isTransfer = entry.transaction_type === 'in' && entry.from_location && entry.from_location !== 'NEW_STOCK';
     const isOut = entry.transaction_type === 'out';
 
     return (
@@ -1410,12 +1464,20 @@ const EntryRow = ({ entry, user, getGodownName, getProductName, onEdit, onDelete
                 )}
             </td>
             <td className="px-6 py-4 whitespace-nowrap">
-                {isTransfer || isOut ? (
+                {isTransfer ? (
                     <span className="text-sm text-slate-700">
-                        <span className="font-semibold">{getGodownName(isTransfer ? entry.from_location : entry.godown_id)}</span>
+                        <span className="font-semibold">{getGodownName(entry.from_location)}</span>
                         <span className="text-slate-400 mx-1.5">—</span>
                         <span className="text-slate-500">{parseFloat(entry.opening_stock || 0).toLocaleString()} → -{parseFloat(entry.quantity).toLocaleString()} = {parseFloat(entry.closing_stock || 0).toLocaleString()}</span>
                     </span>
+                ) : isOut ? (
+                    <span className="text-sm text-slate-700">
+                        <span className="font-semibold">{getGodownName(entry.godown_id)}</span>
+                        <span className="text-slate-400 mx-1.5">—</span>
+                        <span className="text-slate-500">{parseFloat(entry.opening_stock || 0).toLocaleString()} → -{parseFloat(entry.quantity).toLocaleString()} = {parseFloat(entry.closing_stock || 0).toLocaleString()}</span>
+                    </span>
+                ) : entry.transaction_type === 'in' && entry.from_location === 'NEW_STOCK' ? (
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-violet-600 bg-violet-50 border border-violet-100 px-2 py-0.5 rounded-full">✨ New Stock (From System)</span>
                 ) : (
                     <span className="text-sm text-slate-400 italic">External / Purchase</span>
                 )}
