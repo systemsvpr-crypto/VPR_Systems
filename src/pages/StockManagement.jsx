@@ -179,8 +179,9 @@ const StockManagement = () => {
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
-    const handleDateChange = (date) => {
-        setFormData(prev => ({ ...prev, date: date }));
+    const handleDateChange = (e) => {
+        const val = e?.target ? e.target.value : e;
+        setFormData(prev => ({ ...prev, date: val }));
     };
 
     const addProductItem = () => {
