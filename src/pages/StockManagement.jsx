@@ -287,7 +287,18 @@ const StockManagement = () => {
 
         if (sourceGodownId && selectedProdData && qtyNum !== '') {
             const sourceStock = products.find(p => p.name === selectedProdData.name && p.godown_id === sourceGodownId);
-            const availableQty = parseFloat(sourceStock?.closing_quantity) || 0;
+            let availableQty = parseFloat(sourceStock?.closing_quantity) || 0;
+            
+            if (editingEntry && editingEntry.product_id === productId) {
+                // If editing, the original quantity of this entry is already deducted/added.
+                // We add it back to find the true available stock before this entry.
+                const wasTransfer = editingEntry.transaction_type === 'in' && editingEntry.from_location && editingEntry.from_location !== 'NEW_STOCK';
+                if (editingEntry.transaction_type === 'out' && sourceGodownId === editingEntry.godown_id) {
+                    availableQty += editingEntry.quantity;
+                } else if (wasTransfer && sourceGodownId === editingEntry.from_location) {
+                    availableQty += editingEntry.quantity;
+                }
+            }
             
             if (qtyNum > availableQty) {
                 qtyNum = availableQty;
@@ -330,39 +341,104 @@ const StockManagement = () => {
 
         try {
             if (editingEntry) {
+                // We will collect all products we need to recalculate later
+                const affectedProducts = new Set();
+                affectedProducts.add(editingEntry.product_id);
+
+                // Fetch next count for possible new product creation
+                let nextCount = 1;
+                const { data: lastProd } = await supabase
+                    .from('products')
+                    .select('product_id')
+                    .order('product_id', { ascending: false })
+                    .limit(1);
+                
+                if (lastProd && lastProd.length > 0 && lastProd[0].product_id) {
+                    const match = lastProd[0].product_id.match(/\d+$/);
+                    if (match) {
+                        nextCount = parseInt(match[0], 10) + 1;
+                    }
+                }
+
+                // 1. Process the first product item (updates the existing editingEntry row)
                 const singleItem = formData.productItems[0];
                 const qty = singleItem.quantity;
-                // A "transfer" is a Stock-In that came from another real godown (not NEW_STOCK)
-                const wasTransfer =
-                    editingEntry.transaction_type === 'in' &&
-                    editingEntry.from_location &&
-                    editingEntry.from_location !== 'NEW_STOCK';
-                const isTransfer = formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK';
+                let targetProductId = singleItem.product_id;
+                affectedProducts.add(targetProductId);
 
-                // Fetch current stock for display values
+                const submittedProduct = products.find(p => p.product_id === targetProductId);
+
+                if (formData.transaction_type === 'in' && submittedProduct) {
+                    if (submittedProduct.godown_id !== formData.godown_id) {
+                        const destProduct = products.find(p => p.name === submittedProduct.name && p.godown_id === formData.godown_id);
+                        if (destProduct) {
+                            targetProductId = destProduct.product_id;
+                            affectedProducts.add(targetProductId);
+                        } else {
+                            const newProductId = `PROD-${nextCount.toString().padStart(4, '0')}`;
+                            nextCount++;
+
+                            const { data: newProd, error: createErr } = await supabase
+                                .from('products')
+                                .insert([{
+                                    product_id: newProductId,
+                                    godown_id: formData.godown_id,
+                                    godown_name: godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id,
+                                    name: submittedProduct.name,
+                                    description: submittedProduct.description || null,
+                                    unit: submittedProduct.unit || 'units',
+                                    mux: submittedProduct.mux || 1,
+                                    opening_quantity: 0,
+                                    closing_quantity: 0,
+                                    quantity: 0,
+                                    master_product_id: submittedProduct.master_product_id || null,
+                                    product_type: submittedProduct.product_type || null
+                                }])
+                                .select()
+                                .single();
+                            
+                            if (createErr) throw createErr;
+                            targetProductId = newProd.product_id;
+                            affectedProducts.add(targetProductId);
+                        }
+                    }
+                }
+
+                // Now get the base stock for the target destination product
+                const isSameProduct = editingEntry.product_id === targetProductId && editingEntry.godown_id === formData.godown_id;
                 const { data: productData } = await supabase
                     .from('products')
                     .select('closing_quantity')
-                    .eq('product_id', singleItem.product_id)
+                    .eq('product_id', targetProductId)
                     .single();
                 const currentStock = parseFloat(productData?.closing_quantity) || 0;
+
+                let baseStock = currentStock;
+                if (isSameProduct) {
+                    if (editingEntry.transaction_type === 'in') {
+                        baseStock = currentStock - editingEntry.quantity;
+                    } else {
+                        baseStock = currentStock + editingEntry.quantity;
+                    }
+                }
+
                 const displayClosing = formData.transaction_type === 'in'
-                    ? currentStock + qty : Math.max(0, currentStock - qty);
+                    ? baseStock + qty : Math.max(0, baseStock - qty);
 
                 const { productItems, ...formDataWithoutItems } = formData;
                 const entryData = {
                     ...formDataWithoutItems,
-                    product_id: singleItem.product_id,
+                    product_id: targetProductId,
                     quantity: qty,
-                    opening_stock: currentStock,
+                    opening_stock: baseStock,
                     closing_stock: displayClosing,
                     transporter_id: formData.transaction_type === 'in' ? (formData.transporter_id || null) : null,
                     lr_number: formData.transaction_type === 'in' ? (formData.lr_number || null) : null,
-                    // 'NEW_STOCK' is a UI-only sentinel; store null in DB (FK constraint on godowns table)
                     from_location:
                         formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK'
                             ? formData.from_location
                             : null,
+                    freight_amount: formData.transaction_type === 'in' && formData.freight_amount ? parseFloat(formData.freight_amount) : null,
                 };
 
                 const { error } = await supabase
@@ -372,65 +448,200 @@ const StockManagement = () => {
                 if (error) throw error;
 
                 // Handle source-out row for transfers
+                const wasTransfer =
+                    editingEntry.transaction_type === 'in' &&
+                    editingEntry.from_location &&
+                    editingEntry.from_location !== 'NEW_STOCK';
+                const isTransfer = formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK';
+
                 const oldSourceEntryId = editingEntry.entry_id + '-SRC';
+
+                // Add old source product to affected if it was transfer
+                if (wasTransfer) {
+                    const oldSourceProduct = products.find(p => p.product_id === editingEntry.product_id);
+                    const oldSourceProductInstance = oldSourceProduct ? products.find(p => p.name === oldSourceProduct.name && p.godown_id === editingEntry.from_location) : null;
+                    if (oldSourceProductInstance) {
+                        affectedProducts.add(oldSourceProductInstance.product_id);
+                    }
+                }
+
                 if (wasTransfer && !isTransfer) {
-                    // Was a transfer, no longer is — delete the old source-out row
+                    // Delete the old source-out row
                     await supabase.from('stock_management').delete().eq('entry_id', oldSourceEntryId);
                 } else if (isTransfer) {
-                    // Find source product
-                    const destProduct = products.find(p => p.product_id === singleItem.product_id);
+                    const destProduct = products.find(p => p.product_id === targetProductId);
                     const sourceProduct = destProduct ? products.find(p => p.name === destProduct.name && p.godown_id === formData.from_location) : null;
                     if (sourceProduct) {
+                        affectedProducts.add(sourceProduct.product_id);
+
                         const { data: srcData } = await supabase
                             .from('products')
-                            .select('closing_quantity, mux')
+                            .select('closing_quantity')
                             .eq('product_id', sourceProduct.product_id)
                             .single();
                         const srcCurrentStock = parseFloat(srcData?.closing_quantity) || 0;
-                        const srcMux = parseFloat(srcData?.mux) || 0;
-                        const srcNewStock = Math.max(0, srcCurrentStock - qty);
+
+                        let srcBaseStock = srcCurrentStock;
+                        const oldSourceProduct = products.find(p => p.product_id === editingEntry.product_id);
+                        const oldSourceProductInstance = oldSourceProduct ? products.find(p => p.name === oldSourceProduct.name && p.godown_id === editingEntry.from_location) : null;
+                        if (wasTransfer && oldSourceProductInstance && oldSourceProductInstance.product_id === sourceProduct.product_id) {
+                            srcBaseStock = srcCurrentStock + editingEntry.quantity;
+                        }
+                        const srcNewStock = Math.max(0, srcBaseStock - qty);
+
+                        const srcDataObj = {
+                            entry_id: oldSourceEntryId,
+                            godown_id: formData.from_location,
+                            product_id: sourceProduct.product_id,
+                            transaction_type: 'out',
+                            quantity: qty,
+                            opening_stock: srcBaseStock,
+                            closing_stock: srcNewStock,
+                            reference_number: formData.reference_number,
+                            date: formData.date,
+                            notes: `Transfer out to ${godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id}`,
+                            transporter_id: formData.transporter_id || null,
+                            lr_number: formData.lr_number || null,
+                        };
 
                         if (wasTransfer) {
-                            // Update existing source-out row
                             await supabase
                                 .from('stock_management')
                                 .update({
-                                    quantity: qty,
-                                    closing_stock: srcNewStock,
-                                    date: formData.date,
+                                    ...srcDataObj,
                                     updated_at: new Date().toISOString()
                                 })
                                 .eq('entry_id', oldSourceEntryId);
                         } else {
-                            // Create new source-out row
+                            await supabase
+                                .from('stock_management')
+                                .insert([srcDataObj]);
+                        }
+                    }
+                }
+
+                // 2. Process any additional product items (inserts new rows)
+                for (let i = 1; i < formData.productItems.length; i++) {
+                    const item = formData.productItems[i];
+                    // Generate a new unique entry_id linked to the editing entry
+                    const entryId = `${editingEntry.entry_id}-ADD-${i}-${Math.floor(Math.random() * 10000)}`;
+
+                    let targetAddProductId = item.product_id;
+                    affectedProducts.add(targetAddProductId);
+
+                    const submittedAddProduct = products.find(p => p.product_id === targetAddProductId);
+
+                    if (formData.transaction_type === 'in' && submittedAddProduct) {
+                        if (submittedAddProduct.godown_id !== formData.godown_id) {
+                            const destProduct = products.find(p => p.name === submittedAddProduct.name && p.godown_id === formData.godown_id);
+                            if (destProduct) {
+                                targetAddProductId = destProduct.product_id;
+                                affectedProducts.add(targetAddProductId);
+                            } else {
+                                const newProductId = `PROD-${nextCount.toString().padStart(4, '0')}`;
+                                nextCount++;
+
+                                const { data: newProd, error: createErr } = await supabase
+                                    .from('products')
+                                    .insert([{
+                                        product_id: newProductId,
+                                        godown_id: formData.godown_id,
+                                        godown_name: godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id,
+                                        name: submittedAddProduct.name,
+                                        description: submittedAddProduct.description || null,
+                                        unit: submittedAddProduct.unit || 'units',
+                                        mux: submittedAddProduct.mux || 1,
+                                        opening_quantity: 0,
+                                        closing_quantity: 0,
+                                        quantity: 0,
+                                        master_product_id: submittedAddProduct.master_product_id || null,
+                                        product_type: submittedAddProduct.product_type || null
+                                    }])
+                                    .select()
+                                    .single();
+                                
+                                if (createErr) throw createErr;
+                                targetAddProductId = newProd.product_id;
+                                affectedProducts.add(targetAddProductId);
+                            }
+                        }
+                    }
+
+                    const { data: addProductData } = await supabase
+                        .from('products')
+                        .select('closing_quantity')
+                        .eq('product_id', targetAddProductId)
+                        .single();
+
+                    const currentAddStock = parseFloat(addProductData?.closing_quantity) || 0;
+                    const addQty = item.quantity;
+                    let addOpeningStock = currentAddStock;
+                    let addClosingStock = formData.transaction_type === 'in'
+                        ? currentAddStock + addQty : Math.max(0, currentAddStock - addQty);
+
+                    const entryAddData = {
+                        entry_id: entryId,
+                        godown_id: formData.godown_id,
+                        product_id: targetAddProductId,
+                        transaction_type: formData.transaction_type,
+                        quantity: addQty,
+                        opening_stock: addOpeningStock,
+                        closing_stock: addClosingStock,
+                        reference_number: formData.reference_number,
+                        date: formData.date,
+                        notes: formData.notes,
+                        transporter_id: formData.transaction_type === 'in' ? (formData.transporter_id || null) : null,
+                        lr_number: formData.transaction_type === 'in' ? (formData.lr_number || null) : null,
+                        from_location:
+                            formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK'
+                                ? formData.from_location
+                                : null,
+                        freight_amount: formData.transaction_type === 'in' && formData.freight_amount ? parseFloat(formData.freight_amount) : null,
+                    };
+
+                    const { error: insertErr } = await supabase
+                        .from('stock_management')
+                        .insert([entryAddData]);
+                    if (insertErr) throw insertErr;
+
+                    // If it is a transfer, also insert the source-out row for this additional product
+                    if (isTransfer) {
+                        const destProduct = products.find(p => p.product_id === targetAddProductId);
+                        const sourceProduct = destProduct ? products.find(p => p.name === destProduct.name && p.godown_id === formData.from_location) : null;
+                        if (sourceProduct) {
+                            affectedProducts.add(sourceProduct.product_id);
+
+                            const { data: srcData } = await supabase
+                                .from('products')
+                                .select('closing_quantity')
+                                .eq('product_id', sourceProduct.product_id)
+                                .single();
+                            const srcCurrentStock = parseFloat(srcData?.closing_quantity) || 0;
+                            const srcNewStock = Math.max(0, srcCurrentStock - addQty);
+
+                            const sourceEntryId = entryId + '-SRC';
                             await supabase.from('stock_management').insert([{
-                                entry_id: oldSourceEntryId,
+                                entry_id: sourceEntryId,
                                 godown_id: formData.from_location,
                                 product_id: sourceProduct.product_id,
                                 transaction_type: 'out',
-                                quantity: qty,
+                                quantity: addQty,
                                 opening_stock: srcCurrentStock,
                                 closing_stock: srcNewStock,
                                 reference_number: formData.reference_number,
                                 date: formData.date,
                                 notes: `Transfer out to ${godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id}`,
+                                transporter_id: formData.transporter_id || null,
+                                lr_number: formData.lr_number || null,
                             }]);
                         }
-
-                        // Update source product stock
-                        await supabase
-                            .from('products')
-                            .update({
-                                closing_quantity: srcNewStock,
-                                quantity: (srcNewStock * srcMux).toFixed(3),
-                                updated_at: new Date().toISOString()
-                            })
-                            .eq('product_id', sourceProduct.product_id);
                     }
                 }
 
-                // Recalculate destination product stock from history
-                await recalculateProductStock(singleItem.product_id);
+                // 3. Recalculate stock for all affected products
+                for (const pid of affectedProducts) {
+                    await recalculateProductStock(pid);
+                }
 
                 toast.success('Entry updated successfully');
             } else {
@@ -1150,7 +1361,7 @@ const StockManagement = () => {
                                                 <label className="block text-sm font-medium text-slate-700">
                                                     Products <span className="text-red-500">*</span>
                                                 </label>
-                                                {formData.productItems.length > 0 && !editingEntry && (
+                                                {formData.productItems.length > 0 && (
                                                     <Button
                                                         type="button"
                                                         variant="ghost"
@@ -1166,126 +1377,124 @@ const StockManagement = () => {
                                                 <p className="text-red-500 text-xs">{errors.productItems}</p>
                                             )}
 
-                                            {!editingEntry && (
-                                                <div className="flex flex-col gap-3 p-3 bg-slate-50 rounded-lg border-2 border-dashed border-slate-200 hover:border-primary/50 transition-colors">
-                                                    {((formData.transaction_type === 'in' && !formData.from_location && !formData.godown_id) || (formData.transaction_type === 'out' && !formData.godown_id)) && (
-                                                        <div className="text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-100 flex items-center gap-2">
-                                                            <span>Please select a location above to add products.</span>
-                                                        </div>
-                                                    )}
-                                                    <div className="flex gap-2">
-                                                        <div className="flex-1">
-                                                            <SearchableSelect
-                                                                dropdownWidth={450}
-                                                                options={availableProducts.map(p => {
-                                                                    return {
-                                                                        value: p._destProductId || p.product_id, 
-                                                                        label: p.name,
-                                                                        stock: p.closing_quantity || 0,
-                                                                        godownId: p.godown_id
-                                                                    };
-                                                                })}
-                                                                renderOption={(option) => {
-                                                                    const godownName = godowns.find(g => g.godown_id === option.godownId)?.name || 'Unknown Godown';
-                                                                    return (
-                                                                        <div className="flex items-center justify-between w-full gap-4">
-                                                                            <div className="flex items-center gap-2 min-w-0">
-                                                                                <span className="text-sm font-medium truncate text-slate-800">{option.label}</span>
-                                                                                <span className="text-xs font-semibold text-slate-500 whitespace-nowrap bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                                                                                    In: {godownName}
-                                                                                </span>
-                                                                            </div>
-                                                                            <div className="flex items-center gap-1.5 shrink-0">
-                                                                                <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Stock:</span>
-                                                                                <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200/60 min-w-[2.5rem] text-center">
-                                                                                    {parseFloat(option.stock).toLocaleString()}
-                                                                                </span>
-                                                                            </div>
-                                                                        </div>
-                                                                    );
-                                                                }}
-                                                                value={selectedProduct}
-                                                                onChange={(val) => setSelectedProduct(val)}
-                                                                placeholder="Search and select product..."
-                                                                searchPlaceholder="Search products..."
-                                                                disabled={(formData.transaction_type === 'in' && !formData.from_location && !formData.godown_id) || (formData.transaction_type === 'out' && !formData.godown_id)}
-                                                            />
-                                                        </div>
-                                                        <div className="w-28">
-                                                            <Input
-                                                                type="number"
-                                                                min="1"
-                                                                value={selectedQty}
-                                                                onChange={(e) => {
-                                                                    let val = e.target.value === '' ? '' : parseInt(e.target.value) || 0;
-                                                                    if (val !== '' && maxQtyForSelected !== null && val > maxQtyForSelected) {
-                                                                        val = maxQtyForSelected;
-                                                                        toast.error(`Maximum available stock is ${maxQtyForSelected}`);
-                                                                    }
-                                                                    setSelectedQty(val);
-                                                                }}
-                                                                placeholder="Qty"
-                                                                className="h-10 text-center font-medium"
-                                                                disabled={(formData.transaction_type === 'in' && !formData.from_location && !formData.godown_id) || (formData.transaction_type === 'out' && !formData.godown_id)}
-                                                            />
-                                                        </div>
-                                                        <Button
-                                                            type="button"
-                                                            onClick={addProductItem}
-                                                            className="h-10 px-4"
-                                                            disabled={!selectedProduct || !selectedQty || ((formData.transaction_type === 'in' && !formData.from_location && !formData.godown_id) || (formData.transaction_type === 'out' && !formData.godown_id))}
-                                                        >
-                                                            <Plus size={18} />
-                                                            <span className="ml-1">Add</span>
-                                                        </Button>
+                                            <div className="flex flex-col gap-3 p-3 bg-slate-50 rounded-lg border-2 border-dashed border-slate-200 hover:border-primary/50 transition-colors">
+                                                {((formData.transaction_type === 'in' && !formData.from_location && !formData.godown_id) || (formData.transaction_type === 'out' && !formData.godown_id)) && (
+                                                    <div className="text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-100 flex items-center gap-2">
+                                                        <span>Please select a location above to add products.</span>
                                                     </div>
-                                                    {selectedProduct && (
-                                                        <div className="flex gap-4 px-3 py-2 bg-white rounded-md border border-slate-200 text-xs shadow-sm">
-                                                            {(() => {
-                                                                const destProduct = products.find(p => p.product_id === selectedProduct);
-                                                                const qty = parseInt(selectedQty) || 0;
-                                                                let destCurrentStock = parseFloat(destProduct?.closing_quantity) || 0;
-                                                                let destNewStock = formData.transaction_type === 'in' ? destCurrentStock + qty : destCurrentStock - qty;
-
-                                                                let sourceProduct = null;
-                                                                let sourceCurrentStock = 0;
-                                                                let sourceNewStock = 0;
-                                                                if (formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK') {
-                                                                    sourceProduct = products.find(p => p.name === destProduct?.name && p.godown_id === formData.from_location);
-                                                                    sourceCurrentStock = parseFloat(sourceProduct?.closing_quantity) || 0;
-                                                                    sourceNewStock = sourceCurrentStock - qty;
-                                                                }
-
+                                                )}
+                                                <div className="flex gap-2">
+                                                    <div className="flex-1">
+                                                        <SearchableSelect
+                                                            dropdownWidth={450}
+                                                            options={availableProducts.map(p => {
+                                                                return {
+                                                                    value: p._destProductId || p.product_id, 
+                                                                    label: p.name,
+                                                                    stock: p.closing_quantity || 0,
+                                                                    godownId: p.godown_id
+                                                                };
+                                                            })}
+                                                            renderOption={(option) => {
+                                                                const godownName = godowns.find(g => g.godown_id === option.godownId)?.name || 'Unknown Godown';
                                                                 return (
-                                                                    <div className="flex flex-col gap-1.5 w-full">
-                                                                        <div className="text-slate-500 font-semibold uppercase text-[10px] tracking-wider">Live Stock Preview</div>
-                                                                        {formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK' && (
-                                                                            <div className="flex items-center justify-between">
-                                                                                <span className="text-rose-600 font-medium">From {getGodownName(formData.from_location)}:</span>
-                                                                                <span className="flex items-center gap-2 font-medium">
-                                                                                    <span className="text-slate-500">{sourceCurrentStock}</span>
-                                                                                    <ArrowRight size={12} className="text-slate-400" />
-                                                                                    <span className={sourceNewStock < 0 ? "text-red-500" : "text-slate-800"}>{sourceNewStock}</span>
-                                                                                </span>
-                                                                            </div>
-                                                                        )}
-                                                                        <div className="flex items-center justify-between">
-                                                                            <span className={formData.transaction_type === 'in' ? "text-emerald-600 font-medium" : "text-rose-600 font-medium"}>
-                                                                                {formData.transaction_type === 'in' ? `To ${getGodownName(formData.godown_id)}:` : `From ${getGodownName(formData.godown_id)}:`}
+                                                                    <div className="flex items-center justify-between w-full gap-4">
+                                                                        <div className="flex items-center gap-2 min-w-0">
+                                                                            <span className="text-sm font-medium truncate text-slate-800">{option.label}</span>
+                                                                            <span className="text-xs font-semibold text-slate-500 whitespace-nowrap bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                                                                                In: {godownName}
                                                                             </span>
-                                                                            <span className="flex items-center gap-2 font-medium">
-                                                                                <span className="text-slate-500">{destCurrentStock}</span>
-                                                                                <ArrowRight size={12} className="text-slate-400" />
-                                                                                <span className={destNewStock < 0 ? "text-red-500" : "text-slate-800"}>{destNewStock}</span>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-1.5 shrink-0">
+                                                                            <span className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Stock:</span>
+                                                                            <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200/60 min-w-[2.5rem] text-center">
+                                                                                {parseFloat(option.stock).toLocaleString()}
                                                                             </span>
                                                                         </div>
                                                                     </div>
                                                                 );
-                                                            })()}
-                                                        </div>
-                                                    )}
+                                                            }}
+                                                            value={selectedProduct}
+                                                            onChange={(val) => setSelectedProduct(val)}
+                                                            placeholder="Search and select product..."
+                                                            searchPlaceholder="Search products..."
+                                                            disabled={(formData.transaction_type === 'in' && !formData.from_location && !formData.godown_id) || (formData.transaction_type === 'out' && !formData.godown_id)}
+                                                        />
+                                                    </div>
+                                                    <div className="w-28">
+                                                        <Input
+                                                            type="number"
+                                                            min="1"
+                                                            value={selectedQty}
+                                                            onChange={(e) => {
+                                                                let val = e.target.value === '' ? '' : parseInt(e.target.value) || 0;
+                                                                if (val !== '' && maxQtyForSelected !== null && val > maxQtyForSelected) {
+                                                                    val = maxQtyForSelected;
+                                                                    toast.error(`Maximum available stock is ${maxQtyForSelected}`);
+                                                                }
+                                                                setSelectedQty(val);
+                                                            }}
+                                                            placeholder="Qty"
+                                                            className="h-10 text-center font-medium"
+                                                            disabled={(formData.transaction_type === 'in' && !formData.from_location && !formData.godown_id) || (formData.transaction_type === 'out' && !formData.godown_id)}
+                                                        />
+                                                    </div>
+                                                    <Button
+                                                        type="button"
+                                                        onClick={addProductItem}
+                                                        className="h-10 px-4"
+                                                        disabled={!selectedProduct || !selectedQty || ((formData.transaction_type === 'in' && !formData.from_location && !formData.godown_id) || (formData.transaction_type === 'out' && !formData.godown_id))}
+                                                    >
+                                                        <Plus size={18} />
+                                                        <span className="ml-1">Add</span>
+                                                    </Button>
                                                 </div>
-                                            )}
+                                                {selectedProduct && (
+                                                    <div className="flex gap-4 px-3 py-2 bg-white rounded-md border border-slate-200 text-xs shadow-sm">
+                                                        {(() => {
+                                                            const destProduct = products.find(p => p.product_id === selectedProduct);
+                                                            const qty = parseInt(selectedQty) || 0;
+                                                            let destCurrentStock = parseFloat(destProduct?.closing_quantity) || 0;
+                                                            let destNewStock = formData.transaction_type === 'in' ? destCurrentStock + qty : destCurrentStock - qty;
+
+                                                            let sourceProduct = null;
+                                                            let sourceCurrentStock = 0;
+                                                            let sourceNewStock = 0;
+                                                            if (formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK') {
+                                                                    sourceProduct = products.find(p => p.name === destProduct?.name && p.godown_id === formData.from_location);
+                                                                    sourceCurrentStock = parseFloat(sourceProduct?.closing_quantity) || 0;
+                                                                    sourceNewStock = sourceCurrentStock - qty;
+                                                            }
+
+                                                            return (
+                                                                <div className="flex flex-col gap-1.5 w-full">
+                                                                    <div className="text-slate-500 font-semibold uppercase text-[10px] tracking-wider">Live Stock Preview</div>
+                                                                    {formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK' && (
+                                                                        <div className="flex items-center justify-between">
+                                                                            <span className="text-rose-600 font-medium">From {getGodownName(formData.from_location)}:</span>
+                                                                            <span className="flex items-center gap-2 font-medium">
+                                                                                <span className="text-slate-500">{sourceCurrentStock}</span>
+                                                                                <ArrowRight size={12} className="text-slate-400" />
+                                                                                <span className={sourceNewStock < 0 ? "text-red-500" : "text-slate-800"}>{sourceNewStock}</span>
+                                                                            </span>
+                                                                        </div>
+                                                                    )}
+                                                                    <div className="flex items-center justify-between">
+                                                                        <span className={formData.transaction_type === 'in' ? "text-emerald-600 font-medium" : "text-rose-600 font-medium"}>
+                                                                            {formData.transaction_type === 'in' ? `To ${getGodownName(formData.godown_id)}:` : `From ${getGodownName(formData.godown_id)}:`}
+                                                                        </span>
+                                                                        <span className="flex items-center gap-2 font-medium">
+                                                                            <span className="text-slate-500">{destCurrentStock}</span>
+                                                                            <ArrowRight size={12} className="text-slate-400" />
+                                                                            <span className={destNewStock < 0 ? "text-red-500" : "text-slate-800"}>{destNewStock}</span>
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })()}
+                                                    </div>
+                                                )}
+                                            </div>
 
                                             {formData.productItems.length === 0 ? (
                                                 <div className="text-center py-8 px-4 bg-slate-50 rounded-lg border border-slate-200">
@@ -1321,15 +1530,30 @@ const StockManagement = () => {
                                                                                 const destProduct = products.find(p => p.product_id === item.product_id);
                                                                                 const qty = parseInt(item.quantity) || 0;
                                                                                 let destCurrentStock = parseFloat(destProduct?.closing_quantity) || 0;
-                                                                                let destNewStock = formData.transaction_type === 'in' ? destCurrentStock + qty : destCurrentStock - qty;
+                                                                                
+                                                                                let baseDestStock = destCurrentStock;
+                                                                                if (editingEntry) {
+                                                                                    if (editingEntry.transaction_type === 'in') {
+                                                                                        baseDestStock = destCurrentStock - editingEntry.quantity;
+                                                                                    } else {
+                                                                                        baseDestStock = destCurrentStock + editingEntry.quantity;
+                                                                                    }
+                                                                                }
+                                                                                let destNewStock = formData.transaction_type === 'in' ? baseDestStock + qty : baseDestStock - qty;
                                                                     
                                                                                 let sourceProduct = null;
                                                                                 let sourceCurrentStock = 0;
+                                                                                let baseSourceStock = 0;
                                                                                 let sourceNewStock = 0;
                                                                                 if (formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK') {
                                                                                     sourceProduct = products.find(p => p.name === destProduct?.name && p.godown_id === formData.from_location);
                                                                                     sourceCurrentStock = parseFloat(sourceProduct?.closing_quantity) || 0;
-                                                                                    sourceNewStock = sourceCurrentStock - qty;
+                                                                                    
+                                                                                    baseSourceStock = sourceCurrentStock;
+                                                                                    if (editingEntry && editingEntry.from_location === formData.from_location) {
+                                                                                        baseSourceStock = sourceCurrentStock + editingEntry.quantity;
+                                                                                    }
+                                                                                    sourceNewStock = baseSourceStock - qty;
                                                                                 }
                                                                     
                                                                                 return (
@@ -1338,7 +1562,7 @@ const StockManagement = () => {
                                                                                             <div className="text-[11px] flex items-center justify-between max-w-[200px]">
                                                                                                 <span className="text-rose-600 font-medium">From {getGodownName(formData.from_location)}:</span>
                                                                                                 <span className="flex items-center gap-1.5 font-medium">
-                                                                                                    <span className="text-slate-500">{sourceCurrentStock}</span>
+                                                                                                    <span className="text-slate-500">{baseSourceStock}</span>
                                                                                                     <ArrowRight size={10} className="text-slate-400" />
                                                                                                     <span className={sourceNewStock < 0 ? "text-red-500" : "text-slate-700"}>{sourceNewStock}</span>
                                                                                                 </span>
@@ -1349,7 +1573,7 @@ const StockManagement = () => {
                                                                                                 {formData.transaction_type === 'in' ? `To ${getGodownName(formData.godown_id)}:` : `From ${getGodownName(formData.godown_id)}:`}
                                                                                             </span>
                                                                                             <span className="flex items-center gap-1.5 font-medium">
-                                                                                                <span className="text-slate-500">{destCurrentStock}</span>
+                                                                                                <span className="text-slate-500">{baseDestStock}</span>
                                                                                                 <ArrowRight size={10} className="text-slate-400" />
                                                                                                 <span className={destNewStock < 0 ? "text-red-500" : "text-slate-700"}>{destNewStock}</span>
                                                                                             </span>
@@ -1383,17 +1607,15 @@ const StockManagement = () => {
                                                                                 <span className="text-sm font-medium">+</span>
                                                                             </button>
                                                                         </div>
-                                                                        {!editingEntry && (
-                                                                            <Button
-                                                                                type="button"
-                                                                                variant="ghost"
-                                                                                size="icon"
-                                                                                onClick={() => removeProductItem(item.product_id)}
-                                                                                className="h-8 w-8 text-slate-400 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all"
-                                                                            >
-                                                                                <X size={14} />
-                                                                            </Button>
-                                                                        )}
+                                                                        <Button
+                                                                            type="button"
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            onClick={() => removeProductItem(item.product_id)}
+                                                                            className="h-8 w-8 text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all"
+                                                                        >
+                                                                            <X size={14} />
+                                                                        </Button>
                                                                     </div>
                                                                 </div>
                                                             );
