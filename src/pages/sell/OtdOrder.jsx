@@ -47,6 +47,7 @@ const OtdOrder = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [customerPhoneMap, setCustomerPhoneMap] = useState({});
   const [whatsAppModal, setWhatsAppModal] = useState({ isOpen: false, status: 'sending', clientName: '', phoneNumber: '' });
+  const [sendWhatsApp, setSendWhatsApp] = useState(false);
 
   // --- External Sheets Data ---
   const [loadingStock, setLoadingStock] = useState(false);
@@ -280,7 +281,7 @@ const OtdOrder = () => {
         if (stockEntry) stockValues = stockDataMap[stockEntry];
       }
 
-      const allStockInfo = stockValues ? stockValues.map(s => `${s.godown}: ${s.stock}`).join(', ') : '-';
+      const allStockInfo = stockValues ? stockValues.map(s => s.godown).join(', ') : '-';
 
       return {
         ...order,
@@ -322,7 +323,11 @@ const OtdOrder = () => {
   const handleItemChange = (index, field, value) => {
     setFormData(prev => {
       const newItems = [...prev.items];
-      newItems[index][field] = value;
+      let filteredValue = value;
+      if (field === 'qty' && typeof value === 'string') {
+        filteredValue = value.replace(/-/g, '');
+      }
+      newItems[index][field] = filteredValue;
 
       if (field === 'itemName' && value && productGodownMap[value]) {
         newItems[index].godownName = productGodownMap[value];
@@ -409,6 +414,13 @@ const OtdOrder = () => {
       return;
     }
 
+    const hasInvalidQty = formData.items.some(item => !item.qty || parseFloat(item.qty) <= 0);
+    if (hasInvalidQty) {
+      toast.error('Quantity must be greater than zero for all items');
+      setIsSubmitting(false);
+      return;
+    }
+
     const hasStockErrors = formData.items.some(item => {
       if (!item.itemName || !item.godownName || !item.qty) return false;
       const itemKey = normalize(item.itemName);
@@ -459,28 +471,31 @@ const OtdOrder = () => {
 
       if (error) throw error;
 
-      // Show WhatsApp Sending Dialog
-      const clientPhone = customerPhoneMap[formData.clientName] || '';
-      setWhatsAppModal({
-        isOpen: true,
-        status: 'sending',
-        clientName: formData.clientName,
-        phoneNumber: clientPhone
-      });
-
-      // Send WhatsApp Notification
-      try {
-        await whatsappService.sendOrderCreationNotification(clientPhone || '9691207533', {
-          customerName: formData.clientName,
-          orderNo: formData.orderNo,
-          items: formData.items,
-          orderDate: formData.orderDate
+      // Send WhatsApp Notification only if sendWhatsApp is enabled
+      if (sendWhatsApp) {
+        // Show WhatsApp Sending Dialog
+        const clientPhone = customerPhoneMap[formData.clientName] || '';
+        setWhatsAppModal({
+          isOpen: true,
+          status: 'sending',
+          clientName: formData.clientName,
+          phoneNumber: clientPhone
         });
-        setWhatsAppModal(prev => ({ ...prev, status: 'success' }));
-      } catch (wsError) {
-        console.error('WhatsApp failed:', wsError);
-        setWhatsAppModal(prev => ({ ...prev, status: 'error', error: wsError.message }));
-        toast.error(`WhatsApp notification failed: ${wsError.message}`);
+
+        // Send WhatsApp Notification
+        try {
+          await whatsappService.sendOrderCreationNotification(clientPhone || '9691207533', {
+            customerName: formData.clientName,
+            orderNo: formData.orderNo,
+            items: formData.items,
+            orderDate: formData.orderDate
+          });
+          setWhatsAppModal(prev => ({ ...prev, status: 'success' }));
+        } catch (wsError) {
+          console.error('WhatsApp failed:', wsError);
+          setWhatsAppModal(prev => ({ ...prev, status: 'error', error: wsError.message }));
+          toast.error(`WhatsApp notification failed: ${wsError.message}`);
+        }
       }
 
       toast.success('Order created successfully!');
@@ -578,7 +593,7 @@ const OtdOrder = () => {
             </button>
 
             <button
-              onClick={() => setIsModalOpen(true)}
+              onClick={() => { setSendWhatsApp(false); setIsModalOpen(true); }}
               className="erp-btn-primary h-[42px] px-6 shadow-md shadow-primary/10"
             >
               <Plus size={18} className="stroke-[3]" />
@@ -698,7 +713,7 @@ const OtdOrder = () => {
                                     isSelected ? "text-primary font-black scale-110" : "text-slate-400"
                                   )}
                                 >
-                                  {st.godown} {st.stock}{sIdx < itemStocks.length - 1 ? ',' : ''}
+                                  {st.godown}{sIdx < itemStocks.length - 1 ? ',' : ''}
                                 </div>
                               );
                             });
@@ -863,7 +878,7 @@ const OtdOrder = () => {
 
             <form onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-hidden">
               <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-8 custom-scrollbar bg-gray-50/30">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-gray-700 uppercase tracking-wide">Order Date</label>
                     <input
@@ -894,6 +909,29 @@ const OtdOrder = () => {
                       placeholder="Choose Client"
                       showAll={false}
                     />
+                  </div>
+                  <div className="flex flex-col justify-between pb-1 space-y-1.5">
+                    <label className="text-xs font-bold text-gray-700 uppercase tracking-wide">WhatsApp Alert</label>
+                    <div className="flex items-center gap-3 h-[38px]">
+                      <button
+                        type="button"
+                        onClick={() => setSendWhatsApp(!sendWhatsApp)}
+                        className={cn(
+                          "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
+                          sendWhatsApp ? "bg-primary" : "bg-slate-200"
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                            sendWhatsApp ? "translate-x-5" : "translate-x-0"
+                          )}
+                        />
+                      </button>
+                      <span className="text-xs font-semibold text-slate-600">
+                        {sendWhatsApp ? "Enabled" : "Disabled"}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -991,6 +1029,7 @@ const OtdOrder = () => {
                               <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Quantity</label>
                               <input
                                 type="number"
+                                min="1"
                                 required
                                 placeholder="0"
                                 value={item.qty}

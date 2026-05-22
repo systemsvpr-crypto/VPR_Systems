@@ -232,6 +232,26 @@ const OtdDispatchPlan = () => {
     }
   }, [fetchAllRows, normalize]);
 
+  const getAvailableStock = useCallback((order, selectedGodown) => {
+    if (!order || !order.itemName || !selectedGodown) return 0;
+    const itemKey = normalize(order.itemName);
+    const godownKey = normalize(selectedGodown);
+    
+    let stockValues = stockDataMap[itemKey];
+    if (!stockValues) {
+      const stockEntry = Object.keys(stockDataMap).find(key =>
+        itemKey.includes(key) || key.includes(itemKey)
+      );
+      if (stockEntry) {
+        stockValues = stockDataMap[stockEntry];
+      }
+    }
+    
+    if (!stockValues) return 0;
+    const match = stockValues.find(s => normalize(s.name) === godownKey);
+    return match ? match.stock : 0;
+  }, [stockDataMap, normalize]);
+
   const fetchPendingOrders = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshingOrders(true);
     else setLoadingOrders(true);
@@ -683,7 +703,8 @@ const OtdDispatchPlan = () => {
             dispatchQty: order.planningPendingQty,
             dispatchDate: new Date().toISOString().split('T')[0],
             gstIncluded: 'No',
-            godownName: bestGodown
+            godownName: bestGodown,
+            rate: order.rate || 0
           }
         }));
       } else {
@@ -698,9 +719,13 @@ const OtdDispatchPlan = () => {
   }, [getRowKey, normalize, stockDataMap]);
 
   const handleEditChange = useCallback((key, field, value) => {
+    let filteredValue = value;
+    if (field === 'dispatchQty' && typeof value === 'string') {
+      filteredValue = value.replace(/-/g, '');
+    }
     setEditData(prev => ({
       ...prev,
-      [key]: { ...prev[key], [field]: value }
+      [key]: { ...prev[key], [field]: filteredValue }
     }));
   }, []);
 
@@ -715,22 +740,44 @@ const OtdDispatchPlan = () => {
     })();
 
     const plansToSubmit = [];
+    const rateUpdates = [];
+    let hasStockErrors = false;
 
-    Object.keys(selectedRows).forEach((key) => {
+    for (const key of Object.keys(selectedRows)) {
       if (selectedRows[key]) {
         const order = orders?.find(o => getRowKey(o) === key);
         const planningData = editData[key];
         if (order && planningData) {
+          const selectedGodown = planningData.godownName || order.godownName;
+          const availableStock = getAvailableStock(order, selectedGodown);
+          const dispatchQty = parseInt(planningData.dispatchQty, 10) || 0;
+
+          if (dispatchQty <= 0) {
+            toast.error(
+              `Cannot save: Dispatch Qty for Order ${order.orderNo} must be greater than zero.`
+            );
+            hasStockErrors = true;
+            break;
+          }
+
+          if (dispatchQty > availableStock) {
+            toast.error(
+              `Cannot save: Dispatch Qty for Order ${order.orderNo} (${dispatchQty}) exceeds available stock in ${selectedGodown} (${availableStock} available).`
+            );
+            hasStockErrors = true;
+            break;
+          }
+
           currentMaxNo++;
           const individualDispatchNo = `DN-${currentMaxNo}`;
 
           plansToSubmit.push({
             order_id: order.id,
             dispatch_number: individualDispatchNo,
-            planned_qty: parseInt(planningData.dispatchQty, 10) || 0,
+            planned_qty: dispatchQty,
             planned_date: planningData.dispatchDate,
             gst_included: planningData.gstIncluded,
-            godown_name: planningData.godownName || order.godownName,
+            godown_name: selectedGodown,
             status: 'Planned',
             submitted_by: user?.name || user?.full_name || user?.username || 'System',
             product_name: order.itemName || null,
@@ -738,9 +785,26 @@ const OtdDispatchPlan = () => {
             client_name: order.clientName || null,
             order_number: order.orderNo || null
           });
+
+          // Check if rate was updated and needs to be saved back to the order
+          if (planningData.rate !== undefined && planningData.rate !== null && planningData.rate !== '') {
+            const newRate = parseFloat(planningData.rate);
+            if (!isNaN(newRate) && newRate !== parseFloat(order.rate)) {
+              rateUpdates.push(
+                supabase
+                  .from('app_orders')
+                  .update({ rate: newRate })
+                  .eq('id', order.id)
+              );
+            }
+          }
         }
       }
-    });
+    }
+
+    if (hasStockErrors) {
+      return;
+    }
 
     if (plansToSubmit.length === 0) return;
 
@@ -751,6 +815,13 @@ const OtdDispatchPlan = () => {
         .insert(plansToSubmit);
 
       if (error) throw error;
+
+      // Save rate updates if any
+      if (rateUpdates.length > 0) {
+        const updateResults = await Promise.all(rateUpdates);
+        const firstFailed = updateResults.find(r => r.error);
+        if (firstFailed) throw firstFailed.error;
+      }
 
       toast.success('Planning saved successfully!');
       
@@ -764,7 +835,7 @@ const OtdDispatchPlan = () => {
     } finally {
       setIsSaving(false);
     }
-  }, [selectedRows, orders, editData, fetchPendingOrders, fetchPlanningHistory, getRowKey, user]);
+  }, [selectedRows, orders, editData, fetchPendingOrders, fetchPlanningHistory, getRowKey, user, getAvailableStock]);
 
   const handleRefresh = useCallback(() => {
     fetchPendingOrders(true);
@@ -906,6 +977,7 @@ const OtdDispatchPlan = () => {
                     {isAnySelected && (
                       <>
                         <th className="erp-table-th text-right">Dispatch Qty</th>
+                        <th className="erp-table-th text-right">Rate</th>
                         <th className="erp-table-th text-center">Dispatch Date</th>
                         <th className="erp-table-th text-center">GST</th>
                         <th className="erp-table-th text-center">Dispatch Godown</th>
@@ -957,10 +1029,10 @@ const OtdDispatchPlan = () => {
                 </thead>
                 <tbody className="divide-y divide-gray-200 text-sm">
                   {loadingOrders ? (
-                    <TableSkeleton cols={isAnySelected ? 17 : 13} />
+                    <TableSkeleton cols={isAnySelected ? 18 : 13} />
                   ) : currentItems.length === 0 ? (
                     <tr>
-                      <td colSpan={isAnySelected ? 17 : 13} className="px-6 py-20 text-center">
+                      <td colSpan={isAnySelected ? 18 : 13} className="px-6 py-20 text-center">
                         <div className="flex flex-col items-center gap-3">
                           <div className="p-4 bg-gray-50 rounded-full">
                             <ClipboardList size={32} className="text-gray-200" />
@@ -986,13 +1058,51 @@ const OtdDispatchPlan = () => {
                             <>
                               <td className="erp-table-td text-right">
                                 {selectedRows[key] ? (
-                                  <input
-                                    type="number"
-                                    value={editData[key]?.dispatchQty || ''}
-                                    onChange={(e) => handleEditChange(key, 'dispatchQty', e.target.value)}
-                                    className="w-28 h-9 px-3 bg-white border-2 border-slate-300 rounded-lg text-[15px] font-black text-slate-900 outline-none focus:border-primary focus:ring-4 focus:ring-primary/10 transition-all text-center shadow-md"
-                                    placeholder="0"
-                                  />
+                                  (() => {
+                                    const selectedGodown = editData[key]?.godownName || order.godownName;
+                                    const availableStock = getAvailableStock(order, selectedGodown);
+                                    const dispatchQtyVal = parseFloat(editData[key]?.dispatchQty) || 0;
+                                    const hasStockError = dispatchQtyVal > availableStock;
+                                    return (
+                                      <div className="flex flex-col items-center">
+                                        <input
+                                          type="number"
+                                          min="1"
+                                          value={editData[key]?.dispatchQty || ''}
+                                          onChange={(e) => handleEditChange(key, 'dispatchQty', e.target.value)}
+                                          className={`w-28 h-9 px-3 bg-white border-2 rounded-lg text-[15px] font-black outline-none transition-all text-center shadow-md ${
+                                            hasStockError
+                                              ? "border-red-400 text-red-600 focus:border-red-500 focus:ring-4 focus:ring-red-100"
+                                              : "border-slate-300 text-slate-900 focus:border-primary focus:ring-4 focus:ring-primary/10"
+                                          }`}
+                                          placeholder="0"
+                                        />
+                                        {hasStockError && (
+                                          <span className="block text-[10px] text-red-500 font-bold mt-1 bg-red-50 px-1.5 py-0.5 rounded border border-red-100 whitespace-nowrap animate-in fade-in zoom-in-95 duration-200">
+                                            Max Avail: {availableStock}
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })()
+                                ) : (
+                                  <span className="text-slate-300 font-bold">—</span>
+                                )}
+                              </td>
+                              <td className="erp-table-td text-right">
+                                {selectedRows[key] ? (
+                                  <div className="flex items-center gap-1 justify-end">
+                                    <span className="text-slate-400 font-bold">₹</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="any"
+                                      value={editData[key]?.rate !== undefined ? editData[key].rate : order.rate}
+                                      onChange={(e) => handleEditChange(key, 'rate', e.target.value)}
+                                      className="w-20 h-9 px-2 bg-white border border-slate-200 rounded-lg text-[13px] font-bold text-slate-700 outline-none focus:border-primary text-right shadow-sm focus:ring-4 focus:ring-primary/5 transition-all"
+                                      placeholder="0.00"
+                                    />
+                                  </div>
                                 ) : (
                                   <span className="text-slate-300 font-bold">—</span>
                                 )}
@@ -1027,17 +1137,31 @@ const OtdDispatchPlan = () => {
                               </td>
                               <td className="erp-table-td text-center">
                                 {selectedRows[key] ? (
-                                  <div className="w-full min-w-[150px]">
-                                    <SearchableDropdown
-                                      value={editData[key]?.godownName || order.godownName}
-                                      onChange={(val) => handleEditChange(key, 'godownName', val)}
-                                      options={godowns}
-                                      placeholder="Select Godown"
-                                      showAll={false}
-                                      focusColor="primary"
-                                      className="w-full h-8"
-                                    />
-                                  </div>
+                                  (() => {
+                                    const currentGodown = editData[key]?.godownName || order.godownName;
+                                    const currentStock = getAvailableStock(order, currentGodown);
+                                    const dropdownValue = `${currentGodown} (Available: ${currentStock})`;
+                                    const optionsWithStock = godowns.map(gdn => {
+                                      const stock = getAvailableStock(order, gdn);
+                                      return `${gdn} (Available: ${stock})`;
+                                    });
+                                    return (
+                                      <div className="w-full min-w-[200px]">
+                                        <SearchableDropdown
+                                          value={dropdownValue}
+                                          onChange={(val) => {
+                                            const cleanGdn = val.split(' (Available:')[0];
+                                            handleEditChange(key, 'godownName', cleanGdn);
+                                          }}
+                                          options={optionsWithStock}
+                                          placeholder="Select Godown"
+                                          showAll={false}
+                                          focusColor="primary"
+                                          className="w-full h-8"
+                                        />
+                                      </div>
+                                    );
+                                  })()
                                 ) : (
                                   <span className="text-gray-400">-</span>
                                 )}
@@ -1121,7 +1245,7 @@ const OtdDispatchPlan = () => {
                     })
                   )}
                   {!loadingOrders && Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
-                    <tr key={`empty-${i}`}><td colSpan={isAnySelected ? 17 : 13} className="h-16"></td></tr>
+                    <tr key={`empty-${i}`}><td colSpan={isAnySelected ? 18 : 13} className="h-16"></td></tr>
                   ))}
                 </tbody>
               </table>
@@ -1185,12 +1309,32 @@ const OtdDispatchPlan = () => {
                           </div>
                           <div>
                             <label className="block text-[10px] font-bold text-primary mb-1 uppercase">Disp Qty</label>
-                            <input
-                              type="number"
-                              value={editData[key]?.dispatchQty || ''}
-                              onChange={(e) => handleEditChange(key, 'dispatchQty', e.target.value)}
-                              className="w-full px-3 py-1.5 border border-green-200 rounded text-xs outline-none focus:border-primary bg-white"
-                            />
+                            {(() => {
+                              const selectedGodown = editData[key]?.godownName || order.godownName;
+                              const availableStock = getAvailableStock(order, selectedGodown);
+                              const dispatchQtyVal = parseFloat(editData[key]?.dispatchQty) || 0;
+                              const hasStockError = dispatchQtyVal > availableStock;
+                              return (
+                                <>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={editData[key]?.dispatchQty || ''}
+                                    onChange={(e) => handleEditChange(key, 'dispatchQty', e.target.value)}
+                                    className={`w-full px-3 py-1.5 border rounded text-xs outline-none bg-white font-bold transition-all ${
+                                      hasStockError
+                                        ? "border-red-400 text-red-600 focus:border-red-500"
+                                        : "border-green-200 focus:border-primary"
+                                    }`}
+                                  />
+                                  {hasStockError && (
+                                    <p className="text-[9px] text-red-500 font-bold mt-1 leading-tight bg-red-50 p-1 rounded border border-red-100 animate-in fade-in duration-200">
+                                      Exceeds stock ({availableStock} available).
+                                    </p>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </div>
                           <div>
                             <label className="block text-[10px] font-bold text-primary mb-1 uppercase">GST</label>
@@ -1203,25 +1347,51 @@ const OtdDispatchPlan = () => {
                               <option value="No">No</option>
                             </select>
                           </div>
-                          <div className="col-span-2">
-                            <label className="block text-[10px] font-bold text-primary mb-1 uppercase">Godown Name</label>
-                            <SearchableDropdown
-                              value={editData[key]?.godownName || order.godownName}
-                              onChange={(val) => handleEditChange(key, 'godownName', val)}
-                              options={godowns}
-                              placeholder="Select Godown"
-                              showAll={false}
-                              focusColor="primary"
-                              className="w-full h-8"
-                            />
-                          </div>
+                           <div className="col-span-2">
+                             <label className="block text-[10px] font-bold text-primary mb-1 uppercase">Godown Name</label>
+                             {(() => {
+                               const currentGodown = editData[key]?.godownName || order.godownName;
+                               const currentStock = getAvailableStock(order, currentGodown);
+                               const dropdownValue = `${currentGodown} (Available: ${currentStock})`;
+                               const optionsWithStock = godowns.map(gdn => {
+                                 const stock = getAvailableStock(order, gdn);
+                                 return `${gdn} (Available: ${stock})`;
+                               });
+                               return (
+                                 <SearchableDropdown
+                                   value={dropdownValue}
+                                   onChange={(val) => {
+                                     const cleanGdn = val.split(' (Available:')[0];
+                                     handleEditChange(key, 'godownName', cleanGdn);
+                                   }}
+                                   options={optionsWithStock}
+                                   placeholder="Select Godown"
+                                   showAll={false}
+                                   focusColor="primary"
+                                   className="w-full h-8"
+                                 />
+                               );
+                             })()}
+                           </div>
                         </div>
                       )}
 
                       <div className="grid grid-cols-4 gap-2 text-[10px] text-gray-500 pt-2 border-t border-gray-50">
                         <div>
                           <p className="uppercase text-[8px] font-bold text-gray-400">Rate</p>
-                          <p className="font-bold text-gray-700">{order.rate}</p>
+                          {selectedRows[key] ? (
+                            <input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={editData[key]?.rate !== undefined ? editData[key].rate : order.rate}
+                              onChange={(e) => handleEditChange(key, 'rate', e.target.value)}
+                              className="w-full px-1 py-0.5 bg-white border border-slate-300 rounded text-[11px] font-bold text-slate-700 outline-none focus:border-primary text-center"
+                              placeholder="0.00"
+                            />
+                          ) : (
+                            <p className="font-bold text-gray-700">₹{order.rate}</p>
+                          )}
                         </div>
                         <div>
                           <p className="uppercase text-[8px] font-bold text-gray-400">Order Qty</p>

@@ -50,6 +50,8 @@ const OtdDispatchDone = () => {
   // --- Master data ---
   const [itemNames, setItemNames] = useState([]);
   const [godowns, setGodowns] = useState([]);
+  const [productsData, setProductsData] = useState([]);
+  const [godownsData, setGodownsData] = useState([]);
 
   const pendingAbortRef = useRef(null);
   const historyAbortRef = useRef(null);
@@ -151,13 +153,17 @@ const OtdDispatchDone = () => {
   const fetchMasterData = useCallback(async () => {
     try {
       const [productsRes, godownsRes] = await Promise.all([
-        supabase.from('products').select('name').order('name'),
-        supabase.from('godowns').select('name').order('name')
+        supabase.from('products').select('product_id, name, godown_id, closing_quantity, is_active').eq('is_active', true),
+        supabase.from('godowns').select('godown_id, name, is_active').eq('is_active', true).order('name')
       ]);
       if (productsRes.error) throw productsRes.error;
       if (godownsRes.error) throw godownsRes.error;
-      setItemNames(productsRes.data.map(p => p.name));
-      setGodowns(godownsRes.data.map(g => g.name));
+
+      setProductsData(productsRes.data || []);
+      setGodownsData(godownsRes.data || []);
+
+      setItemNames([...new Set((productsRes.data || []).map(p => p.name))].sort());
+      setGodowns((godownsRes.data || []).map(g => g.name));
     } catch (error) {
       console.error('Error fetching master data:', error);
       toast.error('Failed to load master data: ' + error.message);
@@ -165,6 +171,24 @@ const OtdDispatchDone = () => {
   }, []);
 
   useEffect(() => { fetchMasterData(); }, [fetchMasterData]);
+
+  // Helper to format godown option string with stock availability of a product
+  const getGodownOptionString = useCallback((godownName, productName) => {
+    const godownObj = godownsData.find(g => g.name === godownName);
+    if (!godownObj) return godownName;
+    const prodStock = productsData.find(p => p.name === productName && p.godown_id === godownObj.godown_id);
+    const availableQty = prodStock ? parseFloat(prodStock.closing_quantity) || 0 : 0;
+    return `${godownName} (${availableQty} units)`;
+  }, [godownsData, productsData]);
+
+  // Helper to get godown options with availability for a product
+  const getGodownOptionsForProduct = useCallback((productName) => {
+    return godownsData.map(g => {
+      const prodStock = productsData.find(p => p.name === productName && p.godown_id === g.godown_id);
+      const availableQty = prodStock ? parseFloat(prodStock.closing_quantity) || 0 : 0;
+      return `${g.name} (${availableQty} units)`;
+    });
+  }, [godownsData, productsData]);
 
   useEffect(() => {
     setSelectedRows({});
@@ -262,11 +286,40 @@ const OtdDispatchDone = () => {
     const selectedIds = Object.keys(selectedRows).filter(id => selectedRows[id]);
     if (selectedIds.length === 0) return;
 
+    // --- Validate Stock Availability for all selected items first ---
+    for (const id of selectedIds) {
+      const item = orders.find(o => String(o.id) === String(id));
+      if (item) {
+        const finalQty = editData[id]?.dispatchQty !== undefined
+          ? parseFloat(editData[id].dispatchQty)
+          : parseFloat(item.dispatchQty);
+        const finalGodown = editData[id]?.godown || item.godownName;
+        const finalProduct = editData[id]?.product || item.itemName;
+
+        if (isNaN(finalQty) || finalQty <= 0) {
+          toast.error(`Please enter a valid quantity for dispatch ${item.dispatchNo}`);
+          return;
+        }
+
+        const godownObj = godownsData.find(g => g.name === finalGodown);
+        if (!godownObj) {
+          toast.error(`Godown "${finalGodown}" not found for dispatch ${item.dispatchNo}`);
+          return;
+        }
+
+        const prodStock = productsData.find(p => p.name === finalProduct && p.godown_id === godownObj.godown_id);
+        const availableStock = prodStock ? parseFloat(prodStock.closing_quantity) || 0 : 0;
+
+        if (finalQty > availableStock) {
+          toast.error(`Insufficient stock for "${finalProduct}" in "${finalGodown}" for dispatch ${item.dispatchNo}.\nAvailable: ${availableStock}, Requested: ${finalQty}`);
+          return;
+        }
+      }
+    }
+
     setIsSaving(true);
     try {
       const now = new Date().toISOString();
-      const rowsToLog = [];
-      const updates = [];
 
       for (const id of selectedIds) {
         const item = orders.find(o => String(o.id) === String(id));
@@ -277,7 +330,20 @@ const OtdDispatchDone = () => {
           const finalGodown = editData[id]?.godown || item.godownName;
           const finalProduct = editData[id]?.product || item.itemName;
 
-          rowsToLog.push({
+          // 1. Update the dispatch_plans record
+          const { error: planErr } = await supabase.from('dispatch_plans').update({
+            planned_qty: finalQty,
+            godown_name: finalGodown,
+            product_name: finalProduct,
+            dispatch_completed: true,
+            completed_at: now,
+            status: 'Completed',
+            submitted_by: user?.name || user?.full_name || user?.username || 'System',
+          }).eq('id', item.id);
+          if (planErr) throw planErr;
+
+          // 2. Log in dispatch_completed_log
+          const { error: logErr } = await supabase.from('dispatch_completed_log').insert([{
             dispatch_id: item.id,
             dispatch_number: item.dispatchNo,
             dispatch_date: item.dispatchDate,
@@ -291,78 +357,62 @@ const OtdDispatchDone = () => {
             status: 'Completed',
             order_no: item.orderNumber,
             is_skip: false
-          });
+          }]);
+          if (logErr) throw logErr;
 
-          updates.push(
-            supabase.from('dispatch_plans').update({
-              planned_qty: finalQty,
-              godown_name: finalGodown,
-              product_name: finalProduct,
-              dispatch_completed: true,
-              completed_at: now,
-              status: 'Completed',
-              submitted_by: user?.name || user?.full_name || user?.username || 'System',
-            }).eq('id', item.id)
-          );
-
+          // 3. Process stock outflow if applicable
           if (finalGodown && finalProduct && finalQty > 0) {
-            const { data: gData } = await supabase.from('godowns').select('godown_id').eq('name', finalGodown).single();
+            const { data: gData, error: gErr } = await supabase.from('godowns').select('godown_id').eq('name', finalGodown).single();
+            if (gErr) throw gErr;
+
             if (gData?.godown_id) {
-              const { data: pData } = await supabase.from('products').select('*').eq('name', finalProduct).eq('godown_id', gData.godown_id).single();
+              // Re-fetch the latest product details from database for this exact product-godown mapping
+              const { data: pData, error: pErr } = await supabase.from('products').select('*').eq('name', finalProduct).eq('godown_id', gData.godown_id).single();
+              if (pErr) throw pErr;
+
               if (pData) {
                 const currentStock = parseFloat(pData.closing_quantity) || 0;
                 const newStock = currentStock - finalQty;
                 const mux = parseFloat(pData.mux) || 0;
-                
-                updates.push(
-                  supabase.from('products').update({
-                    closing_quantity: newStock,
-                    quantity: (newStock * mux).toFixed(3),
-                    updated_at: now
-                  }).eq('product_id', pData.product_id)
-                );
 
+                // Update product table closing stock and derived quantity
+                const { error: prodUpErr } = await supabase.from('products').update({
+                  closing_quantity: newStock,
+                  quantity: (newStock * mux).toFixed(3),
+                  updated_at: now
+                }).eq('product_id', pData.product_id);
+                if (prodUpErr) throw prodUpErr;
+
+                // Insert into stock_management ledger
                 const entryId = `STK-SAL-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`.toUpperCase();
-                updates.push(
-                  supabase.from('stock_management').insert([{
-                    entry_id: entryId,
-                    godown_id: gData.godown_id,
-                    product_id: pData.product_id,
-                    transaction_type: 'out',
-                    quantity: finalQty,
-                    opening_stock: currentStock,
-                    closing_stock: newStock,
-                    reference_number: item.dispatchNo,
-                    date: now.split('T')[0],
-                    notes: `Sales Dispatch: ${item.dispatchNo} for ${item.clientName}`,
-                  }])
-                );
+                const { error: smErr } = await supabase.from('stock_management').insert([{
+                  entry_id: entryId,
+                  godown_id: gData.godown_id,
+                  product_id: pData.product_id,
+                  transaction_type: 'out',
+                  quantity: finalQty,
+                  opening_stock: currentStock,
+                  closing_stock: newStock,
+                  reference_number: item.dispatchNo,
+                  date: now.split('T')[0],
+                  notes: `Sales Dispatch: ${item.dispatchNo} for ${item.clientName}`,
+                }]);
+                if (smErr) throw smErr;
 
-                updates.push(
-                  supabase.from('stock_notifications').insert([{
-                    notification_type: 'stock_out',
-                    title: 'Stock OUT (Sales)',
-                    message: `${finalQty} units dispatched to ${item.clientName} from ${finalGodown}`,
-                    product_id: pData.product_id,
-                    godown_id: gData.godown_id,
-                    related_id: entryId
-                  }])
-                );
+                // Insert stock notification entry
+                const { error: notifErr } = await supabase.from('stock_notifications').insert([{
+                  notification_type: 'stock_out',
+                  title: 'Stock OUT (Sales)',
+                  message: `${finalQty} units dispatched to ${item.clientName} from ${finalGodown}`,
+                  product_id: pData.product_id,
+                  godown_id: gData.godown_id,
+                  related_id: entryId
+                }]);
+                if (notifErr) throw notifErr;
               }
             }
           }
         }
-      }
-
-      if (rowsToLog.length > 0) {
-        const logResult = await supabase.from('dispatch_completed_log').insert(rowsToLog);
-        if (logResult.error) throw logResult.error;
-      }
-
-      if (updates.length > 0) {
-        const results = await Promise.all(updates);
-        const errorRes = results.find(r => r.error);
-        if (errorRes) throw errorRes.error;
       }
 
       toast.success('Dispatch marked as completed!');
@@ -370,6 +420,7 @@ const OtdDispatchDone = () => {
       setEditData({});
       await fetchPendingOrders(true);
       await fetchHistory(true);
+      await fetchMasterData();
     } catch (error) {
       console.error('Save failed:', error);
       toast.error(`Failed to save dispatch completion: ${error.message}`);
@@ -779,7 +830,7 @@ const OtdDispatchDone = () => {
                       <td className="erp-table-td font-bold text-slate-900">{item.clientName}</td>
 
                       {/* Product — editable dropdown when selected; edit goes to dispatch_plans only */}
-                      <td className={`erp-table-td font-semibold text-slate-700 truncate max-w-[200px] relative ${isSelected ? 'z-[70]' : ''}`}>
+                      <td className={`erp-table-td font-semibold text-slate-700 relative ${isSelected ? 'z-[70] min-w-[275px]' : 'truncate max-w-[200px]'}`}>
                         {activeTab === 'pending' && isSelected ? (
                           <div className="w-64">
                             <SearchableDropdown
@@ -798,13 +849,16 @@ const OtdDispatchDone = () => {
                       </td>
 
                       {/* Godown */}
-                      <td className={`erp-table-td text-center text-slate-600 italic font-black text-[11px] uppercase opacity-60 whitespace-nowrap relative ${isSelected ? 'z-[60]' : ''}`}>
+                      <td className={`erp-table-td text-center text-slate-600 italic font-black text-[11px] uppercase opacity-60 whitespace-nowrap relative ${isSelected ? 'z-[60] min-w-[210px]' : ''}`}>
                         {activeTab === 'pending' && isSelected ? (
                           <div className="w-48 mx-auto">
                             <SearchableDropdown
-                              value={editData[itemId]?.godown || item.godownName}
-                              onChange={(val) => handleEditChange(itemId, 'godown', val)}
-                              options={godowns}
+                              value={getGodownOptionString(editData[itemId]?.godown || item.godownName, editData[itemId]?.product || item.itemName)}
+                              onChange={(val) => {
+                                const rawGodownName = godownsData.find(g => val === g.name || val.startsWith(g.name + ' ('))?.name || val;
+                                handleEditChange(itemId, 'godown', rawGodownName);
+                              }}
+                              options={getGodownOptionsForProduct(editData[itemId]?.product || item.itemName)}
                               placeholder="Select Godown"
                               showAll={false}
                               focusColor="primary"

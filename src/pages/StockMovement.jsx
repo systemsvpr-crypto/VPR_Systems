@@ -99,7 +99,6 @@ const StockMovement = () => {
                 .from('stock_management')
                 .select('*')
                 .not('godown_id', 'is', null)
-                .eq('transaction_type', 'in')
                 .order('date', { ascending: false })
                 .order('created_at', { ascending: false });
 
@@ -150,11 +149,31 @@ const StockMovement = () => {
     // Filtered Data
     const filteredTransfers = useMemo(() => {
         return transfers.filter(t => {
-            if (filterSourceGodown !== 'all') {
-                if (filterSourceGodown === 'new_stock' && t.from_location !== null) return false;
-                if (filterSourceGodown !== 'new_stock' && t.from_location !== filterSourceGodown) return false;
+            // Filter out source duplicate transfer outflows to avoid duplicate transfer rows
+            if (t.entry_id && t.entry_id.endsWith('-SRC')) {
+                return false;
             }
-            if (filterDestGodown !== 'all' && t.godown_id !== filterDestGodown) return false;
+
+            if (filterSourceGodown !== 'all') {
+                if (filterSourceGodown === 'new_stock') {
+                    // Inflow from system new stock has from_location === null and type 'in'
+                    if (t.transaction_type === 'in' && t.from_location !== null) return false;
+                    if (t.transaction_type === 'out') return false;
+                } else {
+                    // For specific godowns:
+                    // Inflow transfer must originate from filterSourceGodown
+                    if (t.transaction_type === 'in' && t.from_location !== filterSourceGodown) return false;
+                    // Outflow dispatch must reduce stock from filterSourceGodown
+                    if (t.transaction_type === 'out' && t.godown_id !== filterSourceGodown) return false;
+                }
+            }
+
+            if (filterDestGodown !== 'all') {
+                // Inflow transfer/receipt stock is added to godown_id
+                if (t.transaction_type === 'in' && t.godown_id !== filterDestGodown) return false;
+                // Outflow dispatch has no destination godown in the system, so exclude
+                if (t.transaction_type === 'out') return false;
+            }
 
             if (searchTerm) {
                 const term = searchTerm.toLowerCase();
@@ -191,13 +210,20 @@ const StockMovement = () => {
 
             const dataToExport = filteredTransfers.map(t => {
                 const product = productMap[t.product_id];
+                const fromGodown = t.transaction_type === 'out'
+                    ? (godownMap[t.godown_id] || t.godown_id)
+                    : (t.from_location ? (godownMap[t.from_location] || t.from_location) : 'New Stock (System)');
+                const toGodown = t.transaction_type === 'out'
+                    ? 'Dispatch / Out'
+                    : (godownMap[t.godown_id] || t.godown_id);
+
                 return {
                     'Date': t.date,
                     'Entry ID': t.entry_id,
                     'Product ID': t.product_id,
                     'Product Name': product ? product.name : 'Unknown',
-                    'From Godown': t.from_location ? (godownMap[t.from_location] || t.from_location) : 'New Stock (System)',
-                    'To Godown': godownMap[t.godown_id] || t.godown_id,
+                    'From Godown': fromGodown,
+                    'To Godown': toGodown,
                     'Quantity (Bags)': parseFloat(t.quantity) || 0,
                     'Mux (Weight Factor)': product ? parseFloat(product.mux) || 1 : 1,
                     'Total Weight (KG)': product ? (parseFloat(t.quantity) || 0) * (parseFloat(product.mux) || 0) : 0,
@@ -297,10 +323,10 @@ const StockMovement = () => {
                     <div>
                         <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                             <ArrowRightLeft className="text-primary" size={20} />
-                            Inter-Godown Transfers
+                            Stock Movement & Transfers
                         </h1>
                         <p className="text-sm font-medium text-slate-500 mt-0.5">
-                            Track products moving between godown locations
+                            Track stock inflows, outflows, and transfers between locations
                         </p>
                     </div>
                 </div>
@@ -436,16 +462,33 @@ const StockMovement = () => {
                                                     <span className="text-xs text-slate-400 font-mono">(SKU: {t.product_id})</span>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
-                                                    <span className="font-semibold text-slate-700 mr-2">
-                                                        {t.from_location ? (godownMap[t.from_location] || t.from_location) : '✨ New Stock'}
-                                                    </span>
-                                                    {t.from_location && (
-                                                        <span className="text-xs font-bold text-amber-600">(-{parseFloat(t.quantity).toLocaleString()})</span>
+                                                    {t.transaction_type === 'out' ? (
+                                                        <>
+                                                            <span className="font-semibold text-slate-700 mr-2">
+                                                                {godownMap[t.godown_id] || t.godown_id}
+                                                            </span>
+                                                            <span className="text-xs font-bold text-rose-600">(-{parseFloat(t.quantity).toLocaleString()})</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <span className="font-semibold text-slate-700 mr-2">
+                                                                {t.from_location ? (godownMap[t.from_location] || t.from_location) : '✨ New Stock'}
+                                                            </span>
+                                                            {t.from_location && (
+                                                                <span className="text-xs font-bold text-amber-600">(-{parseFloat(t.quantity).toLocaleString()})</span>
+                                                            )}
+                                                        </>
                                                     )}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
-                                                    <span className="font-semibold text-slate-700 mr-2">{godownMap[t.godown_id] || t.godown_id}</span>
-                                                    <span className="text-xs font-bold text-emerald-600">(+{parseFloat(t.quantity).toLocaleString()})</span>
+                                                    {t.transaction_type === 'out' ? (
+                                                        <span className="text-slate-400 italic font-medium">Dispatch / Out</span>
+                                                    ) : (
+                                                        <>
+                                                            <span className="font-semibold text-slate-700 mr-2">{godownMap[t.godown_id] || t.godown_id}</span>
+                                                            <span className="text-xs font-bold text-emerald-600">(+{parseFloat(t.quantity).toLocaleString()})</span>
+                                                        </>
+                                                    )}
                                                 </td>
                                                 <td className="px-6 py-4 text-right font-bold text-slate-700 whitespace-nowrap">
                                                     {parseFloat(t.quantity).toLocaleString()} <span className="text-xs text-slate-400 font-normal">Bags</span>

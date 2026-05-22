@@ -1,11 +1,17 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Mail, History, Save, ChevronUp, ChevronDown, RefreshCw, ClipboardList, CheckCircle, Search, Package } from 'lucide-react';
+import { Mail, History, Save, ChevronUp, ChevronDown, RefreshCw, ClipboardList, CheckCircle, Search, Package, XCircle } from 'lucide-react';
 import SearchableDropdown from '../../components/SearchableDropdown';
 import toast from 'react-hot-toast';
 import useAuthStore from '../../store/authStore';
 import { supabase } from '../../supabase';
 import { whatsappService } from '../../services/whatsappService';
 import Pagination from '@/components/ui/Pagination';
+
+const WhatsAppIcon = ({ className = "w-4 h-4" }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12.012 2c-5.506 0-9.989 4.478-9.99 9.984a9.96 9.96 0 001.37 5.054L2 22l5.077-1.331a9.929 9.929 0 004.93 1.315h.005c5.505 0 9.989-4.478 9.99-9.984A9.97 9.97 0 0012.012 2zm5.836 14.199c-.24.674-1.2 1.312-1.65 1.36-.45.047-.9-.12-2.87-.9-2.525-1.003-4.14-3.565-4.267-3.733-.127-.168-.934-1.24-.934-2.385 0-1.145.59-1.704.82-1.939.23-.236.5-.294.666-.294.167 0 .334.003.477.01.147.007.348-.056.546.422.203.49.69 1.681.75 1.8.06.12.1.26.02.42-.08.16-.12.26-.24.4-.12.14-.25.31-.36.42-.12.12-.24.25-.1.49.14.24.62 1.011 1.325 1.636.91.81 1.675 1.06 1.915 1.18.24.12.38.1.52-.06.14-.16.6-1.04.76-1.4.16-.36.32-.3.54-.22.22.08 1.41.66 1.65.78.24.12.4.18.46.28.06.1.06.58-.18 1.254z" />
+  </svg>
+);
 
 const ITEMS_PER_PAGE = 10;
 
@@ -61,6 +67,9 @@ const OtdInformAfter = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
+  const [customerPhoneMap, setCustomerPhoneMap] = useState({});
+  const [whatsAppModal, setWhatsAppModal] = useState({ isOpen: false, status: 'sending', currentClient: '', phoneNumber: '', progress: 0, total: 0 });
+
   // --- Fetch Data ---
   const fetchData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setIsRefreshing(true);
@@ -110,9 +119,26 @@ const OtdInformAfter = () => {
     }
   }, []);
 
+  const fetchCustomers = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('master_customers')
+        .select('customer_name, customer_number');
+      if (error) throw error;
+      const phoneMap = {};
+      (data || []).forEach(c => {
+        if (c.customer_name) phoneMap[c.customer_name] = c.customer_number || '-';
+      });
+      setCustomerPhoneMap(phoneMap);
+    } catch (err) {
+      console.error('fetchCustomers error:', err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+    fetchCustomers();
+  }, [fetchData, fetchCustomers]);
 
   // --- Filtering & Sorting ---
   const allUniqueClients = useMemo(() =>
@@ -175,54 +201,104 @@ const OtdInformAfter = () => {
     setSelectedRows(prev => {
       const next = { ...prev };
       if (next[id]) delete next[id];
-      else next[id] = true;
+      else next[id] = 'no'; // Default to 'no' (WhatsApp switch is OFF/disabled by default)
       return next;
     });
   };
 
+  const handleStatusChange = (id, status) => {
+    setSelectedRows(prev => ({ ...prev, [id]: status }));
+  };
+
   const handleSave = async () => {
-    const selectedIds = Object.keys(selectedRows).filter(id => selectedRows[id]);
-    console.log('OtdInformAfter handleSave triggered with:', selectedIds);
-    if (selectedIds.length === 0) return;
+    const selectedIds = Object.keys(selectedRows);
+    console.log('OtdInformAfter handleSave triggered with selectedIds:', selectedIds);
+    if (selectedIds.length === 0) {
+      console.log('No rows selected, exiting handleSave');
+      return;
+    }
+
+    // Group selected items by client for bulk notification
+    const selectedItemsDetails = pendingItems.filter(item => selectedIds.includes(String(item.id)));
+    const groupedByClient = selectedItemsDetails.reduce((acc, item) => {
+      const client = item.customerName;
+      if (!acc[client]) acc[client] = [];
+      acc[client].push(item);
+      return acc;
+    }, {});
+
+    // Only count clients that actually have at least one item set to send WhatsApp
+    const clientsWithWhatsApp = Object.keys(groupedByClient).filter(clientName => {
+      const items = groupedByClient[clientName];
+      return items.some(i => selectedRows[i.id] === 'yes');
+    });
+    const clientCount = clientsWithWhatsApp.length;
 
     setIsSaving(true);
+    setWhatsAppModal({
+      isOpen: true,
+      status: clientCount > 0 ? 'sending' : 'success',
+      currentClient: '',
+      phoneNumber: '',
+      progress: 0,
+      total: clientCount
+    });
+
     try {
-      // Group selected items by client for bulk notification
-      const selectedItemsDetails = pendingItems.filter(item => selectedIds.includes(String(item.id)));
-      const groupedByClient = selectedItemsDetails.reduce((acc, item) => {
-        const client = item.customerName;
-        if (!acc[client]) acc[client] = [];
-        acc[client].push(item);
-        return acc;
-      }, {});
-
       const successfulIds = [];
+      let currentIdx = 0;
 
-      // 1. Send WhatsApp Notifications First
+      // 1. Send WhatsApp Notifications First (only for clients/items that have WhatsApp enabled)
       for (const clientName in groupedByClient) {
         const items = groupedByClient[clientName];
-        try {
-          console.log(`Attempting WhatsApp After for ${clientName}`);
-          await whatsappService.sendBulkDispatchNotification('9691207533', {
-            customerName: clientName,
-            orderNumbers: items.map(i => i.orderNo),
-            items: items.map(i => ({
-              productName: i.productName,
-              dispatchQty: i.dispatchQty,
-              rate: i.rate
-            })),
-            dispatchDates: items.map(i => i.orderDate),
-            totalQty: items.reduce((sum, i) => sum + (parseFloat(i.dispatchQty) || 0), 0)
-          }, { stage: 'After Dispatch' });
-          // Add to successful list
-          items.forEach(it => successfulIds.push(it.id));
-        } catch (wsError) {
-          console.error(`WhatsApp failed for ${clientName}:`, wsError);
-          toast.error(`WhatsApp failed for ${clientName}: ${wsError.message}`, { duration: 5000 });
+        
+        // Separate items for this client based on WhatsApp preference
+        const whatsAppItems = items.filter(i => selectedRows[i.id] === 'yes');
+        const directDBItems = items.filter(i => selectedRows[i.id] === 'no');
+
+        // If there are items that want WhatsApp, send the notification for those items
+        if (whatsAppItems.length > 0) {
+          const clientPhone = customerPhoneMap[clientName] || '';
+          
+          currentIdx++;
+          setWhatsAppModal(prev => ({
+            ...prev,
+            currentClient: clientName,
+            phoneNumber: clientPhone,
+            progress: currentIdx
+          }));
+
+          try {
+            console.log(`Attempting WhatsApp After for ${clientName}`);
+            await whatsappService.sendBulkDispatchNotification(clientPhone || '9691207533', {
+              customerName: clientName,
+              orderNumbers: whatsAppItems.map(i => i.orderNo),
+              items: whatsAppItems.map(i => ({
+                productName: i.productName,
+                dispatchQty: i.dispatchQty,
+                rate: i.rate
+              })),
+              dispatchDates: whatsAppItems.map(i => formatDisplayDate(i.dispatchDate)),
+              totalQty: whatsAppItems.reduce((sum, i) => sum + (parseFloat(i.dispatchQty) || 0), 0)
+            }, { stage: 'After Dispatch' });
+            
+            // If successful, add these items to successfulIds
+            whatsAppItems.forEach(it => successfulIds.push(it.id));
+          } catch (wsError) {
+            console.error(`WhatsApp failed for ${clientName}:`, wsError);
+            const errorMsg = wsError.response?.data?.error?.message || wsError.message || 'Unknown error';
+            toast.error(`WhatsApp failed for ${clientName}: ${errorMsg}`);
+            // If WhatsApp fails, we do NOT add the whatsAppItems to successfulIds (they won't be updated in the DB)
+          }
+        }
+
+        // Any item that doesn't want WhatsApp is immediately considered successful (direct DB update)
+        if (directDBItems.length > 0) {
+          directDBItems.forEach(it => successfulIds.push(it.id));
         }
       }
 
-      // 2. Only update database for items where WhatsApp was successful
+      // 2. Only update database for items where WhatsApp was successful OR bypassed
       if (successfulIds.length > 0) {
         const { error: dbError } = await supabase
           .from('dispatch_plans')
@@ -234,22 +310,28 @@ const OtdInformAfter = () => {
           .in('id', successfulIds);
 
         if (dbError) throw dbError;
-        toast.success(`${successfulIds.length} after-dispatch notifications confirmed.`);
+        setWhatsAppModal(prev => ({ ...prev, status: 'success' }));
+        toast.success(`${successfulIds.length} after-dispatch notifications confirmed and recorded.`);
       } else {
-        toast.error('No notifications were sent. Database not updated.');
+        setWhatsAppModal(prev => ({ ...prev, status: 'error', error: 'No notifications were sent or recorded.' }));
+        toast.error('No notifications were sent/recorded. Database not updated.');
       }
 
       setSelectedRows({});
-      fetchData(true);
+      await fetchData(true);
     } catch (error) {
-      console.error('Save error:', error);
-      toast.error(error.message);
+      console.error('Operation failed:', error);
+      setWhatsAppModal(prev => ({ ...prev, status: 'error', error: error.message }));
+      toast.error('Operation failed: ' + error.message);
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleRefresh = () => fetchData(true);
+  const handleRefresh = () => {
+    fetchData(true);
+    fetchCustomers();
+  };
 
   return (
     <div className="p-4 lg:p-6 space-y-6">
@@ -316,7 +398,7 @@ const OtdInformAfter = () => {
           <table className="erp-table">
             <thead className="erp-table-thead">
               <tr>
-                {activeTab === 'pending' && <th className="erp-table-th text-center w-16">Action</th>}
+                {activeTab === 'pending' && <th className="erp-table-th text-center w-28">Action</th>}
                 {[
                   { label: 'Dispatch No', key: 'dispatchNo' },
                   { label: 'Dispatch Date', key: 'dispatchDate', align: 'center' },
@@ -364,8 +446,34 @@ const OtdInformAfter = () => {
                   return (
                     <tr key={idx} className="erp-table-tr group">
                       {activeTab === 'pending' && (
-                        <td className="erp-table-td text-center w-16">
-                          <input type="checkbox" checked={isSelected} onChange={() => handleCheckboxToggle(item.id)} className="rounded-md w-5 h-5 cursor-pointer" />
+                        <td className="erp-table-td text-center w-28">
+                          <div className="flex items-center gap-3 justify-center min-w-[100px]">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleCheckboxToggle(item.id)}
+                              className="rounded text-primary cursor-pointer w-4 h-4 shadow-sm"
+                            />
+                            {isSelected && (
+                              <div className="flex items-center gap-1.5 animate-in fade-in slide-in-from-left-1 duration-200">
+                                <WhatsAppIcon className={`w-4 h-4 transition-colors duration-200 ${selectedRows[item.id] === 'yes' ? 'text-emerald-500' : 'text-slate-400'}`} />
+                                <button
+                                  type="button"
+                                  onClick={() => handleStatusChange(item.id, selectedRows[item.id] === 'yes' ? 'no' : 'yes')}
+                                  className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                    selectedRows[item.id] === 'yes' ? 'bg-emerald-500' : 'bg-slate-200'
+                                  }`}
+                                  title={selectedRows[item.id] === 'yes' ? "WhatsApp Enabled" : "WhatsApp Disabled"}
+                                >
+                                  <span
+                                    className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                      selectedRows[item.id] === 'yes' ? 'translate-x-3' : 'translate-x-0'
+                                    }`}
+                                  />
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </td>
                       )}
                       <td className="erp-table-td font-black text-primary">{item.dispatchNo}</td>
@@ -405,6 +513,89 @@ const OtdInformAfter = () => {
           </div>
         )}
       </div>
+      
+      {isSaving && !whatsAppModal.isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-white/40 backdrop-blur-md">
+          <RefreshCw size={40} className="animate-spin text-primary" />
+        </div>
+      )}
+
+      {/* WhatsApp Status Modal */}
+      {whatsAppModal.isOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300" />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 flex flex-col items-center text-center animate-in zoom-in-95 duration-200">
+            {whatsAppModal.status === 'sending' ? (
+              <>
+                <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mb-6 relative">
+                  <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+                  <RefreshCw size={32} className="text-primary animate-pulse" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">Sending Notifications</h3>
+                <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-4">
+                  Client {whatsAppModal.progress} of {whatsAppModal.total}
+                </p>
+                <p className="text-slate-500 mb-6">
+                  Notifying <span className="font-bold text-slate-900">{whatsAppModal.currentClient}</span> at <span className="font-bold text-primary">{whatsAppModal.phoneNumber || 'N/A'}</span>
+                </p>
+                <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-primary transition-all duration-500" 
+                    style={{ width: `${(whatsAppModal.progress / whatsAppModal.total) * 100}%` }}
+                  />
+                </div>
+              </>
+            ) : whatsAppModal.status === 'success' ? (
+              <>
+                <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-6">
+                  <CheckCircle size={40} className="text-green-600 animate-bounce" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">
+                  {whatsAppModal.total > 0 ? "Notifications Sent!" : "Records Updated!"}
+                </h3>
+                <p className="text-slate-500 mb-8">
+                  {whatsAppModal.total > 0 
+                    ? "Bulk WhatsApp messages successfully sent to all selected clients."
+                    : "Selected orders successfully confirmed and recorded in the database without sending WhatsApp."}
+                </p>
+                <button
+                  onClick={() => setWhatsAppModal({ ...whatsAppModal, isOpen: false })}
+                  className="w-full py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 transition-colors shadow-lg shadow-green-200"
+                >
+                  Great, Thanks!
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mb-6">
+                  <XCircle size={40} className="text-red-600" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">Sending Completed with Errors</h3>
+                <p className="text-slate-500 mb-8">
+                  {whatsAppModal.error || "Some notifications could not be sent. Please check individual toast messages for details."}
+                </p>
+                <button
+                  onClick={() => setWhatsAppModal({ ...whatsAppModal, isOpen: false })}
+                  className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-colors"
+                >
+                  Close
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes progress-loading {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
+        .animate-progress-loading {
+          animation: progress-loading 1.5s infinite linear;
+          width: 50%;
+        }
+      `}</style>
     </div>
   );
 };

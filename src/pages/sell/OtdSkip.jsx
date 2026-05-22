@@ -72,6 +72,9 @@ const OtdSkip = () => {
   const abortControllerRef = useRef(null);
 
   const [godowns, setGodowns] = useState([]);
+  const [productsData, setProductsData] = useState([]);
+  const [godownsData, setGodownsData] = useState([]);
+  const [itemNames, setItemNames] = useState([]);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -113,13 +116,13 @@ const OtdSkip = () => {
   const fetchStockData = useCallback(async () => {
     setLoadingStock(true);
     try {
-      const [allStock, godownsData] = await Promise.all([
+      const [allStock, gData] = await Promise.all([
         fetchAllRows('products', 'name, godown_id, closing_quantity', 'name'),
         fetchAllRows('godowns', 'name, godown_id', 'name')
       ]);
 
       const godownMap = {};
-      godownsData.forEach(g => {
+      gData.forEach(g => {
         godownMap[g.godown_id] = g.name;
       });
 
@@ -135,6 +138,11 @@ const OtdSkip = () => {
         sMap[item].push(`${displayGodown}:${stock}`);
       });
       setStockDataMap(sMap);
+      
+      setProductsData(allStock);
+      setGodownsData(gData);
+      setItemNames([...new Set(allStock.map(p => p.name))].sort());
+      setGodowns(gData.map(g => g.name));
     } catch (err) {
       console.error("Supabase stock fetch error:", err);
     } finally {
@@ -172,6 +180,24 @@ const OtdSkip = () => {
       return '';
     }
   };
+
+  // Helper to format godown option string with stock availability of a product
+  const getGodownOptionString = useCallback((godownName, productName) => {
+    const godownObj = godownsData.find(g => g.name === godownName);
+    if (!godownObj) return godownName;
+    const prodStock = productsData.find(p => p.name === productName && p.godown_id === godownObj.godown_id);
+    const availableQty = prodStock ? parseFloat(prodStock.closing_quantity) || 0 : 0;
+    return `${godownName} (${availableQty} units)`;
+  }, [godownsData, productsData]);
+
+  // Helper to get godown options with availability for a product
+  const getGodownOptionsForProduct = useCallback((productName) => {
+    return godownsData.map(g => {
+      const prodStock = productsData.find(p => p.name === productName && p.godown_id === g.godown_id);
+      const availableQty = prodStock ? parseFloat(prodStock.closing_quantity) || 0 : 0;
+      return `${g.name} (${availableQty} units)`;
+    });
+  }, [godownsData, productsData]);
 
   // --- Unified fetch: Connected to Supabase ---
   const fetchAllData = useCallback(async (isRefresh = false) => {
@@ -279,7 +305,7 @@ const OtdSkip = () => {
       setPendingItems(pending);
       setHistoryItems(history);
 
-      const uniqueGodowns = (godownsRes.data || []).map(g => g.godown_name);
+      const uniqueGodowns = (godownsRes.data || []).map(g => g.name);
       setGodowns(uniqueGodowns);
 
     } catch (error) {
@@ -481,7 +507,8 @@ const OtdSkip = () => {
           dispatchQty: item?.planningPendingQty || '',
           dispatchDate: new Date().toISOString().split('T')[0],
           gstIncluded: 'No',
-          godown: item?.godown || ''
+          godown: item?.godown || '',
+          product: item?.itemName || ''
         };
       } else delete newState[originalIdx];
       return newState;
@@ -502,7 +529,13 @@ const OtdSkip = () => {
         allFilteredIndices.forEach(idx => {
           if (!next[idx]) {
             const item = pendingItems.find(it => it.originalIndex === idx);
-            next[idx] = { dispatchQty: item?.planningPendingQty || '', dispatchDate: today, gstIncluded: 'No', godown: item?.godown || '' };
+            next[idx] = {
+              dispatchQty: item?.planningPendingQty || '',
+              dispatchDate: today,
+              gstIncluded: 'No',
+              godown: item?.godown || '',
+              product: item?.itemName || ''
+            };
           }
         });
         return next;
@@ -520,6 +553,44 @@ const OtdSkip = () => {
   const handleSave = async () => {
     const selectedIndices = Object.keys(selectedRows).filter(idx => selectedRows[idx]);
     if (selectedIndices.length === 0) return;
+
+    // --- Validate Stock Availability for all selected items first ---
+    for (const idx of selectedIndices) {
+      const item = pendingItems.find(it => String(it.originalIndex) === String(idx));
+      if (item) {
+        const edit = editData[idx];
+        const finalQty = edit?.dispatchQty !== undefined
+          ? parseFloat(edit.dispatchQty)
+          : parseFloat(item.planningPendingQty);
+        const finalGodown = edit?.godown || item.godown;
+        const finalProduct = edit?.product || item.itemName;
+
+        if (isNaN(finalQty) || finalQty <= 0) {
+          toast.error(`Please enter a valid quantity for order ${item.orderNumber}`);
+          return;
+        }
+
+        const godownObj = godownsData.find(g => g.name === finalGodown);
+        if (!godownObj) {
+          toast.error(`Please select a valid Godown for order ${item.orderNumber}`);
+          return;
+        }
+
+        const prodStock = productsData.find(p => p.name === finalProduct && p.godown_id === godownObj.godown_id);
+        const availableStock = prodStock ? parseFloat(prodStock.closing_quantity) || 0 : 0;
+
+        if (finalQty > availableStock) {
+          toast.error(`Insufficient stock for "${finalProduct}" in "${finalGodown}" for order ${item.orderNumber}.\nAvailable: ${availableStock}, Requested: ${finalQty}`);
+          return;
+        }
+
+        if (availableStock <= 0) {
+          toast.error(`Selected Godown "${finalGodown}" does not have stock for "${finalProduct}".`);
+          return;
+        }
+      }
+    }
+
     if (!window.confirm(`Are you sure you want to mark ${selectedIndices.length} items as completed and skipped?`)) return;
 
     setIsSaving(true);
@@ -547,7 +618,7 @@ const OtdSkip = () => {
             dispatch_number: dNo,
             planned_qty: parseFloat(edit.dispatchQty) || 0,
             planned_date: edit.dispatchDate,
-            godown_name: edit.godown,
+            godown_name: edit.godown || item.godown,
             dispatch_completed: true,
             informed_before_dispatch: true,
             informed_after_dispatch: true,
@@ -557,7 +628,7 @@ const OtdSkip = () => {
             completed_at: now,
             informed_at: now,
             // NEW FIELDS
-            product_name: item.itemName || null,
+            product_name: edit.product || item.itemName || null,
             order_qty: item.orderQty || 0,
             client_name: item.clientName || null,
             order_number: item.orderNumber || null
@@ -573,8 +644,8 @@ const OtdSkip = () => {
           dispatch_date: edit.dispatchDate,
           complete_date: now.split('T')[0],
           client_name: item.clientName,
-          product_name: item.itemName,
-          godown_name: edit.godown,
+          product_name: edit.product || item.itemName,
+          godown_name: edit.godown || item.godown,
           order_qty: parseFloat(item.orderQty) || 0,
           dispatch_qty: parseFloat(edit.dispatchQty) || 0,
           crm_name: user?.name || user?.full_name || user?.username || 'System',
@@ -583,6 +654,63 @@ const OtdSkip = () => {
           // NEW FIELDS for log as well
           order_number: item.orderNumber || null
         });
+
+        // 3. Process stock outflow if applicable
+        const finalQty = parseFloat(edit.dispatchQty) || 0;
+        const finalGodown = edit.godown || item.godown;
+        const finalProduct = edit.product || item.itemName;
+
+        if (finalGodown && finalProduct && finalQty > 0) {
+          const { data: gData, error: gErr } = await supabase.from('godowns').select('godown_id').eq('name', finalGodown).single();
+          if (gErr) throw gErr;
+
+          if (gData?.godown_id) {
+            // Re-fetch the latest product details from database for this exact product-godown mapping
+            const { data: pData, error: pErr } = await supabase.from('products').select('*').eq('name', finalProduct).eq('godown_id', gData.godown_id).single();
+            if (pErr) throw pErr;
+
+            if (pData) {
+              const currentStock = parseFloat(pData.closing_quantity) || 0;
+              const newStock = currentStock - finalQty;
+              const mux = parseFloat(pData.mux) || 0;
+
+              // Update product table closing stock and derived quantity
+              const { error: prodUpErr } = await supabase.from('products').update({
+                closing_quantity: newStock,
+                quantity: (newStock * mux).toFixed(3),
+                updated_at: now
+              }).eq('product_id', pData.product_id);
+              if (prodUpErr) throw prodUpErr;
+
+              // Insert into stock_management ledger
+              const entryId = `STK-SAL-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`.toUpperCase();
+              const { error: smErr } = await supabase.from('stock_management').insert([{
+                entry_id: entryId,
+                godown_id: gData.godown_id,
+                product_id: pData.product_id,
+                transaction_type: 'out',
+                quantity: finalQty,
+                opening_stock: currentStock,
+                closing_stock: newStock,
+                reference_number: dNo,
+                date: now.split('T')[0],
+                notes: `Sales Dispatch (Skip): ${dNo} for ${item.clientName}`,
+              }]);
+              if (smErr) throw smErr;
+
+              // Insert stock notification entry
+              const { error: notifErr } = await supabase.from('stock_notifications').insert([{
+                notification_type: 'stock_out',
+                title: 'Stock OUT (Sales - Skipped)',
+                message: `${finalQty} units skipped & marked completed to ${item.clientName} from ${finalGodown}`,
+                product_id: pData.product_id,
+                godown_id: gData.godown_id,
+                related_id: entryId
+              }]);
+              if (notifErr) throw notifErr;
+            }
+          }
+        }
       }
 
       toast.success('Items processed successfully!');
@@ -713,8 +841,43 @@ const OtdSkip = () => {
                     )}
                     <td className="erp-table-td font-black text-slate-500">{item.orderNumber}</td>
                     <td className="erp-table-td font-bold text-slate-900">{item.clientName}</td>
-                    <td className="erp-table-td font-semibold text-slate-700 truncate max-w-[200px]" title={item.itemName}>{item.itemName}</td>
-                    <td className="erp-table-td text-center text-slate-600 italic font-black text-[11px] uppercase opacity-60 whitespace-nowrap">{isSelected ? (<SearchableDropdown value={edit.godown || ''} onChange={(val) => handleEditChange(originalIdx, 'godown', val)} options={godowns} placeholder="Select Godown" showAll={false} className="w-full text-left" />) : (item.godown)}</td>
+                    <td className={`erp-table-td font-semibold text-slate-700 relative ${isSelected ? 'z-[70] min-w-[250px]' : 'truncate max-w-[200px]'}`} title={item.itemName}>
+                      {isSelected ? (
+                        <div className="w-56">
+                          <SearchableDropdown
+                            value={edit.product || item.itemName}
+                            onChange={(val) => handleEditChange(originalIdx, 'product', val)}
+                            options={itemNames}
+                            placeholder="Select Product"
+                            showAll={false}
+                            focusColor="primary"
+                            className="w-full text-left"
+                          />
+                        </div>
+                      ) : (
+                        item.itemName
+                      )}
+                    </td>
+                    <td className={`erp-table-td text-center text-slate-600 italic font-black text-[11px] uppercase opacity-60 whitespace-nowrap relative ${isSelected ? 'z-[60] min-w-[210px]' : ''}`}>
+                      {isSelected ? (
+                        <div className="w-48 mx-auto">
+                          <SearchableDropdown
+                            value={getGodownOptionString(edit.godown || item.godown, edit.product || item.itemName)}
+                            onChange={(val) => {
+                              const rawGodownName = godownsData.find(g => val === g.name || val.startsWith(g.name + ' ('))?.name || val;
+                              handleEditChange(originalIdx, 'godown', rawGodownName);
+                            }}
+                            options={getGodownOptionsForProduct(edit.product || item.itemName)}
+                            placeholder="Select Godown"
+                            showAll={false}
+                            focusColor="primary"
+                            className="w-full text-left"
+                          />
+                        </div>
+                      ) : (
+                        item.godown
+                      )}
+                    </td>
 
                     {activeTab === 'pending' && (<>
                       {/* Order Qty — Remaining sub-label */}
@@ -922,13 +1085,29 @@ const OtdSkip = () => {
                         </div>
                       </div>
                       <div>
+                        <label className="block text-[10px] font-bold text-primary mb-1 uppercase">Product</label>
+                        <SearchableDropdown
+                          value={edit.product || item.itemName}
+                          onChange={(val) => handleEditChange(originalIdx, 'product', val)}
+                          options={itemNames}
+                          placeholder="Select Product"
+                          showAll={false}
+                          focusColor="primary"
+                          className="w-full text-left"
+                        />
+                      </div>
+                      <div>
                         <label className="block text-[10px] font-bold text-primary mb-1 uppercase">Godown</label>
                         <SearchableDropdown
-                          value={edit.godown || ''}
-                          onChange={(val) => handleEditChange(originalIdx, 'godown', val)}
-                          options={godowns}
+                          value={getGodownOptionString(edit.godown || item.godown, edit.product || item.itemName)}
+                          onChange={(val) => {
+                            const rawGodownName = godownsData.find(g => val === g.name || val.startsWith(g.name + ' ('))?.name || val;
+                            handleEditChange(originalIdx, 'godown', rawGodownName);
+                          }}
+                          options={getGodownOptionsForProduct(edit.product || item.itemName)}
                           placeholder="Select Godown"
                           showAll={false}
+                          focusColor="primary"
                           className="w-full text-left"
                         />
                       </div>
