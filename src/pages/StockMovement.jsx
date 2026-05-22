@@ -23,7 +23,11 @@ import {
     CalendarDays,
     FileText,
     Package,
-    Clock
+    Clock,
+    ArrowDownCircle,
+    ArrowUpCircle,
+    BarChart3,
+    Warehouse
 } from 'lucide-react';
 
 const ITEMS_PER_PAGE = 10;
@@ -51,6 +55,12 @@ const StockMovement = () => {
 
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
+
+    // Godown Summary Panel States
+    const [summaryGodown, setSummaryGodown] = useState('');
+    const [summaryDate, setSummaryDate] = useState('');
+    const [summaryData, setSummaryData] = useState(null);
+    const [loadingSummary, setLoadingSummary] = useState(false);
 
     // Drilldown Detail Modal States
     const [selectedTransferRow, setSelectedTransferRow] = useState(null);
@@ -132,6 +142,68 @@ const StockMovement = () => {
     useEffect(() => {
         setCurrentPage(1);
     }, [searchTerm, filterSourceGodown, filterDestGodown]);
+
+    // Fetch Godown Summary — up to 20,000 records, with optional single-day filter
+    const fetchGodownSummary = useCallback(async (godownId, date) => {
+        if (!godownId) {
+            setSummaryData(null);
+            return;
+        }
+        setLoadingSummary(true);
+        try {
+            let query = supabase
+                .from('stock_management')
+                .select('transaction_type, quantity, product_id, date')
+                .eq('godown_id', godownId)
+                .not('entry_id', 'like', '%-SRC')
+                .order('date', { ascending: false })
+                .limit(20000);
+
+            if (date) {
+                query = query.gte('date', date).lte('date', date);
+            }
+
+            const { data, error } = await query;
+            if (error) throw error;
+
+            const rows = data || [];
+            let totalIn = 0;
+            let totalOut = 0;
+            let inCount = 0;
+            let outCount = 0;
+
+            rows.forEach(r => {
+                const qty = parseFloat(r.quantity) || 0;
+                if (r.transaction_type === 'in') {
+                    totalIn += qty;
+                    inCount++;
+                } else {
+                    totalOut += qty;
+                    outCount++;
+                }
+            });
+
+            setSummaryData({
+                godownId,
+                date: date || null,
+                totalIn,
+                totalOut,
+                netBalance: totalIn - totalOut,
+                inCount,
+                outCount,
+                totalRecords: rows.length,
+            });
+        } catch (err) {
+            console.error('Error fetching godown summary:', err);
+            toast.error('Failed to load godown summary');
+        } finally {
+            setLoadingSummary(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchGodownSummary(summaryGodown, summaryDate);
+    }, [summaryGodown, summaryDate, fetchGodownSummary]);
 
     // Lookup Maps
     const godownMap = useMemo(() => {
@@ -351,6 +423,154 @@ const StockMovement = () => {
             </div>
 
             <div className="flex-1 p-6 space-y-6 max-w-[1600px] w-full mx-auto pb-24">
+
+                {/* ── Godown Summary Panel ── */}
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    {/* Panel Header — matches filter-bar style */}
+                    <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/60 flex items-end gap-4 flex-wrap">
+
+                        {/* Title block */}
+                        <div className="space-y-1">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Summary</label>
+                            <div className="flex items-center gap-2 h-10">
+                                <Warehouse size={16} className="text-primary" />
+                                <span className="text-sm font-bold text-slate-700">Godown In / Out</span>
+                            </div>
+                        </div>
+
+                        {/* Godown select */}
+                        <div className="space-y-1 flex-1 min-w-[180px]">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Godown</label>
+                            <select
+                                value={summaryGodown}
+                                onChange={(e) => setSummaryGodown(e.target.value)}
+                                className="w-full h-10 px-3 rounded-lg border border-slate-200 text-sm font-medium focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none bg-white hover:bg-slate-50 transition-all text-slate-700 cursor-pointer"
+                            >
+                                <option value="">— Select Godown —</option>
+                                {godowns.map(g => (
+                                    <option key={g.godown_id} value={g.godown_id}>{g.name}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Date */}
+                        <div className="space-y-1 min-w-[140px]">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Date</label>
+                            <DatePicker
+                                value={summaryDate}
+                                onChange={(e) => setSummaryDate(e.target.value)}
+                            />
+                        </div>
+
+                        {/* Clear + Refresh */}
+                        <div className="flex items-center gap-2">
+                            {summaryDate && (
+                                <button
+                                    onClick={() => setSummaryDate('')}
+                                    className="h-10 px-3 flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-rose-600 border border-slate-200 rounded-lg bg-white hover:bg-rose-50 hover:border-rose-200 transition-all"
+                                >
+                                    <X size={12} />
+                                    Clear
+                                </button>
+                            )}
+                            {summaryGodown && (
+                                <button
+                                    onClick={() => fetchGodownSummary(summaryGodown, summaryDate)}
+                                    disabled={loadingSummary}
+                                    className="h-10 px-3 flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-primary border border-slate-200 rounded-lg bg-white hover:bg-slate-50 transition-all disabled:opacity-50"
+                                >
+                                    <RefreshCw size={11} className={loadingSummary ? 'animate-spin text-primary' : ''} />
+                                    Refresh
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Panel Body */}
+                    {!summaryGodown ? (
+                        <div className="py-10 flex flex-col items-center justify-center gap-2 text-slate-400">
+                            <BarChart3 size={32} className="text-slate-200" />
+                            <p className="text-sm font-medium">Select a godown above to view its In / Out summary</p>
+                        </div>
+                    ) : loadingSummary ? (
+                        <div className="py-10 flex flex-col items-center justify-center gap-3">
+                            <RefreshCw className="animate-spin text-primary" size={24} />
+                            <p className="text-sm font-semibold text-slate-500">Calculating summary…</p>
+                        </div>
+                    ) : summaryData ? (
+                        <div className="p-4">
+                            {/* Four stat cards */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                {/* Stock IN */}
+                                <div className="flex flex-col gap-0.5 p-3 rounded-lg bg-emerald-50 border border-emerald-100">
+                                    <div className="flex items-center gap-1.5 mb-0.5">
+                                        <ArrowDownCircle size={14} className="text-emerald-600" />
+                                        <span className="text-[11px] font-bold text-emerald-600 uppercase tracking-wider">Stock In</span>
+                                    </div>
+                                    <div className="text-xl font-black text-emerald-700 leading-none">
+                                        {summaryData.totalIn.toLocaleString()}
+                                    </div>
+                                    <div className="text-xs text-emerald-500 font-medium mt-0.5">Bags received</div>
+                                    <div className="text-[10px] text-emerald-400">{summaryData.inCount.toLocaleString()} entries</div>
+                                </div>
+
+                                {/* Stock OUT */}
+                                <div className="flex flex-col gap-0.5 p-3 rounded-lg bg-rose-50 border border-rose-100">
+                                    <div className="flex items-center gap-1.5 mb-0.5">
+                                        <ArrowUpCircle size={14} className="text-rose-600" />
+                                        <span className="text-[11px] font-bold text-rose-600 uppercase tracking-wider">Stock Out</span>
+                                    </div>
+                                    <div className="text-xl font-black text-rose-700 leading-none">
+                                        {summaryData.totalOut.toLocaleString()}
+                                    </div>
+                                    <div className="text-xs text-rose-500 font-medium mt-0.5">Bags dispatched</div>
+                                    <div className="text-[10px] text-rose-400">{summaryData.outCount.toLocaleString()} entries</div>
+                                </div>
+
+                                {/* Net Movement */}
+                                <div className={cn(
+                                    "flex flex-col gap-0.5 p-3 rounded-lg border",
+                                    summaryData.netBalance >= 0
+                                        ? "bg-blue-50 border-blue-100"
+                                        : "bg-amber-50 border-amber-100"
+                                )}>
+                                    <div className="flex items-center gap-1.5 mb-0.5">
+                                        <BarChart3 size={14} className={summaryData.netBalance >= 0 ? "text-blue-600" : "text-amber-600"} />
+                                        <span className={cn(
+                                            "text-[11px] font-bold uppercase tracking-wider",
+                                            summaryData.netBalance >= 0 ? "text-blue-600" : "text-amber-600"
+                                        )}>Net Movement</span>
+                                    </div>
+                                    <div className={cn(
+                                        "text-xl font-black leading-none",
+                                        summaryData.netBalance >= 0 ? "text-blue-700" : "text-amber-700"
+                                    )}>
+                                        {summaryData.netBalance >= 0 ? '+' : ''}{summaryData.netBalance.toLocaleString()}
+                                    </div>
+                                    <div className={cn(
+                                        "text-xs font-medium mt-0.5",
+                                        summaryData.netBalance >= 0 ? "text-blue-500" : "text-amber-500"
+                                    )}>In minus Out</div>
+                                </div>
+
+                                {/* Total Entries */}
+                                <div className="flex flex-col gap-0.5 p-3 rounded-lg bg-slate-50 border border-slate-200">
+                                    <div className="flex items-center gap-1.5 mb-0.5">
+                                        <Activity size={14} className="text-slate-500" />
+                                        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Entries</span>
+                                    </div>
+                                    <div className="text-xl font-black text-slate-700 leading-none">
+                                        {(summaryData.inCount + summaryData.outCount).toLocaleString()}
+                                    </div>
+                                    <div className="text-xs text-slate-400 font-medium mt-0.5">All transactions</div>
+                                    <div className="text-[10px] text-slate-400">
+                                        {summaryData.inCount} in · {summaryData.outCount} out
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ) : null}
+                </div>
 
                 {/* Simple Row Filter Bar */}
                 <div className="flex items-end gap-4 flex-wrap w-full mb-4">
