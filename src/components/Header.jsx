@@ -88,7 +88,7 @@ const Header = ({ children }) => {
             type: item.notification_type,
             title: item.title,
             time: item.created_at,
-            link: '/stock-notifications',
+            link: '/stock-movement',
             status: item.is_read ? 'Read' : 'Unread',
             context: 'stock',
             message: item.message,
@@ -155,9 +155,23 @@ const Header = ({ children }) => {
     toast.success('Logged out successfully');
   };
 
-  const handleNotificationClick = (link) => {
+  const handleNotificationClick = async (notif) => {
     setIsNotificationOpen(false);
-    navigate(link);
+    
+    // Mark as read in supabase in the background if it's unread
+    if (notif.status === 'Unread') {
+      const realId = notif.id.replace('stock-', '');
+      try {
+        await supabase
+          .from('stock_notifications')
+          .update({ is_read: true })
+          .eq('id', realId);
+      } catch (err) {
+        console.error("Error marking notification as read:", err);
+      }
+    }
+    
+    navigate(notif.link || '/stock-movement');
   };
 
   const formatTimeAgo = (dateString) => {
@@ -246,7 +260,7 @@ const Header = ({ children }) => {
                     notifications.map((notif) => (
                       <div
                         key={notif.id}
-                        onClick={() => handleNotificationClick(notif.link)}
+                        onClick={() => handleNotificationClick(notif)}
                         className="px-4 py-3 sm:px-5 sm:py-4 hover:bg-slate-50/80 transition-all cursor-pointer border-b border-slate-50 last:border-0 group relative"
                       >
                         <div className="flex gap-3 sm:gap-4">
@@ -289,7 +303,7 @@ const Header = ({ children }) => {
                       </div>
                     ))
                   ) : (
-                    <div className="px-4 py-12 text-center bg-slate-50/30 cursor-pointer" onClick={() => navigate('/stock-notifications')}>
+                    <div className="px-4 py-12 text-center bg-slate-50/30 cursor-pointer" onClick={() => navigate('/stock-movement')}>
                       <div className="inline-flex items-center justify-center w-16 h-16 rounded-lg bg-slate-50 mb-4 text-slate-300 border border-slate-100">
                         <CheckCircle size={32} strokeWidth={1.5} />
                       </div>
@@ -304,7 +318,7 @@ const Header = ({ children }) => {
                       className="text-xs font-semibold text-primary hover:text-primary/80 transition-colors uppercase tracking-wider"
                       onClick={() => {
                         setIsNotificationOpen(false);
-                        navigate('/stock-notifications');
+                        navigate('/stock-movement');
                       }}
                     >
                       View All

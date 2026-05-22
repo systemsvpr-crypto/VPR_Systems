@@ -116,19 +116,47 @@ const StockManagement = () => {
         setCurrentPage(1);
     }, [searchTerm, filterType, filterGodown]);
 
+    const fetchAllProducts = async () => {
+        let accumulated = [];
+        let pageIndex = 0;
+        const pageSize = 1000;
+        let done = false;
+        
+        while (!done) {
+            const from = pageIndex * pageSize;
+            const to = from + pageSize - 1;
+            const { data, error } = await supabase
+                .from('products')
+                .select('*')
+                .eq('is_active', true)
+                .order('name', { ascending: true })
+                .range(from, to);
+            
+            if (error) throw error;
+            accumulated = [...accumulated, ...(data || [])];
+            
+            if (!data || data.length < pageSize) {
+                done = true;
+            } else {
+                pageIndex++;
+            }
+        }
+        return accumulated;
+    };
+
     const fetchData = async () => {
         setLoading(true);
         try {
-            const [entriesRes, godownsRes, productsRes, transportersRes] = await Promise.all([
+            const [entriesRes, godownsRes, transportersRes, allProducts] = await Promise.all([
                 supabase.from('stock_management').select('*').order('created_at', { ascending: false }),
                 supabase.from('godowns').select('*').eq('is_active', true).order('name', { ascending: true }),
-                supabase.from('products').select('*').eq('is_active', true).order('name', { ascending: true }),
-                supabase.from('transporters').select('*').eq('is_active', true).order('name', { ascending: true })
+                supabase.from('transporters').select('*').eq('is_active', true).order('name', { ascending: true }),
+                fetchAllProducts()
             ]);
             if (entriesRes.error) throw entriesRes.error;
             setEntries(entriesRes.data || []);
             setGodowns(godownsRes.data || []);
-            setProducts(productsRes.data || []);
+            setProducts(allProducts || []);
             setTransporters(transportersRes.data || []);
         } catch (error) {
             console.error('Error fetching data:', error);
@@ -680,50 +708,45 @@ const StockManagement = () => {
     }, [filteredEntries, currentPage]);
 
     const availableProducts = useMemo(() => {
-        const isTransfer = formData.transaction_type === 'in' && formData.from_location;
-        const isNewStock = formData.from_location === 'NEW_STOCK';
-        const targetGodownId = isTransfer && !isNewStock ? formData.from_location : formData.godown_id;
+        const isTransfer = formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK';
+        const targetGodownId = isTransfer ? formData.from_location : formData.godown_id;
         
-        if (!targetGodownId && !isNewStock) return [];
+        const uniqueProducts = [];
+        const seenNames = new Set();
         
-        if (isNewStock) {
-            const uniqueProducts = [];
-            const seenNames = new Set();
-            for (const p of products) {
-                if (!seenNames.has(p.name)) {
-                    seenNames.add(p.name);
-                    const destProduct = products.find(dp => dp.name === p.name && dp.godown_id === formData.godown_id);
-                    const prodToUse = destProduct || p;
-                    uniqueProducts.push({
-                        ...prodToUse,
-                        _destProductId: prodToUse.product_id
-                    });
-                }
+        for (const p of products) {
+            if (!seenNames.has(p.name)) {
+                seenNames.add(p.name);
+                
+                // Find the instance of this product in the target godown (for stock lookup)
+                const targetProductInstance = targetGodownId 
+                    ? products.find(dp => dp.name === p.name && dp.godown_id === targetGodownId)
+                    : null;
+                
+                // Find the destination product instance (in To Godown) to map the destination product_id
+                const destProductInstance = formData.godown_id
+                    ? products.find(dp => dp.name === p.name && dp.godown_id === formData.godown_id)
+                    : null;
+
+                const prodToUse = targetProductInstance || destProductInstance || p;
+                
+                uniqueProducts.push({
+                    ...prodToUse,
+                    // If target instance doesn't exist, current stock in target godown is 0
+                    closing_quantity: targetProductInstance ? (parseFloat(targetProductInstance.closing_quantity) || 0) : 0,
+                    // If target instance doesn't exist, godown_id is targetGodownId
+                    godown_id: targetGodownId || prodToUse.godown_id,
+                    // The destination product ID is destProductInstance.product_id if it exists,
+                    // otherwise we fall back to the selected product_id.
+                    _destProductId: destProductInstance ? destProductInstance.product_id : prodToUse.product_id
+                });
             }
-            return uniqueProducts.filter(p => !formData.productItems.some(item => item.product_id === p.product_id));
         }
-
-        return products.filter(p => {
-            if (p.godown_id !== targetGodownId) return false;
-            
-            let destProductId = p.product_id;
-            if (isTransfer) {
-                const destProduct = products.find(dp => dp.name === p.name && dp.godown_id === formData.godown_id);
-                if (destProduct) {
-                    destProductId = destProduct.product_id;
-                } else {
-                    destProductId = p.product_id;
-                }
-            }
-
-            if (formData.productItems.some(item => item.product_id === destProductId)) return false;
-
-            if (formData.transaction_type === 'out' || isTransfer) {
-                if ((parseFloat(p.closing_quantity) || 0) <= 0) return false;
-            }
-            
-            p._destProductId = destProductId;
-            return true;
+        
+        // Filter out products already added to the form
+        return uniqueProducts.filter(p => {
+            const destProductId = p._destProductId || p.product_id;
+            return !formData.productItems.some(item => item.product_id === destProductId);
         });
     }, [products, formData.productItems, formData.godown_id, formData.transaction_type, formData.from_location]);
 
