@@ -275,33 +275,81 @@ const LiveStockDashboard = () => {
         };
     }, [summaryDate, searchTerm, filterGodown]);
 
-    const handleExport = () => {
-        const headers = ["Godown", "Product", "MUX", "Opening", "In", "Out", "Closing", "Transfers"];
-        const rows = filteredSummary.map(s => [
-            s.godown_name,
-            s.product_name,
-            s.mux || '-',
-            s.opening_stock === '-' ? 0 : s.opening_stock,
-            s.in_stock,
-            s.out_stock,
-            s.closing_stock === '-' ? 0 : s.closing_stock,
-            s.transfers
-        ]);
+    const handleExport = async () => {
+        const toastId = toast.loading("Preparing export of all records...");
+        try {
+            let accumulated = [];
+            let batchIndex = 0;
+            let done = false;
+            const EXPORT_BATCH_SIZE = 1000;
 
-        const csvContent = [headers, ...rows]
-            .map(row => row.map(cell => `"${(cell ?? '').toString().replace(/"/g, '""')}"`).join(","))
-            .join("\n");
+            while (!done) {
+                let query = supabase
+                    .from('products')
+                    .select('name, product_type, closing_quantity, godown_name, godown_id')
+                    .eq('is_active', true);
 
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", `Stock_Summary_${summaryDate}.csv`);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        toast.success(`Exported data for ${summaryDate}`);
+                if (searchTerm) {
+                    query = query.or(`name.ilike.%${searchTerm}%,product_id.ilike.%${searchTerm}%`);
+                }
+                if (filterGodown) {
+                    query = query.eq('godown_id', filterGodown);
+                }
+
+                const from = batchIndex * EXPORT_BATCH_SIZE;
+                const to = from + EXPORT_BATCH_SIZE - 1;
+
+                const { data, error } = await query
+                    .order('name', { ascending: true })
+                    .range(from, to);
+
+                if (error) throw error;
+
+                accumulated = [...accumulated, ...(data || [])];
+
+                if (!data || data.length < EXPORT_BATCH_SIZE) {
+                    done = true;
+                } else {
+                    batchIndex++;
+                }
+            }
+
+            if (accumulated.length === 0) {
+                toast.error("No data found to export", { id: toastId });
+                return;
+            }
+
+            const headers = ["Godown Name", "Product Name", "Product Type", "Closing Quantity"];
+            const rows = accumulated.map(p => {
+                const godown = godowns.find(g => g.godown_id === p.godown_id) || {};
+                const gName = godown.name || p.godown_name || p.godown_id || 'Not Assigned';
+                return [
+                    gName,
+                    p.name || '',
+                    p.product_type || '',
+                    p.closing_quantity ?? 0
+                ];
+            });
+
+            const csvContent = [headers, ...rows]
+                .map(row => row.map(cell => `"${(cell ?? '').toString().replace(/"/g, '""')}"`).join(","))
+                .join("\n");
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", `Stock_Report_${summaryDate}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            toast.success(`Exported ${accumulated.length} records successfully!`, { id: toastId });
+        } catch (error) {
+            console.error('Error during export:', error);
+            toast.error('Failed to export data: ' + error.message, { id: toastId });
+        }
     };
 
     return (
