@@ -693,13 +693,22 @@ const StockManagement = () => {
 
     const filteredEntries = useMemo(() => {
         return entries.filter(e => {
-            const matchesSearch = e.entry_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                e.product_id?.toLowerCase().includes(searchTerm.toLowerCase());
+            const term = searchTerm.toLowerCase().trim();
+            const matchesSearch = !term || [
+                e.entry_id,
+                e.product_id,
+                getProductName(e.product_id),
+                getGodownName(e.godown_id),
+                e.date,
+                e.reference_number,
+                e.lr_number,
+                e.notes,
+            ].some(field => field?.toLowerCase().includes(term));
             const matchesType = filterType === 'all' || e.transaction_type === filterType;
             const matchesGodown = filterGodown === 'all' || e.godown_id === filterGodown;
             return matchesSearch && matchesType && matchesGodown;
         });
-    }, [entries, searchTerm, filterType, filterGodown]);
+    }, [entries, searchTerm, filterType, filterGodown, getProductName, getGodownName]);
 
     const totalPages = Math.ceil(filteredEntries.length / ITEMS_PER_PAGE);
     const currentItems = useMemo(() => {
@@ -816,7 +825,7 @@ const StockManagement = () => {
                             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                             <Input
                                 type="text"
-                                placeholder="Search by entry ID or product ID..."
+                                placeholder="Search by product, godown, date, LR, ref..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                                 className="pl-9 h-10 bg-white border-slate-200 rounded-lg focus-visible:ring-primary text-sm font-medium w-full"
