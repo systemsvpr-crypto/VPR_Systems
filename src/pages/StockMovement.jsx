@@ -83,6 +83,7 @@ const StockMovement = () => {
                 const { data, error } = await supabase
                     .from('products')
                     .select('id, product_id, name, godown_id, mux, is_active, product_type')
+                    .eq('is_active', true)
                     .range(page * pageSize, (page + 1) * pageSize - 1);
 
                 if (error) throw error;

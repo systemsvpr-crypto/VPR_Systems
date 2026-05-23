@@ -906,7 +906,7 @@ const StockManagement = () => {
             let running = opening;
             (transactions || []).forEach(t => {
                 const qty = parseFloat(t.quantity) || 0;
-                if (t.transaction_type === 'in') running += qty;
+                if (t.transaction_type === 'in' || t.transaction_type === 'adjustment') running += qty;
                 else running -= qty;
             });
             running = Math.max(0, running);

@@ -167,19 +167,19 @@ const StockLedger = () => {
             
             let qty = 0;
             if (viewMode === 'closing') {
-                qty = isToday ? (parseFloat(p.closing_quantity) || 0) : (snapMap[p.id] || 0);
+                qty = isToday ? (parseFloat(p.closing_quantity) || 0) : (snapMap[p.product_id] || 0);
             } else if (viewMode === 'opening') {
                 if (isToday) {
                     const in_t = todayInMap[p.product_id] || 0;
                     const out_t = todayOutMap[p.product_id] || 0;
                     qty = (parseFloat(p.closing_quantity) || 0) - in_t + out_t;
                 } else {
-                    qty = openingMap[p.id] || 0;
+                    qty = openingMap[p.product_id] || 0;
                 }
             } else if (viewMode === 'inward') {
-                qty = isToday ? (todayInMap[p.product_id] || 0) : (inwardMap[p.id] || 0);
+                qty = isToday ? (todayInMap[p.product_id] || 0) : (inwardMap[p.product_id] || 0);
             } else if (viewMode === 'outward') {
-                qty = isToday ? (todayOutMap[p.product_id] || 0) : (outwardMap[p.id] || 0);
+                qty = isToday ? (todayOutMap[p.product_id] || 0) : (outwardMap[p.product_id] || 0);
             }
             
             if (!types[type]) types[type] = {};
@@ -286,7 +286,7 @@ const StockLedger = () => {
 
             summaries[gId] = {
                 godown: g,
-                opening: isToday ? totalOpening : (gSnapshots.length > 0 ? gSnapshots[0]?.opening_stock : '-'),
+                opening: isToday ? totalOpening : gSnapshots.reduce((s, sn) => s + (parseFloat(sn.opening_stock) || 0), 0),
                 inward: isToday ? totalIn : gSnapshots.reduce((s, sn) => s + (parseFloat(sn.in_stock) || 0), 0),
                 outward: isToday ? totalOut : gSnapshots.reduce((s, sn) => s + (parseFloat(sn.out_stock) || 0), 0),
                 closing: isToday ? totalClosing : gSnapshots.reduce((s, sn) => s + (parseFloat(sn.closing_stock) || 0), 0),

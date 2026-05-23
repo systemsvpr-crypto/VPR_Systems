@@ -26,10 +26,13 @@ const LiveStockDashboard = () => {
     const [totalProducts, setTotalProducts] = useState(0);
     const [loadingMore, setLoadingMore] = useState(false);
     
-    const [summaryDate, setSummaryDate] = useState(new Date().toISOString().split('T')[0]);
+    const today = new Date().toISOString().split('T')[0];
+    const [summaryDate, setSummaryDate] = useState(today);
     const [dayTransactions, setDayTransactions] = useState([]);
     const [dailySnapshots, setDailySnapshots] = useState([]);
     const [selectedTransfer, setSelectedTransfer] = useState(null);
+
+    const isFutureDate = useMemo(() => summaryDate > today, [summaryDate, today]);
 
     const fetchGodownsAndTransactions = async () => {
         try {
@@ -191,7 +194,24 @@ const LiveStockDashboard = () => {
     // Dynamic Master Summary Logic
     const dynamicSummary = useMemo(() => {
         return products.map(p => {
-            const isToday = summaryDate === new Date().toISOString().split('T')[0];
+            const isToday = summaryDate === today;
+            if (isFutureDate) {
+                const godown = getGodownDetails(p.godown_id);
+                return {
+                    product_id: p.product_id,
+                    product_name: p.name,
+                    godown_id: p.godown_id,
+                    godown_name: godown.name || p.godown_id,
+                    mux: p.mux || '',
+                    opening_stock: '-',
+                    in_stock: '-',
+                    out_stock: '-',
+                    transfers: 0,
+                    closing_stock: '-',
+                    opening_quantity: 0,
+                    closing_quantity: 0,
+                };
+            }
 
             // 1. Try to find the snapshot for this specific date
             const snapshot = dailySnapshots.find(s => s.product_id === p.product_id && s.godown_id === p.godown_id);
@@ -489,6 +509,28 @@ const LiveStockDashboard = () => {
                                         </thead>
                                         <tbody className="divide-y divide-slate-50">
                                             {godowns.filter(g => !filterGodown || g.godown_id === filterGodown).map(godown => {
+                                                if (isFutureDate) {
+                                                    return (
+                                                        <tr key={godown.godown_id} className="group hover:bg-slate-50/80 transition-colors">
+                                                            <td className="px-6 py-4">
+                                                                <div className="flex items-center gap-3">
+                                                                    <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 group-hover:bg-primary/10 group-hover:text-primary transition-colors">
+                                                                        <MapPin size={14} />
+                                                                    </div>
+                                                                    <div>
+                                                                        <p className="text-sm font-bold text-slate-900 leading-none">{godown.name}</p>
+                                                                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">{godown.city}</p>
+                                                                    </div>
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-center text-xs text-slate-300">-</td>
+                                                            <td className="px-6 py-4 text-center text-xs text-slate-300">-</td>
+                                                            <td className="px-6 py-4 text-center text-xs text-slate-300">-</td>
+                                                            <td className="px-6 py-4 text-center text-xs text-slate-300">-</td>
+                                                            <td className="px-6 py-4 text-center text-xs text-slate-300">-</td>
+                                                        </tr>
+                                                    );
+                                                }
                                                 const directIn = dayTransactions.filter(t => t.godown_id === godown.godown_id && t.transaction_type === 'in').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
                                                 const directOut = dayTransactions.filter(t => t.godown_id === godown.godown_id && t.transaction_type === 'out').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
                                                 const outgoingTransfers = dayTransactions.filter(t => t.from_location === godown.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
@@ -498,7 +540,20 @@ const LiveStockDashboard = () => {
                                                 const gProducts = allProducts.filter(p => p.godown_id === godown.godown_id);
                                                 const totalClosing = gProducts.reduce((sum, p) => sum + (parseFloat(p.closing_quantity) || 0), 0);
                                                 const totalOpening = totalClosing - totalIn + totalOut;
-                                                const isToday = summaryDate === new Date().toISOString().split('T')[0];
+                                                const isToday = summaryDate === today;
+
+                                                // Snapshot-based aggregates for past dates
+                                                const gSnapshots = dailySnapshots.filter(s => s.godown_id === godown.godown_id);
+                                                const hasSnapshots = gSnapshots.length > 0;
+                                                const snapOpening = gSnapshots.reduce((s, sn) => s + (parseFloat(sn.opening_stock) || 0), 0);
+                                                const snapClosing = gSnapshots.reduce((s, sn) => s + (parseFloat(sn.closing_stock) || 0), 0);
+                                                const snapIn = gSnapshots.reduce((s, sn) => s + (parseFloat(sn.in_stock) || 0), 0);
+                                                const snapOut = gSnapshots.reduce((s, sn) => s + (parseFloat(sn.out_stock) || 0), 0);
+                                                // Fall back to live transaction data when no snapshots exist yet
+                                                const displayOpening = isToday ? totalOpening : (hasSnapshots ? snapOpening : totalOpening);
+                                                const displayClosing = isToday ? totalClosing : (hasSnapshots ? snapClosing : totalClosing);
+                                                const displayIn = isToday ? totalIn : (hasSnapshots ? snapIn : totalIn);
+                                                const displayOut = isToday ? totalOut : (hasSnapshots ? snapOut : totalOut);
 
                                                 return (
                                                     <tr key={godown.godown_id} className="group hover:bg-slate-50/80 transition-colors">
@@ -514,16 +569,16 @@ const LiveStockDashboard = () => {
                                                             </div>
                                                         </td>
                                                         <td className="px-6 py-4 text-center font-mono text-xs text-slate-600">
-                                                            {isToday ? totalOpening.toLocaleString() : '-'}
+                                                            {displayOpening.toLocaleString()}
                                                         </td>
                                                         <td className="px-6 py-4 text-center">
-                                                            <span className="text-xs font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">+{totalIn.toLocaleString()}</span>
+                                                            <span className="text-xs font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">+{displayIn.toLocaleString()}</span>
                                                         </td>
                                                         <td className="px-6 py-4 text-center">
-                                                            <span className="text-xs font-black text-rose-600 bg-rose-50 px-2 py-1 rounded-md">-{totalOut.toLocaleString()}</span>
+                                                            <span className="text-xs font-black text-rose-600 bg-rose-50 px-2 py-1 rounded-md">-{displayOut.toLocaleString()}</span>
                                                         </td>
                                                         <td className="px-6 py-4 text-center text-sm font-black text-slate-900">
-                                                            {isToday ? totalClosing.toLocaleString() : '-'}
+                                                            {displayClosing.toLocaleString()}
                                                         </td>
                                                         <td className="px-6 py-4 text-center">
                                                             <button
@@ -602,13 +657,13 @@ const LiveStockDashboard = () => {
                                                             <td className="px-6 py-4">
                                                                 <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-2 py-1 rounded uppercase tracking-wider">{s.godown_name}</span>
                                                             </td>
-                                                            <td className="px-6 py-4 text-center font-mono text-xs text-slate-500">{s.opening_quantity}</td>
-                                                            <td className="px-6 py-4 text-center font-mono text-xs font-black text-slate-900">{s.closing_quantity}</td>
+                                                            <td className="px-6 py-4 text-center font-mono text-xs text-slate-500">{s.opening_stock ?? '-'}</td>
+                                                            <td className="px-6 py-4 text-center font-mono text-xs font-black text-slate-900">{s.closing_stock ?? '-'}</td>
                                                             <td className="px-6 py-4 text-center">
-                                                                <span className="text-xs font-black text-emerald-600">+{s.in_stock}</span>
+                                                                <span className="text-xs font-black text-emerald-600">{s.in_stock === '-' ? '-' : `+${s.in_stock}`}</span>
                                                             </td>
                                                             <td className="px-6 py-4 text-center">
-                                                                <span className="text-xs font-black text-rose-600">-{s.out_stock}</span>
+                                                                <span className="text-xs font-black text-rose-600">{s.out_stock === '-' ? '-' : `-${s.out_stock}`}</span>
                                                             </td>
                                                             <td className="px-6 py-4 text-center">
                                                                 <button
