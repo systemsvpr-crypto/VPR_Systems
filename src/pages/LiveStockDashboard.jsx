@@ -31,6 +31,7 @@ const LiveStockDashboard = () => {
     const [dayTransactions, setDayTransactions] = useState([]);
     const [dailySnapshots, setDailySnapshots] = useState([]);
     const [selectedTransfer, setSelectedTransfer] = useState(null);
+    const [historicalBalances, setHistoricalBalances] = useState({});
 
     const isFutureDate = useMemo(() => summaryDate > today, [summaryDate, today]);
 
@@ -156,6 +157,50 @@ const LiveStockDashboard = () => {
         return () => clearTimeout(timer);
     }, [searchTerm, filterGodown, summaryDate]);
 
+    // Fetch historical transactions up to summaryDate for accurate opening/closing computation
+    useEffect(() => {
+        const productIds = products.map(p => p.product_id);
+        if (productIds.length === 0 || !summaryDate || isFutureDate) {
+            setHistoricalBalances({});
+            return;
+        }
+        let cancelled = false;
+        const computeBalances = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('stock_management')
+                    .select('product_id, date, transaction_type, quantity, godown_id, from_location')
+                    .in('product_id', productIds)
+                    .lte('date', summaryDate)
+                    .order('date', { ascending: true })
+                    .order('created_at', { ascending: true });
+
+                if (error || cancelled) return;
+
+                // Compute running balance per (product_id, godown_id) pair.
+                // Dual-entry transfers create a -SRC out entry for the source godown,
+                // so the destination entry's from_location is NOT replayed here to avoid double-counting.
+                const balances = {};
+                (data || []).forEach(t => {
+                    const key = `${t.product_id}-${t.godown_id}`;
+                    if (!balances[key]) {
+                        const prod = products.find(p => p.product_id === t.product_id && p.godown_id === t.godown_id);
+                        balances[key] = parseFloat(prod?.opening_quantity) || 0;
+                    }
+                    const qty = parseFloat(t.quantity) || 0;
+                    if (t.transaction_type === 'in') balances[key] += qty;
+                    else balances[key] -= qty;
+                });
+
+                if (!cancelled) setHistoricalBalances(balances);
+            } catch (err) {
+                if (!cancelled) console.error('Error computing historical balances:', err);
+            }
+        };
+        computeBalances();
+        return () => { cancelled = true; };
+    }, [products, summaryDate, isFutureDate]);
+
     // Infinite Scroll — triggers paginated fetchProducts
     useEffect(() => {
         const handleScroll = () => {
@@ -226,20 +271,32 @@ const LiveStockDashboard = () => {
             const out_stock = pTransactions.filter(t => t.transaction_type === 'out' && t.godown_id === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0) +
                 pTransactions.filter(t => t.from_location === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
 
-            let opening_stock = snapshot ? snapshot.opening_stock : '-';
-            let closing_stock = snapshot ? snapshot.closing_stock : '-';
-            let display_in = snapshot ? snapshot.in_stock : in_stock;
-            let display_out = snapshot ? snapshot.out_stock : out_stock;
+            let opening_stock, closing_stock, display_in, display_out;
 
-            // Priority logic for Today
             if (isToday) {
+                // Live data for today
                 display_in = in_stock;
                 display_out = out_stock;
-                
-                // Dynamically calculate opening and closing stock for today 
-                // to perfectly reflect any edits made to the master product opening quantity
                 closing_stock = p.closing_quantity;
                 opening_stock = p.closing_quantity - in_stock + out_stock;
+            } else if (snapshot) {
+                // Snapshot data for past dates
+                opening_stock = snapshot.opening_stock;
+                closing_stock = snapshot.closing_stock;
+                display_in = snapshot.in_stock;
+                display_out = snapshot.out_stock;
+            } else {
+                // Historical computation from transactions up to summaryDate
+                const histClosing = historicalBalances[`${p.product_id}-${p.godown_id}`];
+                if (histClosing !== undefined) {
+                    closing_stock = Math.max(0, histClosing);
+                    opening_stock = Math.max(0, histClosing - in_stock + out_stock);
+                } else {
+                    opening_stock = '-';
+                    closing_stock = '-';
+                }
+                display_in = in_stock;
+                display_out = out_stock;
             }
 
             const godown = getGodownDetails(p.godown_id);
@@ -262,7 +319,7 @@ const LiveStockDashboard = () => {
                 closing_quantity: p.closing_quantity || 0,
             };
         });
-    }, [products, dayTransactions, summaryDate, godowns, dailySnapshots]);
+    }, [products, dayTransactions, summaryDate, godowns, dailySnapshots, historicalBalances]);
 
     // Server-side filtering already applies to dynamicSummary base (which depends on products)
     const filteredSummary = dynamicSummary;
