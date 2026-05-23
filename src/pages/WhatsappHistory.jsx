@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { 
-  Search, RefreshCw, Clock, User, Phone, Eye, X, XCircle,
-  MoreVertical, Check, CheckCheck, Send, Paperclip, 
-  Smile, Filter, ChevronLeft, LayoutGrid, List
+import {
+    Search, RefreshCw, Clock, User, Phone, Eye, X, XCircle,
+    MoreVertical, Check, CheckCheck, Send, Paperclip,
+    Smile, Filter, ChevronLeft, LayoutGrid, List
 } from 'lucide-react';
 import { supabase } from '../supabase';
 import toast from 'react-hot-toast';
 
+
 /**
- * WhatsappHistory Component
+ * WhatsappHistory 
  * A premium WhatsApp-style interface for auditing message logs.
  */
 const WhatsappHistory = () => {
@@ -38,7 +39,7 @@ const WhatsappHistory = () => {
 
             if (error) throw error;
             setLogs(data || []);
-            
+
             // Auto-select first contact if none selected
             if (data?.length > 0 && !selectedContactId) {
                 const firstKey = data[0].phone_number || data[0].recipient_name;
@@ -58,17 +59,17 @@ const WhatsappHistory = () => {
         // Subscribe to real-time updates for receiving messages and status updates
         const channel = supabase
             .channel('whatsapp_logs_changes')
-            .on('postgres_changes', 
-                { event: 'INSERT', schema: 'public', table: 'whatsapp_logs' }, 
+            .on('postgres_changes',
+                { event: 'INSERT', schema: 'public', table: 'whatsapp_logs' },
                 (payload) => {
                     const newLog = payload.new;
                     const key = newLog.phone_number || newLog.recipient_name;
-                    
+
                     // If this message belongs to the chat we are currently looking at, mark it read immediately
                     if (key === selectedContactIdRef.current && newLog.is_read === false) {
                         markMessagesAsRead(key);
                     }
-                    
+
                     setLogs(prev => {
                         // Prevent duplicate if already in state
                         if (prev.some(log => log.id === newLog.id)) return prev;
@@ -84,7 +85,7 @@ const WhatsappHistory = () => {
                 { event: 'UPDATE', schema: 'public', table: 'whatsapp_logs' },
                 (payload) => {
                     // Update the status (ticks) or read state in real-time
-                    setLogs(prev => prev.map(log => 
+                    setLogs(prev => prev.map(log =>
                         log.id === payload.new.id ? payload.new : log
                     ));
                 }
@@ -131,7 +132,7 @@ const WhatsappHistory = () => {
                 .or(`phone_number.eq.${contactId},recipient_name.eq.${contactId}`);
 
             if (error) throw error;
-            
+
             // Local state update to remove badges immediately
             setLogs(prev => prev.map(log => {
                 const key = log.phone_number || log.recipient_name;
@@ -173,7 +174,7 @@ const WhatsappHistory = () => {
                 contact.unreadCount += 1;
             }
         });
-        
+
         let contactList = Array.from(map.values());
 
         // Apply Category Filtering
@@ -186,8 +187,8 @@ const WhatsappHistory = () => {
         // Apply Search Filtering
         if (searchTerm.trim()) {
             const term = searchTerm.toLowerCase();
-            contactList = contactList.filter(c => 
-                c.name.toLowerCase().includes(term) || 
+            contactList = contactList.filter(c =>
+                c.name.toLowerCase().includes(term) ||
                 c.phone?.includes(term) ||
                 c.lastMessage?.toLowerCase().includes(term)
             );
@@ -196,9 +197,9 @@ const WhatsappHistory = () => {
         return contactList.sort((a, b) => new Date(b.lastDate) - new Date(a.lastDate));
     }, [logs, searchTerm, filterType]);
 
-    const selectedContact = useMemo(() => 
-        contacts.find(c => c.id === selectedContactId), 
-    [contacts, selectedContactId]);
+    const selectedContact = useMemo(() =>
+        contacts.find(c => c.id === selectedContactId),
+        [contacts, selectedContactId]);
 
     const chatMessages = useMemo(() => {
         if (!selectedContact) return [];
@@ -227,7 +228,7 @@ const WhatsappHistory = () => {
 
         if (date.toDateString() === today.toDateString()) return 'TODAY';
         if (date.toDateString() === yesterday.toDateString()) return 'YESTERDAY';
-        
+
         return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }).toUpperCase();
     };
 
@@ -251,7 +252,8 @@ const WhatsappHistory = () => {
     return (
         <div className="flex h-[calc(100vh-64px)] w-full overflow-hidden bg-[#111b21] font-sans antialiased">
             {/* Styles for WhatsApp pattern and animations */}
-            <style dangerouslySetInnerHTML={{ __html: `
+            <style dangerouslySetInnerHTML={{
+                __html: `
                 .wa-bg {
                     background-color: #0b141a;
                     background-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png');
@@ -327,19 +329,19 @@ const WhatsappHistory = () => {
                         />
                     </div>
                     <div className="flex items-center gap-2 px-1">
-                        <button 
+                        <button
                             onClick={() => setFilterType('all')}
                             className={`px-3 py-1 rounded-full text-[12px] font-bold transition-all ${filterType === 'all' ? 'bg-[#202c33] text-[#00a884]' : 'text-[#8696a0] hover:bg-[#202c33]'}`}
                         >
                             All
                         </button>
-                        <button 
+                        <button
                             onClick={() => setFilterType('sent')}
                             className={`px-3 py-1 rounded-full text-[12px] font-bold transition-all ${filterType === 'sent' ? 'bg-[#202c33] text-[#00a884]' : 'text-[#8696a0] hover:bg-[#202c33]'}`}
                         >
                             Sent
                         </button>
-                        <button 
+                        <button
                             onClick={() => setFilterType('bulk')}
                             className={`px-3 py-1 rounded-full text-[12px] font-bold transition-all ${filterType === 'bulk' ? 'bg-[#202c33] text-[#00a884]' : 'text-[#8696a0] hover:bg-[#202c33]'}`}
                         >
@@ -369,7 +371,7 @@ const WhatsappHistory = () => {
                         </div>
                     ) : (
                         contacts.map((contact) => (
-                            <div 
+                            <div
                                 key={contact.id}
                                 onClick={() => {
                                     setSelectedContactId(contact.id);
@@ -436,7 +438,7 @@ const WhatsappHistory = () => {
                         {/* Messages Area */}
                         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-4 relative bg-[#0b141a] custom-scrollbar">
                             <div className="wa-bg" />
-                            
+
                             <div className="relative z-10 space-y-8 flex flex-col">
                                 {groupedMessages.map((group) => (
                                     <React.Fragment key={group.date}>
@@ -450,7 +452,7 @@ const WhatsappHistory = () => {
                                         {group.messages.map((msg, index) => {
                                             const isIncoming = msg.status === 'Received';
                                             const isFirstUnread = msg.is_read === false && isIncoming && group.messages.slice(0, index).every(m => m.is_read !== false);
-                                            
+
                                             return (
                                                 <React.Fragment key={msg.id}>
                                                     {/* Unread Separator */}
@@ -461,8 +463,8 @@ const WhatsappHistory = () => {
                                                             </span>
                                                         </div>
                                                     )}
-                                                    
-                                                    <div 
+
+                                                    <div
                                                         className={`flex flex-col animate-in fade-in slide-in-from-bottom-2 duration-300 ${isIncoming ? 'items-start' : 'items-end'}`}
                                                     >
                                                         {/* Template Badge (Sent only) */}
@@ -475,11 +477,10 @@ const WhatsappHistory = () => {
                                                         )}
 
                                                         {/* Bubble */}
-                                                        <div className={`max-w-[85%] sm:max-w-[70%] lg:max-w-[60%] p-3 rounded-xl shadow-md relative message-bubble border ${
-                                                            isIncoming 
-                                                                ? 'bg-[#202c33] text-[#e9edef] rounded-tl-none border-[#202c33]/50 message-bubble-received' 
+                                                        <div className={`max-w-[85%] sm:max-w-[70%] lg:max-w-[60%] p-3 rounded-xl shadow-md relative message-bubble border ${isIncoming
+                                                                ? 'bg-[#202c33] text-[#e9edef] rounded-tl-none border-[#202c33]/50 message-bubble-received'
                                                                 : 'bg-[#005c4b] text-[#e9edef] rounded-tr-none border-[#005c4b]/50 message-bubble-sent'
-                                                        }`}>
+                                                            }`}>
                                                             {/* Message Content */}
                                                             <div className="text-[14px] leading-relaxed whitespace-pre-wrap break-words pr-14">
                                                                 {msg.message_content}
@@ -527,12 +528,11 @@ const WhatsappHistory = () => {
                                     disabled={sending}
                                 />
                             </div>
-                            <button 
-                                type="submit" 
+                            <button
+                                type="submit"
                                 disabled={!newMessage.trim() || sending}
-                                className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
-                                    newMessage.trim() && !sending ? 'bg-[#00a884] text-white shadow-lg' : 'bg-transparent text-[#8696a0]'
-                                }`}
+                                className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${newMessage.trim() && !sending ? 'bg-[#00a884] text-white shadow-lg' : 'bg-transparent text-[#8696a0]'
+                                    }`}
                             >
                                 <Send size={20} className={newMessage.trim() ? 'translate-x-0.5' : ''} />
                             </button>
@@ -541,9 +541,9 @@ const WhatsappHistory = () => {
                 ) : (
                     <div className="flex-1 flex flex-col items-center justify-center bg-[#222d34] border-l border-[#2f3b43] text-center p-12">
                         <div className="relative mb-8">
-                             <div className="w-24 h-24 bg-[#2a3942] rounded-full flex items-center justify-center text-[#54656f]">
+                            <div className="w-24 h-24 bg-[#2a3942] rounded-full flex items-center justify-center text-[#54656f]">
                                 <Send size={48} />
-                             </div>
+                            </div>
                         </div>
                         <h1 className="text-3xl font-light text-[#e9edef] mb-3">WhatsApp Web</h1>
                         <p className="text-sm text-[#8696a0] max-w-sm leading-relaxed">
