@@ -363,7 +363,7 @@ const LiveStockDashboard = () => {
             while (!done) {
                 let query = supabase
                     .from('products')
-                    .select('name, product_type, closing_quantity, godown_name, godown_id')
+                    .select('name, product_type, closing_quantity')
                     .eq('is_active', true);
 
                 if (searchTerm) {
@@ -396,19 +396,27 @@ const LiveStockDashboard = () => {
                 return;
             }
 
-            const headers = ["Godown Name", "Product Name", "Product Type", "Closing Quantity"];
+            const headers = ["Product Name", "Product Type", "Closing Quantity"];
             const rows = accumulated.map(p => {
-                const godown = godowns.find(g => g.godown_id === p.godown_id) || {};
-                const gName = godown.name || p.godown_name || p.godown_id || 'Not Assigned';
                 return [
-                    gName,
                     p.name || '',
                     p.product_type || '',
                     p.closing_quantity ?? 0
                 ];
             });
 
-            const csvContent = [headers, ...rows]
+            let formattedDate = summaryDate;
+            if (summaryDate && summaryDate.includes('-')) {
+                const [year, month, day] = summaryDate.split('-');
+                formattedDate = `${day}/${month}/${year}`;
+            }
+
+            const csvContent = [
+                ["Date:", formattedDate],
+                [],
+                headers,
+                ...rows
+            ]
                 .map(row => row.map(cell => `"${(cell ?? '').toString().replace(/"/g, '""')}"`).join(","))
                 .join("\n");
 
