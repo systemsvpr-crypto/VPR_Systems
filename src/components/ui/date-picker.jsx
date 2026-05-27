@@ -13,7 +13,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 
-export function DatePicker({ value, onChange, name, placeholder = "Pick a date", className }) {
+export function DatePicker({ value, onChange, name, placeholder = "Pick a date", className, disabled }) {
   const date = (value && !isNaN(new Date(value).getTime())) ? new Date(value) : undefined
 
   return (
@@ -37,12 +37,14 @@ export function DatePicker({ value, onChange, name, placeholder = "Pick a date",
           mode="single"
           selected={date}
           onSelect={(newDate) => {
+            if (disabled && disabled(newDate)) return
             onChange({ target: { name, value: newDate ? format(newDate, 'yyyy-MM-dd') : '' } })
           }}
           initialFocus
           captionLayout="dropdown"
           fromYear={1900}
           toYear={2050}
+          disabled={disabled}
         />
       </PopoverContent>
     </Popover>

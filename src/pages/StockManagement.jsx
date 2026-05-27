@@ -148,6 +148,22 @@ const StockManagement = () => {
 
     const handleOpenModal = (entry = null) => {
         if (entry) {
+            const today = new Date().toISOString().split('T')[0];
+            const entryDate = entry.date || '';
+            if (entryDate !== today) {
+                toast.error('You can only edit current date entries');
+                return;
+            }
+            const entryId = entry.entry_id || '';
+            const baseId = entryId.endsWith('-SRC') ? entryId.slice(0, -4) : entryId;
+            if (baseId.startsWith('STK-SAL-') || baseId.startsWith('ARR-')) {
+                toast.error('Cannot edit entries created by sales or purchase');
+                return;
+            }
+            if (entryId.endsWith('-SRC')) {
+                toast.error('Transfer entries cannot be edited independently');
+                return;
+            }
             setEditingEntry(entry);
             // If this was a Stock-In with no from_location (null/empty) it was created as
             // "New Stock (From System)". Restore the sentinel value so the form pre-selects it.
@@ -187,8 +203,9 @@ const StockManagement = () => {
     };
 
     const handleDateChange = (e) => {
-        const val = e?.target ? e.target.value : e;
-        setFormData(prev => ({ ...prev, date: val }));
+        // Force today's date — entries can only be created for the current date
+        const today = new Date().toISOString().split('T')[0];
+        setFormData(prev => ({ ...prev, date: today }));
     };
 
     const addProductItem = () => {
@@ -703,6 +720,29 @@ const StockManagement = () => {
 
     const confirmDelete = async () => {
         if (!itemToDelete) return;
+
+        const today = new Date().toISOString().split('T')[0];
+        if ((itemToDelete.date || '') !== today) {
+            toast.error('You can only delete current date entries');
+            setIsDeleteModalOpen(false);
+            setItemToDelete(null);
+            return;
+        }
+        const delEntryId = itemToDelete.entry_id || '';
+        const delBaseId = delEntryId.endsWith('-SRC') ? delEntryId.slice(0, -4) : delEntryId;
+        if (delBaseId.startsWith('STK-SAL-') || delBaseId.startsWith('ARR-')) {
+            toast.error('Cannot delete entries created by sales or purchase');
+            setIsDeleteModalOpen(false);
+            setItemToDelete(null);
+            return;
+        }
+        if (delEntryId.endsWith('-SRC')) {
+            toast.error('Transfer entries cannot be deleted independently');
+            setIsDeleteModalOpen(false);
+            setItemToDelete(null);
+            return;
+        }
+
         setIsDeleting(true);
         try {
             const entry = itemToDelete;
@@ -1087,7 +1127,14 @@ const StockManagement = () => {
                                             <DatePicker
                                                 value={formData.date}
                                                 onChange={handleDateChange}
+                                                disabled={(date) => {
+                                                    const today = new Date();
+                                                    return date.getFullYear() !== today.getFullYear()
+                                                        || date.getMonth() !== today.getMonth()
+                                                        || date.getDate() !== today.getDate();
+                                                }}
                                             />
+                                            <p className="text-[10px] text-slate-400 font-medium mt-0.5">Only current date entries are allowed</p>
                                         </div>
 
                                         {formData.transaction_type === 'in' && (
@@ -1482,8 +1529,21 @@ const EntryRow = ({ entry, user, getGodownName, getProductName, onEdit, onDelete
     const isTransfer = entry.transaction_type === 'in' && entry.from_location && entry.from_location !== 'NEW_STOCK';
     const isOut = entry.transaction_type === 'out';
 
+    // Guard: only current-date, direct stock entries can be edited/deleted
+    const today = new Date().toISOString().split('T')[0];
+    const entryDate = entry.date || '';
+    const isCurrentDate = entryDate === today;
+    const entryId = entry.entry_id || '';
+    const isSRC = entryId.endsWith('-SRC');
+    const baseId = isSRC ? entryId.slice(0, -4) : entryId;
+    const isFromSellOrPurchase = baseId.startsWith('STK-SAL-') || baseId.startsWith('ARR-');
+    const canEditDelete = !isSRC && !isFromSellOrPurchase && isCurrentDate;
+
     return (
-        <tr className="hover:bg-slate-50 transition-colors group h-[73px]">
+        <tr className={cn(
+            "transition-colors h-[73px]",
+            canEditDelete ? "hover:bg-slate-50 group" : "opacity-50"
+        )}>
             <td className="px-6 py-4 whitespace-nowrap">
                 <div className="flex items-center gap-2">
                     <span className={cn(
@@ -1552,10 +1612,12 @@ const EntryRow = ({ entry, user, getGodownName, getProductName, onEdit, onDelete
             </td>
             <td className="px-6 py-4 text-center whitespace-nowrap">
                 <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                    <button onClick={onEdit} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-colors" title="Edit">
-                        <Edit2 size={16} />
-                    </button>
-                    {(user?.role === 'SUPER ADMIN' || user?.Admin === 'Yes') && (
+                    {canEditDelete && (
+                        <button onClick={onEdit} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded-lg transition-colors" title="Edit">
+                            <Edit2 size={16} />
+                        </button>
+                    )}
+                    {canEditDelete && (user?.role === 'SUPER ADMIN' || user?.Admin === 'Yes') && (
                         <button onClick={onDelete} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Delete">
                             <Trash2 size={16} />
                         </button>
