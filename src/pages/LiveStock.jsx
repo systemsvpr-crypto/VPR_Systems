@@ -137,9 +137,7 @@ const StockLedger = () => {
                         todayOutMap[t.product_id] = (todayOutMap[t.product_id] || 0) + qty;
                     }
                 }
-                if (t.from_location && (selectedGodown === 'all' || t.from_location === selectedGodown)) {
-                    todayOutMap[t.product_id] = (todayOutMap[t.product_id] || 0) + qty;
-                }
+
             });
         }
 
@@ -265,12 +263,9 @@ const StockLedger = () => {
                 .reduce((s, t) => s + (parseFloat(t.quantity) || 0), 0);
             const directOut = gTxns.filter(t => t.godown_id === gId && t.transaction_type === 'out')
                 .reduce((s, t) => s + (parseFloat(t.quantity) || 0), 0);
-            const outgoingTransfers = gTxns.filter(t => t.from_location === gId)
-                .reduce((s, t) => s + (parseFloat(t.quantity) || 0), 0);
-
             const totalClosing = gProducts.reduce((s, p) => s + (parseFloat(p.current_stock) || 0), 0);
             const totalIn = directIn;
-            const totalOut = directOut + outgoingTransfers;
+            const totalOut = directOut;
             const totalOpening = totalClosing - totalIn + totalOut;
 
             summaries[gId] = {

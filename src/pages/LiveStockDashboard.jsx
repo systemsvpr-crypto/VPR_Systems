@@ -234,8 +234,7 @@ const LiveStockDashboard = () => {
                 ).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
                 const in_stock = pTransactions.filter(t => t.godown_id === p.godown_id && t.transaction_type === 'in').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
-                const out_stock = pTransactions.filter(t => t.transaction_type === 'out' && t.godown_id === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0) +
-                    pTransactions.filter(t => t.from_location === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
+                const out_stock = pTransactions.filter(t => t.transaction_type === 'out' && t.godown_id === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
 
                 const display_in = in_stock;
                 const display_out = out_stock;
@@ -549,9 +548,8 @@ const LiveStockDashboard = () => {
                                                 }
                                                 const directIn = dayTransactions.filter(t => t.godown_id === godown.godown_id && t.transaction_type === 'in').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
                                                 const directOut = dayTransactions.filter(t => t.godown_id === godown.godown_id && t.transaction_type === 'out').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
-                                                const outgoingTransfers = dayTransactions.filter(t => t.from_location === godown.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
                                                 const totalIn = directIn;
-                                                const totalOut = directOut + outgoingTransfers;
+                                                const totalOut = directOut;
                                                 // Use allProducts (complete dataset) for accurate godown totals
                                                 const gProducts = allProducts.filter(p => p.godown_id === godown.godown_id);
                                                 const totalClosing = gProducts.reduce((sum, p) => sum + (parseFloat(p.current_stock) || 0), 0);

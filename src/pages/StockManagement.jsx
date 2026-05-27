@@ -367,8 +367,8 @@ const StockManagement = () => {
                                 unit: submittedProduct.unit || 'units',
                                 mux: submittedProduct.mux || 1,
                                 current_stock: 0,
-                                master_product_id: submittedProduct.master_product_id || null,
-                                product_type: submittedProduct.product_type || null
+                                master_product_id: submittedProduct.master_product_id ?? null,
+                                product_type: submittedProduct.product_type ?? null
                             });
                             targetProductId = newProd.product_id;
                             affectedProducts.add(targetProductId);
@@ -499,8 +499,8 @@ const StockManagement = () => {
                                     unit: submittedAddProduct.unit || 'units',
                                     mux: submittedAddProduct.mux || 1,
                                     current_stock: 0,
-                                    master_product_id: submittedAddProduct.master_product_id || null,
-                                    product_type: submittedAddProduct.product_type || null
+                                    master_product_id: submittedAddProduct.master_product_id ?? null,
+                                    product_type: submittedAddProduct.product_type ?? null
                                 });
                                 targetAddProductId = newProd.product_id;
                                 affectedProducts.add(targetAddProductId);
@@ -609,8 +609,8 @@ const StockManagement = () => {
                                     unit: submittedProduct.unit || 'units',
                                     mux: submittedProduct.mux || 1,
                                     current_stock: 0,
-                                    master_product_id: submittedProduct.master_product_id || null,
-                                    product_type: submittedProduct.product_type || null
+                                    master_product_id: submittedProduct.master_product_id ?? null,
+                                    product_type: submittedProduct.product_type ?? null
                                 });
                                 targetProductId = newProd.product_id;
                             }
@@ -746,25 +746,30 @@ const StockManagement = () => {
         setIsDeleting(true);
         try {
             const entry = itemToDelete;
+            const qty = parseFloat(entry.quantity) || 0;
             const wasTransfer = entry.from_location && entry.transaction_type === 'in';
 
-            // If this was a transfer, also delete the paired source-out row
+            // Get current stock and reverse the entry's effect
+            const { current_stock: mainStock } = await stockManagementService.getProductClosingQuantity(entry.product_id);
+            const revertedMain = entry.transaction_type === 'in'
+                ? Math.max(0, mainStock - qty)
+                : mainStock + qty;
+            await stockManagementService.updateProductStock(entry.product_id, revertedMain);
+
+            // If this was a transfer, also reverse the source product's stock and delete the -SRC row
             if (wasTransfer) {
                 const sourceEntryId = entry.entry_id + '-SRC';
                 const srcRow = await stockManagementService.getSourceEntry(sourceEntryId);
                 if (srcRow) {
+                    const { current_stock: srcStock } = await stockManagementService.getProductClosingQuantity(srcRow.product_id);
+                    const revertedSrc = srcStock + qty;
+                    await stockManagementService.updateProductStock(srcRow.product_id, revertedSrc);
                     await stockManagementService.delete(sourceEntryId);
-                    if (srcRow.product_id) {
-                        await stockManagementService.recalculateProductStock(srcRow.product_id);
-                    }
                 }
             }
 
             // Delete the main entry
             await stockManagementService.delete(entry.entry_id);
-
-            // Recalculate the affected product's stock from history
-            await stockManagementService.recalculateProductStock(entry.product_id);
 
             toast.success('Entry deleted successfully');
             fetchData();
