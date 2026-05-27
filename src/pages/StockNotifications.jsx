@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Bell, Check, Trash2, Eye, Package, ArrowDown, ArrowUp, X } from 'lucide-react';
-import { supabase } from '../supabase';
 import toast from 'react-hot-toast';
+import { notificationService } from '../services/notificationService';
+import { productService } from '../services/productService';
+import { godownService } from '../services/godownService';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import DeleteModal from '@/components/ui/DeleteModal';
@@ -43,15 +45,14 @@ const StockNotifications = () => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const [notifRes, productsRes, godownsRes] = await Promise.all([
-                supabase.from('stock_notifications').select('*').order('created_at', { ascending: false }),
-                supabase.from('products').select('*').order('name', { ascending: true }),
-                supabase.from('godowns').select('*').order('name', { ascending: true })
+            const [notifications, products, godowns] = await Promise.all([
+                notificationService.getAll(),
+                productService.getAll(),
+                godownService.getAll()
             ]);
-            if (notifRes.error) throw notifRes.error;
-            setNotifications(notifRes.data || []);
-            setProducts(productsRes.data || []);
-            setGodowns(godownsRes.data || []);
+            setNotifications(notifications || []);
+            setProducts(products || []);
+            setGodowns(godowns || []);
         } catch (error) {
             console.error('Error fetching data:', error);
             toast.error('Failed to fetch notifications');
@@ -62,11 +63,7 @@ const StockNotifications = () => {
 
     const handleMarkAsRead = async (id) => {
         try {
-            const { error } = await supabase
-                .from('stock_notifications')
-                .update({ is_read: true })
-                .eq('id', id);
-            if (error) throw error;
+            await notificationService.markAsRead(id);
             fetchData();
         } catch (error) {
             console.error('Error marking as read:', error);
@@ -76,11 +73,7 @@ const StockNotifications = () => {
 
     const handleMarkAllAsRead = async () => {
         try {
-            const { error } = await supabase
-                .from('stock_notifications')
-                .update({ is_read: true })
-                .eq('is_read', false);
-            if (error) throw error;
+            await notificationService.markAllAsRead();
             toast.success('All notifications marked as read');
             fetchData();
         } catch (error) {
@@ -98,11 +91,7 @@ const StockNotifications = () => {
         if (!itemToDelete) return;
         setIsDeleting(true);
         try {
-            const { error } = await supabase
-                .from('stock_notifications')
-                .delete()
-                .eq('id', itemToDelete);
-            if (error) throw error;
+            await notificationService.delete(itemToDelete);
             toast.success('Notification deleted');
             fetchData();
             setIsDeleteModalOpen(false);

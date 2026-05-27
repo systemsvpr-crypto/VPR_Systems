@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Package, MapPin, RotateCcw, X, ArrowUp, Download, RefreshCcw } from 'lucide-react';
-import { supabase } from '../supabase';
+import { liveStockDashboardService } from '../services/liveStockDashboardService';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
 import { cn } from '@/lib/utils';
 
-const BATCH_SIZE = 1000; // Supabase max rows per request — used for Godown Distribution
 const PAGE_SIZE = 50;   // Rows per page — used for Detailed Metrics infinite scroll
 
 const LiveStockDashboard = () => {
@@ -37,20 +36,12 @@ const LiveStockDashboard = () => {
 
     const fetchGodownsAndTransactions = async () => {
         try {
-            const [godownsRes, transactionsRes, snapshotsRes, prodNamesRes] = await Promise.all([
-                supabase.from('godowns').select('*').eq('is_active', true).order('name', { ascending: true }),
-                supabase.from('stock_management').select('*').eq('date', summaryDate),
-                supabase.from('daily_stock_summary').select('*').eq('date', summaryDate),
-                supabase.from('products').select('product_id, name').eq('is_active', true)
-            ]);
+            const data = await liveStockDashboardService.fetchDashboardData(summaryDate);
+            setGodowns(data.godowns || []);
+            setDailySnapshots(data.dailySnapshots || []);
 
-            const godownsData = godownsRes.data || [];
-            setGodowns(godownsData);
-            setDailySnapshots(snapshotsRes.data || []);
-
-            const lookupProducts = prodNamesRes.data || [];
-            const flattenedTransactions = (transactionsRes.data || []).map(t => {
-                const prod = lookupProducts.find(p => p.product_id === t.product_id);
+            const flattenedTransactions = (data.transactions || []).map(t => {
+                const prod = (data.masterProducts || []).find(p => p.product_id === t.product_id);
                 return {
                     ...t,
                     product_name: prod?.name || t.product_name || 'Unknown Product'
@@ -67,33 +58,11 @@ const LiveStockDashboard = () => {
     // Powers the Godown Distribution table — needs complete data for accurate totals.
     const fetchAllProducts = async () => {
         try {
-            let accumulated = [];
-            let batchIndex = 0;
-            let done = false;
-
-            while (!done) {
-                let query = supabase
-                    .from('products')
-                    .select('godown_id, product_id, closing_quantity, opening_quantity')
-                    .eq('is_active', true);
-
-                if (filterGodown) query = query.eq('godown_id', filterGodown);
-
-                const from = batchIndex * BATCH_SIZE;
-                const to   = from + BATCH_SIZE - 1;
-
-                const { data, error } = await query
-                    .order('name', { ascending: true })
-                    .range(from, to);
-
-                if (error) throw error;
-
-                accumulated = [...accumulated, ...(data || [])];
-
-                if (!data || data.length < BATCH_SIZE) done = true;
-                else batchIndex++;
+            const data = await liveStockDashboardService.fetchDashboardData(summaryDate);
+            let accumulated = data.products || [];
+            if (filterGodown) {
+                accumulated = accumulated.filter(p => p.godown_id === filterGodown);
             }
-
             setAllProducts(accumulated);
         } catch (error) {
             console.error('Error fetching all products:', error);
@@ -107,32 +76,37 @@ const LiveStockDashboard = () => {
         else setLoadingMore(true);
 
         try {
-            let query = supabase
-                .from('products')
-                .select('*', { count: 'exact' })
-                .eq('is_active', true);
+            const data = await liveStockDashboardService.fetchDashboardData(summaryDate);
+            let filtered = data.products || [];
 
-            if (searchTerm)   query = query.or(`name.ilike.%${searchTerm}%,product_id.ilike.%${searchTerm}%`);
-            if (filterGodown) query = query.eq('godown_id', filterGodown);
+            if (searchTerm) {
+                const term = searchTerm.toLowerCase();
+                filtered = filtered.filter(p =>
+                    (p.name || '').toLowerCase().includes(term) ||
+                    (p.product_id || '').toLowerCase().includes(term)
+                );
+            }
+            if (filterGodown) {
+                filtered = filtered.filter(p => p.godown_id === filterGodown);
+            }
 
-            const { data, count, error } = await query
-                .order('name', { ascending: true })
-                .range(pageNumber * PAGE_SIZE, (pageNumber + 1) * PAGE_SIZE - 1);
+            filtered.sort((a, b) => (a.name || '').localeCompare(b.name));
 
-            if (error) throw error;
+            const sliced = filtered.slice(pageNumber * PAGE_SIZE, (pageNumber + 1) * PAGE_SIZE);
+            const count = filtered.length;
 
             if (reset) {
-                setProducts(data || []);
+                setProducts(sliced);
             } else {
                 setProducts(prev => {
                     const existingKeys = new Set(prev.map(p => `${p.product_id}-${p.godown_id}`));
-                    const unique = (data || []).filter(item => !existingKeys.has(`${item.product_id}-${item.godown_id}`));
+                    const unique = sliced.filter(item => !existingKeys.has(`${item.product_id}-${item.godown_id}`));
                     return [...prev, ...unique];
                 });
             }
 
-            setTotalProducts(count || 0);
-            setHasMore((data || []).length === PAGE_SIZE && (pageNumber + 1) * PAGE_SIZE < count);
+            setTotalProducts(count);
+            setHasMore(sliced.length === PAGE_SIZE && (pageNumber + 1) * PAGE_SIZE < count);
             setPage(pageNumber);
         } catch (error) {
             console.error('Error fetching products:', error);
@@ -167,15 +141,16 @@ const LiveStockDashboard = () => {
         let cancelled = false;
         const computeBalances = async () => {
             try {
-                const { data, error } = await supabase
-                    .from('stock_management')
-                    .select('product_id, date, transaction_type, quantity, godown_id, from_location')
-                    .in('product_id', productIds)
-                    .lte('date', summaryDate)
-                    .order('date', { ascending: true })
-                    .order('created_at', { ascending: true });
+                const fetchData = await liveStockDashboardService.fetchDashboardData(summaryDate);
+                const data = (fetchData.transactions || [])
+                    .filter(t => productIds.includes(t.product_id))
+                    .sort((a, b) => {
+                        const dateCmp = new Date(a.date) - new Date(b.date);
+                        if (dateCmp !== 0) return dateCmp;
+                        return new Date(a.created_at) - new Date(b.created_at);
+                    });
 
-                if (error || cancelled) return;
+                if (cancelled) return;
 
                 // Compute running balance per (product_id, godown_id) pair.
                 // Dual-entry transfers create a -SRC out entry for the source godown,
@@ -184,8 +159,7 @@ const LiveStockDashboard = () => {
                 (data || []).forEach(t => {
                     const key = `${t.product_id}-${t.godown_id}`;
                     if (!balances[key]) {
-                        const prod = products.find(p => p.product_id === t.product_id && p.godown_id === t.godown_id);
-                        balances[key] = parseFloat(prod?.opening_quantity) || 0;
+                        balances[key] = 0;
                     }
                     const qty = parseFloat(t.quantity) || 0;
                     if (t.transaction_type === 'in') balances[key] += qty;
@@ -225,9 +199,7 @@ const LiveStockDashboard = () => {
                 product_unit: product.unit || '',
                 mux: product.mux || '',
                 godown_name: godown.name || product.godown_id || 'Not Assigned',
-                current_stock: parseFloat(product.closing_quantity) || 0,
-                opening_quantity: product.opening_quantity || 0,
-                closing_quantity: product.closing_quantity || 0,
+                current_stock: parseFloat(product.current_stock) || 0,
             };
         });
     }, [products, godowns]);
@@ -253,8 +225,7 @@ const LiveStockDashboard = () => {
                     out_stock: '-',
                     transfers: 0,
                     closing_stock: '-',
-                    opening_quantity: 0,
-                    closing_quantity: 0,
+                    current_stock: 0,
                 };
             }
 
@@ -277,8 +248,8 @@ const LiveStockDashboard = () => {
                 // Live data for today
                 display_in = in_stock;
                 display_out = out_stock;
-                closing_stock = p.closing_quantity;
-                opening_stock = p.closing_quantity - in_stock + out_stock;
+                closing_stock = p.current_stock;
+                opening_stock = p.current_stock - in_stock + out_stock;
             } else if (snapshot) {
                 // Snapshot data for past dates
                 opening_stock = snapshot.opening_stock;
@@ -315,8 +286,7 @@ const LiveStockDashboard = () => {
                     ? pTransfers.reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0)
                     : 0,
                 closing_stock: closing_stock ?? '-',
-                opening_quantity: p.opening_quantity || 0,
-                closing_quantity: p.closing_quantity || 0,
+                current_stock: p.current_stock || 0,
             };
         });
     }, [products, dayTransactions, summaryDate, godowns, dailySnapshots, historicalBalances]);
@@ -328,67 +298,39 @@ const LiveStockDashboard = () => {
 
     // Real-time subscription for relevant tables
     useEffect(() => {
-        const stockChannel = supabase
-            .channel('live-stock-realtime')
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'products' },
-                () => { fetchProducts(0, true); fetchAllProducts(); }
-            )
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'godowns' },
-                () => fetchGodownsAndTransactions()
-            )
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'stock_management' },
-                () => fetchGodownsAndTransactions()
-            )
-            .subscribe();
+        const unsubscribe = liveStockDashboardService.createSubscription(
+            'live-stock-realtime',
+            ['products', 'godowns', 'stock_management'],
+            (payload) => {
+                if (payload.table === 'products') {
+                    fetchProducts(0, true);
+                    fetchAllProducts();
+                } else {
+                    fetchGodownsAndTransactions();
+                }
+            }
+        );
 
         return () => {
-            supabase.removeChannel(stockChannel);
+            if (unsubscribe) unsubscribe();
         };
     }, [summaryDate, searchTerm, filterGodown]);
 
     const handleExport = async () => {
         const toastId = toast.loading("Preparing export of all records...");
         try {
-            let accumulated = [];
-            let batchIndex = 0;
-            let done = false;
-            const EXPORT_BATCH_SIZE = 1000;
+            const data = await liveStockDashboardService.fetchDashboardData(summaryDate);
+            let accumulated = data.products || [];
 
-            while (!done) {
-                let query = supabase
-                    .from('products')
-                    .select('name, product_type, closing_quantity')
-                    .eq('is_active', true);
-
-                if (searchTerm) {
-                    query = query.or(`name.ilike.%${searchTerm}%,product_id.ilike.%${searchTerm}%`);
-                }
-                if (filterGodown) {
-                    query = query.eq('godown_id', filterGodown);
-                }
-
-                const from = batchIndex * EXPORT_BATCH_SIZE;
-                const to = from + EXPORT_BATCH_SIZE - 1;
-
-                const { data, error } = await query
-                    .order('name', { ascending: true })
-                    .range(from, to);
-
-                if (error) throw error;
-
-                accumulated = [...accumulated, ...(data || [])];
-
-                if (!data || data.length < EXPORT_BATCH_SIZE) {
-                    done = true;
-                } else {
-                    batchIndex++;
-                }
+            if (searchTerm) {
+                const term = searchTerm.toLowerCase();
+                accumulated = accumulated.filter(p =>
+                    (p.name || '').toLowerCase().includes(term) ||
+                    (p.product_id || '').toLowerCase().includes(term)
+                );
+            }
+            if (filterGodown) {
+                accumulated = accumulated.filter(p => p.godown_id === filterGodown);
             }
 
             if (accumulated.length === 0) {
@@ -401,7 +343,7 @@ const LiveStockDashboard = () => {
                 return [
                     p.name || '',
                     p.product_type || '',
-                    p.closing_quantity ?? 0
+                    p.current_stock ?? 0
                 ];
             });
 
@@ -603,7 +545,7 @@ const LiveStockDashboard = () => {
                                                 const totalOut = directOut + outgoingTransfers;
                                                 // Use allProducts (complete dataset) for accurate godown totals
                                                 const gProducts = allProducts.filter(p => p.godown_id === godown.godown_id);
-                                                const totalClosing = gProducts.reduce((sum, p) => sum + (parseFloat(p.closing_quantity) || 0), 0);
+                                                const totalClosing = gProducts.reduce((sum, p) => sum + (parseFloat(p.current_stock) || 0), 0);
                                                 const totalOpening = totalClosing - totalIn + totalOut;
                                                 const isToday = summaryDate === today;
 
@@ -841,8 +783,7 @@ const LiveStockDashboard = () => {
                                                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">MUX</th>
                                                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Units</th>
                                                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Total Mass (KG)</th>
-                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Opening</th>
-                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Closing</th>
+                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Current Stock</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-50">
@@ -872,8 +813,7 @@ const LiveStockDashboard = () => {
                                                             {((parseFloat(stock.mux) || 0) * (parseFloat(stock.current_stock) || 0)).toFixed(3)}
                                                         </span>
                                                     </td>
-                                                    <td className="px-6 py-4 text-center font-mono text-xs text-slate-400">{stock.opening_quantity}</td>
-                                                    <td className="px-6 py-4 text-center font-mono text-xs font-black text-slate-900">{stock.closing_quantity}</td>
+                                                    <td className="px-6 py-4 text-center font-mono text-xs font-black text-slate-900">{stock.current_stock}</td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -989,16 +929,12 @@ const StockCard = ({ stock }) => {
 
             {/* Footer Metadata */}
             <div className="mt-auto pt-6 flex items-center justify-between border-t border-slate-50 relative z-10">
-                <div className="flex gap-4">
-                    <div className="flex flex-col">
-                        <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Opening</span>
-                        <span className="text-xs font-bold text-slate-500 mt-0.5">{stock.opening_quantity}</span>
+                    <div className="flex gap-4">
+                        <div className="flex flex-col">
+                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Current</span>
+                            <span className="text-xs font-black text-slate-900 mt-0.5">{stock.current_stock}</span>
+                        </div>
                     </div>
-                    <div className="flex flex-col">
-                        <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest">Closing</span>
-                        <span className="text-xs font-black text-slate-900 mt-0.5">{stock.closing_quantity}</span>
-                    </div>
-                </div>
                 <div className="text-right">
                     <span className="text-[9px] font-black text-slate-900 px-2 py-1 bg-slate-100 rounded-lg uppercase tracking-tight">MUX: {stock.mux || '0.00'}</span>
                 </div>

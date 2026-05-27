@@ -35,7 +35,7 @@ const PurVendorApprove = () => {
 
   const displayRecords = useMemo(() => {
     if (activeTab === 'pending') {
-      return records.filter(r => r.indent_type === 'Process' && r.vendor_approval === false);
+      return records.filter(r => r.indent_type === 'Process' && (r.vendor_approval === false || r.vendor_approval === null));
     } else {
       return records.filter(r => r.vendor_approval === true || r.indent_type === 'Rejected');
     }

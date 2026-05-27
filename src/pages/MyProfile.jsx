@@ -15,8 +15,8 @@ import {
   Lock
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { supabase } from '../supabase';
 import useAuthStore from '../store/authStore';
+import { profileService } from '../services/profileService';
 import { USER_ROLES, GENDERS } from '../constants';
 import {
   Select,
@@ -55,21 +55,8 @@ const MyProfile = () => {
 
       if (!identifier) throw new Error("User identifier missing.");
 
-      let query = supabase.from('users').select('*');
-      if (sessionUser.user_id) {
-        query = query.eq('user_id', sessionUser.user_id);
-      } else {
-        query = query.eq('username', sessionUser.username);
-      }
-
-      const { data, error } = await query.limit(1);
-      if (error) {
-         throw error;
-      }
-      const userData = data && data.length > 0 ? data[0] : null;
+      const userData = await profileService.getByIdentifier(identifier, !!sessionUser.user_id);
       if (!userData) {
-        // User not found in 'users', maybe they are an old 'app_users' user.
-        // Let's clear their session and ask them to login again
         useAuthStore.getState().logout();
         localStorage.removeItem('user');
         toast.error("Session expired or user not found. Please log in again.");
@@ -104,28 +91,13 @@ const MyProfile = () => {
 
     try {
       setUploading(true);
-      const fileExt = file.name.split('.').pop();
-      const fileName = `profile-pictures/${Math.random()}.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('images')
-        .upload(fileName, file);
-
-      if (uploadError) throw uploadError;
-
-      const { data } = supabase.storage
-        .from('images')
-        .getPublicUrl(fileName);
-
-      const publicUrl = data.publicUrl;
+      const publicUrl = await profileService.uploadProfilePicture(file);
       setFormData(prev => ({ ...prev, profile_picture: publicUrl }));
 
-      // Auto-save if not editing
       if (!isEditing && profileData) {
-        await supabase.from('users').update({ profile_picture: publicUrl }).eq('user_id', profileData.user_id);
+        await profileService.updateProfilePicture(profileData.user_id, publicUrl);
         setProfileData(prev => ({ ...prev, profile_picture: publicUrl }));
-        
-        // Sync with store and localStorage
+
         const currentUser = useAuthStore.getState().user;
         if (currentUser) {
           const updatedUser = { ...currentUser, profile_picture: publicUrl };
@@ -170,12 +142,7 @@ const MyProfile = () => {
         cleanUpdates.password = password;
       }
 
-      const { error } = await supabase
-        .from('users')
-        .update(cleanUpdates)
-        .eq('user_id', profileData.user_id);
-
-      if (error) throw error;
+      await profileService.update(profileData.user_id, cleanUpdates);
 
       setProfileData({ ...formData, password: '' });
       setFormData(prev => ({ ...prev, password: '' }));

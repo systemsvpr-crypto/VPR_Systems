@@ -183,6 +183,52 @@ export const sendWhatsAppTextMessage = async (phoneNumber, text, logMeta = {}) =
     }
 };
 
+export const whatsappLogService = {
+    async fetchLogs() {
+        const { data, error } = await supabase
+            .from('whatsapp_logs')
+            .select('*')
+            .order('created_at', { ascending: false });
+        if (error) throw error;
+        return data || [];
+    },
+
+    subscribeToChanges(callback) {
+        const channel = supabase
+            .channel('whatsapp_logs_changes')
+            .on('postgres_changes',
+                { event: 'INSERT', schema: 'public', table: 'whatsapp_logs' },
+                (payload) => callback('INSERT', payload.new)
+            )
+            .on('postgres_changes',
+                { event: 'UPDATE', schema: 'public', table: 'whatsapp_logs' },
+                (payload) => callback('UPDATE', payload.new)
+            )
+            .subscribe();
+
+        return () => supabase.removeChannel(channel);
+    },
+
+    async markAsRead(ids) {
+        const { error } = await supabase
+            .from('whatsapp_logs')
+            .update({ is_read: true })
+            .in('id', ids);
+        if (error) throw error;
+        return true;
+    },
+
+    async markMessagesAsRead(contactId) {
+        const { error } = await supabase
+            .from('whatsapp_logs')
+            .update({ is_read: true })
+            .eq('is_read', false)
+            .or(`phone_number.eq.${contactId},recipient_name.eq.${contactId}`);
+        if (error) throw error;
+        return true;
+    },
+};
+
 export const whatsappService = {
     sendDispatchNotification: async (recipientNumber, { customerName, orderNumber, productName, dispatchDate }, logMeta = {}) => {
         console.warn('whatsappService.sendDispatchNotification called');

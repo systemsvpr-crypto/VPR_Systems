@@ -117,7 +117,7 @@ const OtdSkip = () => {
     setLoadingStock(true);
     try {
       const [allStock, gData] = await Promise.all([
-        fetchAllRows('products', 'name, godown_id, closing_quantity', 'name'),
+        fetchAllRows('products', 'name, godown_id, current_stock', 'name'),
         fetchAllRows('godowns', 'name, godown_id', 'name')
       ]);
 
@@ -131,7 +131,7 @@ const OtdSkip = () => {
         const item = normalize(row.name);
         const godownId = String(row.godown_id || "").trim();
         const godownName = godownMap[godownId] || godownId;
-        const stock = Number(row.closing_quantity) || 0;
+        const stock = Number(row.current_stock) || 0;
 
         const displayGodown = godownName.toLowerCase() === 'godown' ? 'Gdn' : godownName;
         if (!sMap[item]) sMap[item] = [];
@@ -186,7 +186,7 @@ const OtdSkip = () => {
     const godownObj = godownsData.find(g => g.name === godownName);
     if (!godownObj) return godownName;
     const prodStock = productsData.find(p => p.name === productName && p.godown_id === godownObj.godown_id);
-    const availableQty = prodStock ? parseFloat(prodStock.closing_quantity) || 0 : 0;
+    const availableQty = prodStock ? parseFloat(prodStock.current_stock) || 0 : 0;
     return `${godownName} (${availableQty} units)`;
   }, [godownsData, productsData]);
 
@@ -194,7 +194,7 @@ const OtdSkip = () => {
   const getGodownOptionsForProduct = useCallback((productName) => {
     return godownsData.map(g => {
       const prodStock = productsData.find(p => p.name === productName && p.godown_id === g.godown_id);
-      const availableQty = prodStock ? parseFloat(prodStock.closing_quantity) || 0 : 0;
+      const availableQty = prodStock ? parseFloat(prodStock.current_stock) || 0 : 0;
       return `${g.name} (${availableQty} units)`;
     });
   }, [godownsData, productsData]);
@@ -577,7 +577,7 @@ const OtdSkip = () => {
         }
 
         const prodStock = productsData.find(p => p.name === finalProduct && p.godown_id === godownObj.godown_id);
-        const availableStock = prodStock ? parseFloat(prodStock.closing_quantity) || 0 : 0;
+        const availableStock = prodStock ? parseFloat(prodStock.current_stock) || 0 : 0;
 
         if (finalQty > availableStock) {
           toast.error(`Insufficient stock for "${finalProduct}" in "${finalGodown}" for order ${item.orderNumber}.\nAvailable: ${availableStock}, Requested: ${finalQty}`);
@@ -670,14 +670,11 @@ const OtdSkip = () => {
             if (pErr) throw pErr;
 
             if (pData) {
-              const currentStock = parseFloat(pData.closing_quantity) || 0;
+              const currentStock = parseFloat(pData.current_stock) || 0;
               const newStock = currentStock - finalQty;
-              const mux = parseFloat(pData.mux) || 0;
 
-              // Update product table closing stock and derived quantity
               const { error: prodUpErr } = await supabase.from('products').update({
-                closing_quantity: newStock,
-                quantity: (newStock * mux).toFixed(3),
+                current_stock: newStock,
                 updated_at: now
               }).eq('product_id', pData.product_id);
               if (prodUpErr) throw prodUpErr;
@@ -690,8 +687,7 @@ const OtdSkip = () => {
                 product_id: pData.product_id,
                 transaction_type: 'out',
                 quantity: finalQty,
-                opening_stock: currentStock,
-                closing_stock: newStock,
+                balance_after_transaction: newStock,
                 reference_number: dNo,
                 date: now.split('T')[0],
                 notes: `Sales Dispatch (Skip): ${dNo} for ${item.clientName}`,

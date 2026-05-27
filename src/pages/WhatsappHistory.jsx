@@ -4,8 +4,8 @@ import {
     MoreVertical, Check, CheckCheck, Send, Paperclip,
     Smile, Filter, ChevronLeft, LayoutGrid, List
 } from 'lucide-react';
-import { supabase } from '../supabase';
 import toast from 'react-hot-toast';
+import { whatsappLogService } from '../services/whatsappService';
 
 
 /**
@@ -32,15 +32,9 @@ const WhatsappHistory = () => {
     const fetchLogs = useCallback(async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
-                .from('whatsapp_logs')
-                .select('*')
-                .order('created_at', { ascending: false });
+            const data = await whatsappLogService.fetchLogs();
+            setLogs(data);
 
-            if (error) throw error;
-            setLogs(data || []);
-
-            // Auto-select first contact if none selected
             if (data?.length > 0 && !selectedContactId) {
                 const firstKey = data[0].phone_number || data[0].recipient_name;
                 setSelectedContactId(firstKey);
@@ -56,45 +50,30 @@ const WhatsappHistory = () => {
     useEffect(() => {
         fetchLogs();
 
-        // Subscribe to real-time updates for receiving messages and status updates
-        const channel = supabase
-            .channel('whatsapp_logs_changes')
-            .on('postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'whatsapp_logs' },
-                (payload) => {
-                    const newLog = payload.new;
-                    const key = newLog.phone_number || newLog.recipient_name;
+        const unsubscribe = whatsappLogService.subscribeToChanges((eventType, data) => {
+            if (eventType === 'INSERT') {
+                const key = data.phone_number || data.recipient_name;
 
-                    // If this message belongs to the chat we are currently looking at, mark it read immediately
-                    if (key === selectedContactIdRef.current && newLog.is_read === false) {
-                        markMessagesAsRead(key);
-                    }
-
-                    setLogs(prev => {
-                        // Prevent duplicate if already in state
-                        if (prev.some(log => log.id === newLog.id)) return prev;
-                        return [newLog, ...prev];
-                    });
-
-                    if (newLog.status === 'Received') {
-                        toast.success(`New message from ${newLog.recipient_name || 'Customer'}`);
-                    }
+                if (key === selectedContactIdRef.current && data.is_read === false) {
+                    markMessagesAsRead(key);
                 }
-            )
-            .on('postgres_changes',
-                { event: 'UPDATE', schema: 'public', table: 'whatsapp_logs' },
-                (payload) => {
-                    // Update the status (ticks) or read state in real-time
-                    setLogs(prev => prev.map(log =>
-                        log.id === payload.new.id ? payload.new : log
-                    ));
-                }
-            )
-            .subscribe();
 
-        return () => {
-            supabase.removeChannel(channel);
-        };
+                setLogs(prev => {
+                    if (prev.some(log => log.id === data.id)) return prev;
+                    return [data, ...prev];
+                });
+
+                if (data.status === 'Received') {
+                    toast.success(`New message from ${data.recipient_name || 'Customer'}`);
+                }
+            } else if (eventType === 'UPDATE') {
+                setLogs(prev => prev.map(log =>
+                    log.id === data.id ? data : log
+                ));
+            }
+        });
+
+        return unsubscribe;
     }, []);
 
     const [newMessage, setNewMessage] = useState('');
@@ -122,18 +101,9 @@ const WhatsappHistory = () => {
         }
     };
 
-    // Mark messages as read when chat is opened
     const markMessagesAsRead = useCallback(async (contactId) => {
         try {
-            const { error } = await supabase
-                .from('whatsapp_logs')
-                .update({ is_read: true })
-                .eq('is_read', false)
-                .or(`phone_number.eq.${contactId},recipient_name.eq.${contactId}`);
-
-            if (error) throw error;
-
-            // Local state update to remove badges immediately
+            await whatsappLogService.markMessagesAsRead(contactId);
             setLogs(prev => prev.map(log => {
                 const key = log.phone_number || log.recipient_name;
                 if (key === contactId) {

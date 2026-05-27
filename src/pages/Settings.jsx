@@ -12,7 +12,7 @@ import {
     ChevronLeft,
     ChevronRight,
 } from 'lucide-react';
-import { supabase } from '../supabase';
+import { userService } from '../services/userService';
 import toast from 'react-hot-toast';
 import useAuthStore from '../store/authStore';
 import {
@@ -89,12 +89,7 @@ const Settings = () => {
     const fetchUsers = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
-                .from('users')
-                .select('*')
-                .order('created_at', { ascending: false });
-
-            if (error) throw error;
+            const data = await userService.getAll();
             setUsers(data || []);
         } catch (error) {
             console.error('Error fetching users:', error);
@@ -222,20 +217,8 @@ const Settings = () => {
 
         try {
             setUploading(true);
-            const fileExt = file.name.split('.').pop();
-            const fileName = `profile-pictures/${Math.random()}.${fileExt}`;
-
-            const { error: uploadError } = await supabase.storage
-                .from('images')
-                .upload(fileName, file);
-
-            if (uploadError) throw uploadError;
-
-            const { data } = supabase.storage
-                .from('images')
-                .getPublicUrl(fileName);
-
-            setFormData(prev => ({ ...prev, profile_picture: data.publicUrl }));
+            const publicUrl = await userService.uploadPicture(file);
+            setFormData(prev => ({ ...prev, profile_picture: publicUrl }));
             toast.success('Image uploaded successfully');
         } catch (error) {
             console.error('Error uploading image:', error);
@@ -293,17 +276,10 @@ const Settings = () => {
 
         try {
             // DB Duplicate Checks
-            const checks = [
-                supabase.from('users').select('user_id').eq('username', cleanedData.username)
-            ];
-
-            const [usernameCheck] = await Promise.all(checks);
-
-            if (usernameCheck.error) throw usernameCheck.error;
+            const existingNameUser = await userService.checkDuplicate('username', cleanedData.username, editingUser?.user_id);
 
             const conflictErrors = {};
-            const existingNameUser = usernameCheck.data?.[0];
-            if (existingNameUser && (!editingUser || existingNameUser.user_id !== editingUser.user_id)) {
+            if (existingNameUser) {
                 conflictErrors.username = 'This Username is already taken';
             }
 
@@ -321,13 +297,7 @@ const Settings = () => {
             if (editingUser && !userData.password) delete userData.password;
 
             if (editingUser) {
-
-                const { error } = await supabase
-                    .from('users')
-                    .update(userData)
-                    .eq('user_id', editingUser.user_id);
-
-                if (error) throw error;
+                await userService.update(editingUser.user_id, userData);
                 toast.success('User updated successfully');
 
                 // Update local session if needed
@@ -342,8 +312,7 @@ const Settings = () => {
                     localStorage.setItem('user', JSON.stringify(updatedUserCompat));
                 }
             } else {
-                const { error } = await supabase.from('users').insert([userData]);
-                if (error) throw error;
+                await userService.create(userData);
                 toast.success('User created successfully');
             }
 

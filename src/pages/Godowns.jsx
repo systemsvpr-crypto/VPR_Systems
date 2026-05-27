@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Edit2, X, MapPin, Phone, Mail, Trash2, Tag } from 'lucide-react';
-import { supabase } from '../supabase';
+import { Search, Plus, Edit2, X, MapPin, Phone, Mail, Tag } from 'lucide-react';
 import useAuthStore from '../store/authStore';
+import { godownService } from '../services/godownService';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
-import DeleteModal from '@/components/ui/DeleteModal';
 import Pagination from '@/components/ui/Pagination';
 import { cn } from '@/lib/utils';
 
@@ -31,10 +30,6 @@ const Godowns = ({ isTab = false }) => {
     const [currentPage, setCurrentPage] = useState(1);
     const [formData, setFormData] = useState(DEFAULT_FORM_DATA);
     const [errors, setErrors] = useState({});
-    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-    const [itemToDelete, setItemToDelete] = useState(null);
-    const [isDeleting, setIsDeleting] = useState(false);
-
     useEffect(() => {
         fetchGodowns();
     }, []);
@@ -46,11 +41,7 @@ const Godowns = ({ isTab = false }) => {
     const fetchGodowns = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
-                .from('godowns')
-                .select('*')
-                .order('created_at', { ascending: false });
-            if (error) throw error;
+            const data = await godownService.getAll();
             setGodowns(data || []);
         } catch (error) {
             console.error('Error fetching godowns:', error);
@@ -87,8 +78,7 @@ const Godowns = ({ isTab = false }) => {
 
     const generateGodownId = async () => {
         try {
-            const { data, error } = await supabase.rpc('generate_godown_id');
-            if (error) throw error;
+            const data = await godownService.generateGodownId();
             setFormData(prev => ({ ...prev, godown_id: data }));
         } catch (error) {
             const count = godowns.length + 1;
@@ -122,17 +112,10 @@ const Godowns = ({ isTab = false }) => {
 
         try {
             if (editingGodown) {
-                const { error } = await supabase
-                    .from('godowns')
-                    .update({ ...formData, updated_at: new Date().toISOString() })
-                    .eq('godown_id', editingGodown.godown_id);
-                if (error) throw error;
+                await godownService.update(editingGodown.godown_id, formData);
                 toast.success('Godown updated successfully');
             } else {
-                const { error } = await supabase
-                    .from('godowns')
-                    .insert([formData]);
-                if (error) throw error;
+                await godownService.create(formData);
                 toast.success('Godown created successfully');
             }
             handleCloseModal();
@@ -140,32 +123,6 @@ const Godowns = ({ isTab = false }) => {
         } catch (error) {
             console.error('Error saving godown:', error);
             toast.error(`Error: ${error.message}`);
-        }
-    };
-
-    const handleDelete = (godown) => {
-        setItemToDelete(godown);
-        setIsDeleteModalOpen(true);
-    };
-
-    const confirmDelete = async () => {
-        if (!itemToDelete) return;
-        setIsDeleting(true);
-        try {
-            const { error } = await supabase
-                .from('godowns')
-                .delete()
-                .eq('godown_id', itemToDelete.godown_id);
-            if (error) throw error;
-            toast.success('Godown deleted successfully');
-            fetchGodowns();
-            setIsDeleteModalOpen(false);
-            setItemToDelete(null);
-        } catch (error) {
-            console.error('Error deleting godown:', error);
-            toast.error(`Error: ${error.message}`);
-        } finally {
-            setIsDeleting(false);
         }
     };
 
@@ -236,7 +193,6 @@ const Godowns = ({ isTab = false }) => {
                                 godown={godown}
                                 user={user}
                                 onEdit={() => handleOpenModal(godown)}
-                                onDelete={() => handleDelete(godown)}
                             />
                         ))
                     )}
@@ -248,9 +204,11 @@ const Godowns = ({ isTab = false }) => {
                         <table className="erp-table">
                             <thead className="erp-table-thead">
                                 <tr className="erp-table-tr">
-                                    <HeaderCell>Godown Details</HeaderCell>
-                                    <HeaderCell>Location</HeaderCell>
-                                    <HeaderCell>Contact</HeaderCell>
+                                    <HeaderCell>Name</HeaderCell>
+                                    <HeaderCell>Godown ID</HeaderCell>
+                                    <HeaderCell>Address</HeaderCell>
+                                    <HeaderCell>Contact Person</HeaderCell>
+                                    <HeaderCell>Contact Number</HeaderCell>
                                     <HeaderCell align="center">Status</HeaderCell>
                                     <HeaderCell align="right">Actions</HeaderCell>
                                 </tr>
@@ -267,12 +225,11 @@ const Godowns = ({ isTab = false }) => {
                                             godown={godown}
                                             user={user}
                                             onEdit={() => handleOpenModal(godown)}
-                                            onDelete={() => handleDelete(godown)}
                                         />
                                     ))
                                 )}
                                 {Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
-                                    <tr key={`empty-${i}`}><td colSpan="5" className="h-16"></td></tr>
+                                    <tr key={`empty-${i}`}><td colSpan="7" className="h-16"></td></tr>
                                 ))}
                             </tbody>
                         </table>
@@ -383,15 +340,6 @@ const Godowns = ({ isTab = false }) => {
                 </div>
             )}
 
-            <DeleteModal
-                isOpen={isDeleteModalOpen}
-                onClose={() => setIsDeleteModalOpen(false)}
-                onConfirm={confirmDelete}
-                title="Delete Godown"
-                description="Are you sure you want to delete this godown? This action will remove all recorded location details."
-                itemLabel={itemToDelete?.name}
-                loading={isDeleting}
-            />
         </div>
     );
 };
@@ -428,31 +376,33 @@ const HeaderCell = ({ children, align = "left" }) => (
 
 const EmptyRow = ({ message }) => (
     <tr>
-        <td colSpan="5" className="px-4 py-8 text-center text-slate-500 text-sm">
+        <td colSpan="7" className="px-4 py-8 text-center text-slate-500 text-sm">
             {message}
         </td>
     </tr>
 );
 
-const GodownRow = ({ godown, user, onEdit, onDelete }) => (
+const GodownRow = ({ godown, user, onEdit }) => (
     <tr className="erp-table-tr group">
         <td className="erp-table-td">
             <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 group-hover:bg-primary/10 group-hover:text-primary transition-colors">
                     <MapPin size={18} />
                 </div>
-                <div>
-                    <div className="font-bold text-slate-900 text-sm">{godown.name}</div>
-                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{godown.godown_id}</div>
-                </div>
+                <div className="font-bold text-slate-900 text-sm">{godown.name}</div>
             </div>
         </td>
         <td className="erp-table-td">
-            <div className="text-sm text-slate-500 font-medium line-clamp-1 max-w-[250px]" title={godown.address}>{godown.address || '-'}</div>
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{godown.godown_id}</span>
         </td>
         <td className="erp-table-td">
-            <div className="text-sm text-slate-900 font-bold">{godown.contact_person || '-'}</div>
-            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{godown.contact_number || '-'}</div>
+            <div className="text-sm text-slate-500 font-medium line-clamp-1 max-w-[250px]" title={godown.address}>{godown.address || ''}</div>
+        </td>
+        <td className="erp-table-td">
+            <div className="text-sm text-slate-900 font-bold">{godown.contact_person || ''}</div>
+        </td>
+        <td className="erp-table-td">
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{godown.contact_number || ''}</div>
         </td>
         <td className="erp-table-td text-center">
             <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${godown.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
@@ -465,17 +415,12 @@ const GodownRow = ({ godown, user, onEdit, onDelete }) => (
                 <Button variant="ghost" size="icon" type="button" onClick={onEdit} className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded transition-all" title="Edit">
                     <Edit2 size={16} />
                 </Button>
-                {user?.role === 'SUPER ADMIN' && (
-                    <Button variant="ghost" size="icon" type="button" onClick={onDelete} className="p-1.5 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded transition-all" title="Delete">
-                        <Trash2 size={16} />
-                    </Button>
-                )}
             </div>
         </td>
     </tr>
 );
 
-const MobileGodownCard = ({ godown, user, onEdit, onDelete }) => (
+const MobileGodownCard = ({ godown, user, onEdit }) => (
     <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-start justify-between">
         <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 shrink-0">
@@ -483,20 +428,16 @@ const MobileGodownCard = ({ godown, user, onEdit, onDelete }) => (
             </div>
             <div>
                 <h3 className="font-semibold text-slate-900 text-sm">{godown.name}</h3>
-                <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-xs text-slate-500">{godown.address || 'No address'}</span>
-                </div>
+                <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{godown.godown_id}</div>
+                {godown.address && <div className="text-xs text-slate-500 mt-0.5">{godown.address}</div>}
+                {godown.contact_person && <div className="text-xs text-slate-600 mt-0.5">{godown.contact_person}</div>}
+                {godown.contact_number && <div className="text-xs text-slate-500">{godown.contact_number}</div>}
             </div>
         </div>
         <div className="flex items-center gap-1">
             <Button variant="ghost" size="icon" onClick={onEdit} className="text-slate-400 hover:text-primary hover:bg-primary/5 rounded-full transition-colors">
                 <Edit2 size={18} />
             </Button>
-            {user?.role === 'SUPER ADMIN' && (
-                <Button variant="ghost" size="icon" onClick={onDelete} className="text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded-full transition-colors">
-                    <Trash2 size={18} />
-                </Button>
-            )}
         </div>
     </div>
 );

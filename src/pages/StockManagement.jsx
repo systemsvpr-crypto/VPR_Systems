@@ -15,7 +15,7 @@ import {
     ArrowLeft
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../supabase';
+import { stockManagementService } from '../services/stockManagementService';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -117,48 +117,19 @@ const StockManagement = () => {
         setCurrentPage(1);
     }, [searchTerm, filterType, filterGodown, filterDate]);
 
-    const fetchAllProducts = async () => {
-        let accumulated = [];
-        let pageIndex = 0;
-        const pageSize = 1000;
-        let done = false;
-        
-        while (!done) {
-            const from = pageIndex * pageSize;
-            const to = from + pageSize - 1;
-            const { data, error } = await supabase
-                .from('products')
-                .select('*')
-                .eq('is_active', true)
-                .order('name', { ascending: true })
-                .range(from, to);
-            
-            if (error) throw error;
-            accumulated = [...accumulated, ...(data || [])];
-            
-            if (!data || data.length < pageSize) {
-                done = true;
-            } else {
-                pageIndex++;
-            }
-        }
-        return accumulated;
-    };
-
     const fetchData = async () => {
         setLoading(true);
         try {
-            const [entriesRes, godownsRes, transportersRes, allProducts] = await Promise.all([
-                supabase.from('stock_management').select('*').order('created_at', { ascending: false }),
-                supabase.from('godowns').select('*').eq('is_active', true).order('name', { ascending: true }),
-                supabase.from('transporters').select('*').eq('is_active', true).order('name', { ascending: true }),
-                fetchAllProducts()
+            const [entries, godownsData, transportersData, allProducts] = await Promise.all([
+                stockManagementService.getAll(),
+                stockManagementService.getActiveGodowns(),
+                stockManagementService.getActiveTransporters(),
+                stockManagementService.fetchAllProducts()
             ]);
-            if (entriesRes.error) throw entriesRes.error;
-            setEntries(entriesRes.data || []);
-            setGodowns(godownsRes.data || []);
+            setEntries(entries || []);
+            setGodowns(godownsData || []);
             setProducts(allProducts || []);
-            setTransporters(transportersRes.data || []);
+            setTransporters(transportersData || []);
         } catch (error) {
             console.error('Error fetching data:', error);
             toast.error('Failed to fetch data');
@@ -244,7 +215,7 @@ const StockManagement = () => {
 
         if (sourceGodownId) {
             const sourceStock = products.find(p => p.name === selectedProdData.name && p.godown_id === sourceGodownId);
-            const availableQty = parseFloat(sourceStock?.closing_quantity) || 0;
+            const availableQty = parseFloat(sourceStock?.current_stock) || 0;
             
             if (availableQty < selectedQty) {
                 toast.error(`Insufficient stock. Maximum available is ${availableQty}`);
@@ -287,11 +258,9 @@ const StockManagement = () => {
 
         if (sourceGodownId && selectedProdData && qtyNum !== '') {
             const sourceStock = products.find(p => p.name === selectedProdData.name && p.godown_id === sourceGodownId);
-            let availableQty = parseFloat(sourceStock?.closing_quantity) || 0;
+            let availableQty = parseFloat(sourceStock?.current_stock) || 0;
             
             if (editingEntry && editingEntry.product_id === productId) {
-                // If editing, the original quantity of this entry is already deducted/added.
-                // We add it back to find the true available stock before this entry.
                 const wasTransfer = editingEntry.transaction_type === 'in' && editingEntry.from_location && editingEntry.from_location !== 'NEW_STOCK';
                 if (editingEntry.transaction_type === 'out' && sourceGodownId === editingEntry.godown_id) {
                     availableQty += editingEntry.quantity;
@@ -345,16 +314,10 @@ const StockManagement = () => {
                 const affectedProducts = new Set();
                 affectedProducts.add(editingEntry.product_id);
 
-                // Fetch next count for possible new product creation
                 let nextCount = 1;
-                const { data: lastProd } = await supabase
-                    .from('products')
-                    .select('product_id')
-                    .order('product_id', { ascending: false })
-                    .limit(1);
-                
-                if (lastProd && lastProd.length > 0 && lastProd[0].product_id) {
-                    const match = lastProd[0].product_id.match(/\d+$/);
+                const lastProductId = await stockManagementService.getLastProductId();
+                if (lastProductId) {
+                    const match = lastProductId.match(/\d+$/);
                     if (match) {
                         nextCount = parseInt(match[0], 10) + 1;
                     }
@@ -378,40 +341,27 @@ const StockManagement = () => {
                             const newProductId = `PROD-${nextCount.toString().padStart(4, '0')}`;
                             nextCount++;
 
-                            const { data: newProd, error: createErr } = await supabase
-                                .from('products')
-                                .insert([{
-                                    product_id: newProductId,
-                                    godown_id: formData.godown_id,
-                                    godown_name: godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id,
-                                    name: submittedProduct.name,
-                                    description: submittedProduct.description || null,
-                                    unit: submittedProduct.unit || 'units',
-                                    mux: submittedProduct.mux || 1,
-                                    opening_quantity: 0,
-                                    closing_quantity: 0,
-                                    quantity: 0,
-                                    master_product_id: submittedProduct.master_product_id || null,
-                                    product_type: submittedProduct.product_type || null
-                                }])
-                                .select()
-                                .single();
-                            
-                            if (createErr) throw createErr;
+                            const newProd = await stockManagementService.createProduct({
+                                product_id: newProductId,
+                                godown_id: formData.godown_id,
+                                godown_name: godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id,
+                                name: submittedProduct.name,
+                                description: submittedProduct.description || null,
+                                unit: submittedProduct.unit || 'units',
+                                mux: submittedProduct.mux || 1,
+                                current_stock: 0,
+                                master_product_id: submittedProduct.master_product_id || null,
+                                product_type: submittedProduct.product_type || null
+                            });
                             targetProductId = newProd.product_id;
                             affectedProducts.add(targetProductId);
                         }
                     }
                 }
 
-                // Now get the base stock for the target destination product
                 const isSameProduct = editingEntry.product_id === targetProductId && editingEntry.godown_id === formData.godown_id;
-                const { data: productData } = await supabase
-                    .from('products')
-                    .select('closing_quantity')
-                    .eq('product_id', targetProductId)
-                    .single();
-                const currentStock = parseFloat(productData?.closing_quantity) || 0;
+                const productStock = await stockManagementService.getProductClosingQuantity(targetProductId);
+                const currentStock = productStock.current_stock;
 
                 let baseStock = currentStock;
                 if (isSameProduct) {
@@ -430,8 +380,7 @@ const StockManagement = () => {
                     ...formDataWithoutItems,
                     product_id: targetProductId,
                     quantity: qty,
-                    opening_stock: baseStock,
-                    closing_stock: displayClosing,
+                    balance_after_transaction: displayClosing,
                     transporter_id: formData.transaction_type === 'in' ? (formData.transporter_id || null) : null,
                     lr_number: formData.transaction_type === 'in' ? (formData.lr_number || null) : null,
                     from_location:
@@ -441,11 +390,7 @@ const StockManagement = () => {
                     freight_amount: formData.transaction_type === 'in' && formData.freight_amount ? parseFloat(formData.freight_amount) : null,
                 };
 
-                const { error } = await supabase
-                    .from('stock_management')
-                    .update({ ...entryData, updated_at: new Date().toISOString() })
-                    .eq('entry_id', editingEntry.entry_id);
-                if (error) throw error;
+                await stockManagementService.update(editingEntry.entry_id, entryData);
 
                 // Handle source-out row for transfers
                 const wasTransfer =
@@ -467,19 +412,15 @@ const StockManagement = () => {
 
                 if (wasTransfer && !isTransfer) {
                     // Delete the old source-out row
-                    await supabase.from('stock_management').delete().eq('entry_id', oldSourceEntryId);
+                    await stockManagementService.delete(oldSourceEntryId);
                 } else if (isTransfer) {
                     const destProduct = products.find(p => p.product_id === targetProductId);
                     const sourceProduct = destProduct ? products.find(p => p.name === destProduct.name && p.godown_id === formData.from_location) : null;
                     if (sourceProduct) {
                         affectedProducts.add(sourceProduct.product_id);
 
-                        const { data: srcData } = await supabase
-                            .from('products')
-                            .select('closing_quantity')
-                            .eq('product_id', sourceProduct.product_id)
-                            .single();
-                        const srcCurrentStock = parseFloat(srcData?.closing_quantity) || 0;
+                        const srcStock = await stockManagementService.getProductClosingQuantity(sourceProduct.product_id);
+                        const srcCurrentStock = srcStock.current_stock;
 
                         let srcBaseStock = srcCurrentStock;
                         const oldSourceProduct = products.find(p => p.product_id === editingEntry.product_id);
@@ -495,8 +436,7 @@ const StockManagement = () => {
                             product_id: sourceProduct.product_id,
                             transaction_type: 'out',
                             quantity: qty,
-                            opening_stock: srcBaseStock,
-                            closing_stock: srcNewStock,
+                            balance_after_transaction: srcNewStock,
                             reference_number: formData.reference_number,
                             date: formData.date,
                             notes: `Transfer out to ${godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id}`,
@@ -505,17 +445,9 @@ const StockManagement = () => {
                         };
 
                         if (wasTransfer) {
-                            await supabase
-                                .from('stock_management')
-                                .update({
-                                    ...srcDataObj,
-                                    updated_at: new Date().toISOString()
-                                })
-                                .eq('entry_id', oldSourceEntryId);
+                            await stockManagementService.update(oldSourceEntryId, srcDataObj);
                         } else {
-                            await supabase
-                                .from('stock_management')
-                                .insert([srcDataObj]);
+                            await stockManagementService.create(srcDataObj);
                         }
                     }
                 }
@@ -541,39 +473,26 @@ const StockManagement = () => {
                                 const newProductId = `PROD-${nextCount.toString().padStart(4, '0')}`;
                                 nextCount++;
 
-                                const { data: newProd, error: createErr } = await supabase
-                                    .from('products')
-                                    .insert([{
-                                        product_id: newProductId,
-                                        godown_id: formData.godown_id,
-                                        godown_name: godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id,
-                                        name: submittedAddProduct.name,
-                                        description: submittedAddProduct.description || null,
-                                        unit: submittedAddProduct.unit || 'units',
-                                        mux: submittedAddProduct.mux || 1,
-                                        opening_quantity: 0,
-                                        closing_quantity: 0,
-                                        quantity: 0,
-                                        master_product_id: submittedAddProduct.master_product_id || null,
-                                        product_type: submittedAddProduct.product_type || null
-                                    }])
-                                    .select()
-                                    .single();
-                                
-                                if (createErr) throw createErr;
+                                const newProd = await stockManagementService.createProduct({
+                                    product_id: newProductId,
+                                    godown_id: formData.godown_id,
+                                    godown_name: godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id,
+                                    name: submittedAddProduct.name,
+                                    description: submittedAddProduct.description || null,
+                                    unit: submittedAddProduct.unit || 'units',
+                                    mux: submittedAddProduct.mux || 1,
+                                    current_stock: 0,
+                                    master_product_id: submittedAddProduct.master_product_id || null,
+                                    product_type: submittedAddProduct.product_type || null
+                                });
                                 targetAddProductId = newProd.product_id;
                                 affectedProducts.add(targetAddProductId);
                             }
                         }
                     }
 
-                    const { data: addProductData } = await supabase
-                        .from('products')
-                        .select('closing_quantity')
-                        .eq('product_id', targetAddProductId)
-                        .single();
-
-                    const currentAddStock = parseFloat(addProductData?.closing_quantity) || 0;
+                    const addProductStock = await stockManagementService.getProductClosingQuantity(targetAddProductId);
+                    const currentAddStock = addProductStock.current_stock;
                     const addQty = item.quantity;
                     let addOpeningStock = currentAddStock;
                     let addClosingStock = formData.transaction_type === 'in'
@@ -585,8 +504,7 @@ const StockManagement = () => {
                         product_id: targetAddProductId,
                         transaction_type: formData.transaction_type,
                         quantity: addQty,
-                        opening_stock: addOpeningStock,
-                        closing_stock: addClosingStock,
+                        balance_after_transaction: addClosingStock,
                         reference_number: formData.reference_number,
                         date: formData.date,
                         notes: formData.notes,
@@ -599,10 +517,7 @@ const StockManagement = () => {
                         freight_amount: formData.transaction_type === 'in' && formData.freight_amount ? parseFloat(formData.freight_amount) : null,
                     };
 
-                    const { error: insertErr } = await supabase
-                        .from('stock_management')
-                        .insert([entryAddData]);
-                    if (insertErr) throw insertErr;
+                    await stockManagementService.create(entryAddData);
 
                     // If it is a transfer, also insert the source-out row for this additional product
                     if (isTransfer) {
@@ -611,36 +526,31 @@ const StockManagement = () => {
                         if (sourceProduct) {
                             affectedProducts.add(sourceProduct.product_id);
 
-                            const { data: srcData } = await supabase
-                                .from('products')
-                                .select('closing_quantity')
-                                .eq('product_id', sourceProduct.product_id)
-                                .single();
-                            const srcCurrentStock = parseFloat(srcData?.closing_quantity) || 0;
+                            const srcStockData = await stockManagementService.getProductClosingQuantity(sourceProduct.product_id);
+                            const srcCurrentStock = srcStockData.current_stock;
                             const srcNewStock = Math.max(0, srcCurrentStock - addQty);
 
                             const sourceEntryId = entryId + '-SRC';
-                            await supabase.from('stock_management').insert([{
+                            await stockManagementService.create({
                                 entry_id: sourceEntryId,
                                 godown_id: formData.from_location,
                                 product_id: sourceProduct.product_id,
                                 transaction_type: 'out',
                                 quantity: addQty,
-                                opening_stock: srcCurrentStock,
-                                closing_stock: srcNewStock,
+                                balance_after_transaction: srcNewStock,
                                 reference_number: formData.reference_number,
                                 date: formData.date,
                                 notes: `Transfer out to ${godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id}`,
                                 transporter_id: formData.transporter_id || null,
                                 lr_number: formData.lr_number || null,
-                            }]);
+                            });
                         }
                     }
                 }
 
                 // 3. Recalculate stock for all affected products
                 for (const pid of affectedProducts) {
-                    await recalculateProductStock(pid);
+                    await stockManagementService.recalculateProductStock(pid);
                 }
 
                 toast.success('Entry updated successfully');
@@ -648,14 +558,9 @@ const StockManagement = () => {
                 const baseEntryId = formData.entry_id;
 
                 let nextCount = 1;
-                const { data: lastProd } = await supabase
-                    .from('products')
-                    .select('product_id')
-                    .order('product_id', { ascending: false })
-                    .limit(1);
-                
-                if (lastProd && lastProd.length > 0 && lastProd[0].product_id) {
-                    const match = lastProd[0].product_id.match(/\d+$/);
+                const lastProductId = await stockManagementService.getLastProductId();
+                if (lastProductId) {
+                    const match = lastProductId.match(/\d+$/);
                     if (match) {
                         nextCount = parseInt(match[0], 10) + 1;
                     }
@@ -678,39 +583,24 @@ const StockManagement = () => {
                                 const newProductId = `PROD-${nextCount.toString().padStart(4, '0')}`;
                                 nextCount++;
 
-                                const { data: newProd, error: createErr } = await supabase
-                                    .from('products')
-                                    .insert([{
-                                        product_id: newProductId,
-                                        godown_id: formData.godown_id,
-                                        godown_name: godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id,
-                                        name: submittedProduct.name,
-                                        description: submittedProduct.description || null,
-                                        unit: submittedProduct.unit || 'units',
-                                        mux: submittedProduct.mux || 1,
-                                        opening_quantity: 0,
-                                        closing_quantity: 0,
-                                        quantity: 0,
-                                        master_product_id: submittedProduct.master_product_id || null,
-                                        product_type: submittedProduct.product_type || null
-                                    }])
-                                    .select()
-                                    .single();
-                                
-                                if (createErr) throw createErr;
+                                const newProd = await stockManagementService.createProduct({
+                                    product_id: newProductId,
+                                    godown_id: formData.godown_id,
+                                    godown_name: godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id,
+                                    name: submittedProduct.name,
+                                    description: submittedProduct.description || null,
+                                    unit: submittedProduct.unit || 'units',
+                                    mux: submittedProduct.mux || 1,
+                                    current_stock: 0,
+                                    master_product_id: submittedProduct.master_product_id || null,
+                                    product_type: submittedProduct.product_type || null
+                                });
                                 targetProductId = newProd.product_id;
                             }
                         }
                     }
 
-                    const { data: productData } = await supabase
-                        .from('products')
-                        .select('closing_quantity, mux')
-                        .eq('product_id', targetProductId)
-                        .single();
-
-                    const currentStock = parseFloat(productData?.closing_quantity) || 0;
-                    const mux = parseFloat(productData?.mux) || 0;
+                    const { current_stock: currentStock, mux } = await stockManagementService.getProductClosingQuantity(targetProductId);
                     const qty = item.quantity;
                     let newStock, openingStock, closingStock;
 
@@ -734,8 +624,7 @@ const StockManagement = () => {
                         product_id: targetProductId,
                         transaction_type: formData.transaction_type,
                         quantity: qty,
-                        opening_stock: openingStock,
-                        closing_stock: closingStock,
+                        balance_after_transaction: closingStock,
                         reference_number: formData.reference_number,
                         date: formData.date,
                         notes: formData.notes,
@@ -749,29 +638,19 @@ const StockManagement = () => {
                         freight_amount: formData.transaction_type === 'in' && formData.freight_amount ? parseFloat(formData.freight_amount) : null,
                     };
 
-                    const { error } = await supabase
-                        .from('stock_management')
-                        .insert([entryData]);
-                    if (error) throw error;
+                    await stockManagementService.create(entryData);
 
                     // Update products table directly
-                    await supabase
-                        .from('products')
-                        .update({ 
-                            closing_quantity: newStock, 
-                            quantity: (newStock * mux).toFixed(3),
-                            updated_at: new Date().toISOString() 
-                        })
-                        .eq('product_id', targetProductId);
+                    await stockManagementService.updateProductStock(targetProductId, newStock);
 
-                    await supabase.from('stock_notifications').insert([{
+                    await stockManagementService.createNotification({
                         notification_type: formData.transaction_type === 'in' ? 'stock_in' : 'stock_out',
                         title: `Stock ${formData.transaction_type === 'in' ? 'IN' : 'OUT'}`,
                         message: `${qty} units ${formData.transaction_type === 'in' ? 'received' : 'dispatched'} at ${godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id}`,
                         product_id: targetProductId,
                         godown_id: formData.godown_id,
                         related_id: entryId
-                    }]);
+                    });
 
                     // If this is a transfer (stock in from another godown), also decrement source godown stock
                     if (formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK') {
@@ -780,45 +659,27 @@ const StockManagement = () => {
                             const productName = destProduct ? destProduct.name : submittedProduct?.name;
                             const sourceProduct = products.find(p => p.name === productName && p.godown_id === formData.from_location);
                             if (sourceProduct) {
-                                const { data: srcData } = await supabase
-                                    .from('products')
-                                    .select('closing_quantity, mux')
-                                    .eq('product_id', sourceProduct.product_id)
-                                    .single();
-
-                                const srcCurrentStock = parseFloat(srcData?.closing_quantity) || 0;
-                                const srcMux = parseFloat(srcData?.mux) || 0;
+                                const { current_stock: srcCurrentStock } = await stockManagementService.getProductClosingQuantity(sourceProduct.product_id);
                                 const srcNewStock = Math.max(0, srcCurrentStock - qty);
                                 const sourceEntryId = entryId + '-SRC';
 
                                 // Create source-out entry
-                                const { error: srcErr } = await supabase
-                                    .from('stock_management')
-                                    .insert([{
-                                        entry_id: sourceEntryId,
-                                        godown_id: formData.from_location,
-                                        product_id: sourceProduct.product_id,
-                                        transaction_type: 'out',
-                                        quantity: qty,
-                                        opening_stock: srcCurrentStock,
-                                        closing_stock: srcNewStock,
-                                        reference_number: formData.reference_number,
-                                        date: formData.date,
-                                        notes: `Transfer out to ${godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id}`,
-                                        transporter_id: formData.transporter_id || null,
-                                        lr_number: formData.lr_number || null,
-                                    }]);
-                                if (srcErr) throw srcErr;
+                                await stockManagementService.create({
+                                    entry_id: sourceEntryId,
+                                    godown_id: formData.from_location,
+                                    product_id: sourceProduct.product_id,
+                                    transaction_type: 'out',
+                                    quantity: qty,
+                                    balance_after_transaction: srcNewStock,
+                                    reference_number: formData.reference_number,
+                                    date: formData.date,
+                                    notes: `Transfer out to ${godowns.find(g => g.godown_id === formData.godown_id)?.name || formData.godown_id}`,
+                                    transporter_id: formData.transporter_id || null,
+                                    lr_number: formData.lr_number || null,
+                                });
 
                                 // Update source product stock
-                                await supabase
-                                    .from('products')
-                                    .update({
-                                        closing_quantity: srcNewStock,
-                                        quantity: (srcNewStock * srcMux).toFixed(3),
-                                        updated_at: new Date().toISOString()
-                                    })
-                                    .eq('product_id', sourceProduct.product_id);
+                                await stockManagementService.updateProductStock(sourceProduct.product_id, srcNewStock);
                             }
                         }
                     }
@@ -850,28 +711,20 @@ const StockManagement = () => {
             // If this was a transfer, also delete the paired source-out row
             if (wasTransfer) {
                 const sourceEntryId = entry.entry_id + '-SRC';
-                const { data: srcRow } = await supabase
-                    .from('stock_management')
-                    .select('product_id')
-                    .eq('entry_id', sourceEntryId)
-                    .maybeSingle();
+                const srcRow = await stockManagementService.getSourceEntry(sourceEntryId);
                 if (srcRow) {
-                    await supabase.from('stock_management').delete().eq('entry_id', sourceEntryId);
+                    await stockManagementService.delete(sourceEntryId);
                     if (srcRow.product_id) {
-                        await recalculateProductStock(srcRow.product_id);
+                        await stockManagementService.recalculateProductStock(srcRow.product_id);
                     }
                 }
             }
 
             // Delete the main entry
-            const { error } = await supabase
-                .from('stock_management')
-                .delete()
-                .eq('entry_id', entry.entry_id);
-            if (error) throw error;
+            await stockManagementService.delete(entry.entry_id);
 
             // Recalculate the affected product's stock from history
-            await recalculateProductStock(entry.product_id);
+            await stockManagementService.recalculateProductStock(entry.product_id);
 
             toast.success('Entry deleted successfully');
             fetchData();
@@ -887,41 +740,6 @@ const StockManagement = () => {
 
     const getGodownName = (id) => godowns.find(g => g.godown_id === id)?.name || id;
     const getProductName = (id) => products.find(p => p.product_id === id)?.name || id;
-
-    const recalculateProductStock = async (productId) => {
-        if (!productId) return;
-        try {
-            const { data: product, error: prodErr } = await supabase
-                .from('products')
-                .select('opening_quantity, mux')
-                .eq('product_id', productId)
-                .single();
-            if (prodErr || !product) return;
-            const opening = parseFloat(product.opening_quantity) || 0;
-            const mux = parseFloat(product.mux) || 0;
-            const { data: transactions } = await supabase
-                .from('stock_management')
-                .select('transaction_type, quantity')
-                .eq('product_id', productId);
-            let running = opening;
-            (transactions || []).forEach(t => {
-                const qty = parseFloat(t.quantity) || 0;
-                if (t.transaction_type === 'in' || t.transaction_type === 'adjustment') running += qty;
-                else running -= qty;
-            });
-            running = Math.max(0, running);
-            await supabase
-                .from('products')
-                .update({
-                    closing_quantity: running,
-                    quantity: (running * mux).toFixed(3),
-                    updated_at: new Date().toISOString()
-                })
-                .eq('product_id', productId);
-        } catch (err) {
-            console.error(`Error recalculating stock for ${productId}:`, err);
-        }
-    };
 
     const filteredEntries = useMemo(() => {
         return entries.filter(e => {
@@ -976,7 +794,7 @@ const StockManagement = () => {
                 uniqueProducts.push({
                     ...prodToUse,
                     // If target instance doesn't exist, current stock in target godown is 0
-                    closing_quantity: targetProductInstance ? (parseFloat(targetProductInstance.closing_quantity) || 0) : 0,
+                    current_stock: targetProductInstance ? (parseFloat(targetProductInstance.current_stock) || 0) : 0,
                     // If target instance doesn't exist, godown_id is targetGodownId
                     godown_id: targetGodownId || prodToUse.godown_id,
                     // The destination product ID is destProductInstance.product_id if it exists,
@@ -999,11 +817,11 @@ const StockManagement = () => {
         if (!destProduct) return null;
 
         if (formData.transaction_type === 'out') {
-            return parseFloat(destProduct.closing_quantity) || 0;
+            return parseFloat(destProduct.current_stock) || 0;
         } else if (formData.transaction_type === 'in' && formData.from_location) {
             if (formData.from_location === 'NEW_STOCK') return null;
             const sourceProduct = products.find(p => p.name === destProduct.name && p.godown_id === formData.from_location);
-            return parseFloat(sourceProduct?.closing_quantity) || 0;
+            return parseFloat(sourceProduct?.current_stock) || 0;
         }
         return null;
     }, [selectedProduct, formData.transaction_type, formData.from_location, products]);
@@ -1391,7 +1209,7 @@ const StockManagement = () => {
                                                                 return {
                                                                     value: p._destProductId || p.product_id, 
                                                                     label: p.name,
-                                                                    stock: p.closing_quantity || 0,
+                                                                    stock: p.current_stock || 0,
                                                                     godownId: p.godown_id
                                                                 };
                                                             })}
@@ -1454,7 +1272,7 @@ const StockManagement = () => {
                                                         {(() => {
                                                             const destProduct = products.find(p => p.product_id === selectedProduct);
                                                             const qty = parseInt(selectedQty) || 0;
-                                                            let destCurrentStock = parseFloat(destProduct?.closing_quantity) || 0;
+                                                            let destCurrentStock = parseFloat(destProduct?.current_stock) || 0;
                                                             let destNewStock = formData.transaction_type === 'in' ? destCurrentStock + qty : destCurrentStock - qty;
 
                                                             let sourceProduct = null;
@@ -1462,7 +1280,7 @@ const StockManagement = () => {
                                                             let sourceNewStock = 0;
                                                             if (formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK') {
                                                                     sourceProduct = products.find(p => p.name === destProduct?.name && p.godown_id === formData.from_location);
-                                                                    sourceCurrentStock = parseFloat(sourceProduct?.closing_quantity) || 0;
+                                                                    sourceCurrentStock = parseFloat(sourceProduct?.current_stock) || 0;
                                                                     sourceNewStock = sourceCurrentStock - qty;
                                                             }
 
@@ -1529,7 +1347,7 @@ const StockManagement = () => {
                                                                             {(() => {
                                                                                 const destProduct = products.find(p => p.product_id === item.product_id);
                                                                                 const qty = parseInt(item.quantity) || 0;
-                                                                                let destCurrentStock = parseFloat(destProduct?.closing_quantity) || 0;
+                                                                                let destCurrentStock = parseFloat(destProduct?.current_stock) || 0;
                                                                                 
                                                                                 let baseDestStock = destCurrentStock;
                                                                                 if (editingEntry) {
@@ -1547,7 +1365,7 @@ const StockManagement = () => {
                                                                                 let sourceNewStock = 0;
                                                                                 if (formData.transaction_type === 'in' && formData.from_location && formData.from_location !== 'NEW_STOCK') {
                                                                                     sourceProduct = products.find(p => p.name === destProduct?.name && p.godown_id === formData.from_location);
-                                                                                    sourceCurrentStock = parseFloat(sourceProduct?.closing_quantity) || 0;
+                                                                                    sourceCurrentStock = parseFloat(sourceProduct?.current_stock) || 0;
                                                                                     
                                                                                     baseSourceStock = sourceCurrentStock;
                                                                                     if (editingEntry && editingEntry.from_location === formData.from_location) {
@@ -1690,13 +1508,13 @@ const EntryRow = ({ entry, user, getGodownName, getProductName, onEdit, onDelete
                     <span className="text-sm text-slate-700">
                         <span className="font-semibold">{getGodownName(entry.from_location)}</span>
                         <span className="text-slate-400 mx-1.5">—</span>
-                        <span className="text-slate-500">{parseFloat(entry.opening_stock || 0).toLocaleString()} → -{parseFloat(entry.quantity).toLocaleString()} = {parseFloat(entry.closing_stock || 0).toLocaleString()}</span>
-                    </span>
-                ) : isOut ? (
-                    <span className="text-sm text-slate-700">
-                        <span className="font-semibold">{getGodownName(entry.godown_id)}</span>
-                        <span className="text-slate-400 mx-1.5">—</span>
-                        <span className="text-slate-500">{parseFloat(entry.opening_stock || 0).toLocaleString()} → -{parseFloat(entry.quantity).toLocaleString()} = {parseFloat(entry.closing_stock || 0).toLocaleString()}</span>
+                            <span className="text-slate-500">{(parseFloat(entry.balance_after_transaction || 0) + parseFloat(entry.quantity || 0)).toLocaleString()} → -{parseFloat(entry.quantity || 0).toLocaleString()} = {parseFloat(entry.balance_after_transaction || 0).toLocaleString()}</span>
+                        </span>
+                    ) : isOut ? (
+                        <span className="text-sm text-slate-700">
+                            <span className="font-semibold">{getGodownName(entry.godown_id)}</span>
+                            <span className="text-slate-400 mx-1.5">—</span>
+                            <span className="text-slate-500">{(parseFloat(entry.balance_after_transaction || 0) + parseFloat(entry.quantity || 0)).toLocaleString()} → -{parseFloat(entry.quantity || 0).toLocaleString()} = {parseFloat(entry.balance_after_transaction || 0).toLocaleString()}</span>
                     </span>
                 ) : entry.transaction_type === 'in' && entry.from_location === 'NEW_STOCK' ? (
                     <span className="inline-flex items-center gap-1 text-xs font-semibold text-violet-600 bg-violet-50 border border-violet-100 px-2 py-0.5 rounded-full">✨ New Stock (From System)</span>
@@ -1709,7 +1527,7 @@ const EntryRow = ({ entry, user, getGodownName, getProductName, onEdit, onDelete
                     <span className="text-sm text-slate-700">
                         <span className="font-semibold">{getGodownName(entry.godown_id)}</span>
                         <span className="text-slate-400 mx-1.5">—</span>
-                        <span className="text-slate-500">{parseFloat(entry.opening_stock || 0).toLocaleString()} → +{parseFloat(entry.quantity).toLocaleString()} = {parseFloat(entry.closing_stock || 0).toLocaleString()}</span>
+                            <span className="text-slate-500">{(parseFloat(entry.balance_after_transaction || 0) - parseFloat(entry.quantity || 0)).toLocaleString()} → +{parseFloat(entry.quantity || 0).toLocaleString()} = {parseFloat(entry.balance_after_transaction || 0).toLocaleString()}</span>
                     </span>
                 ) : (
                     <span className="text-sm text-slate-400 italic">Dispatch / Out</span>

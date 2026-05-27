@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Plus, Edit2, X, Trash2, User, Phone, MapPin, Mail, Hash, Calendar } from 'lucide-react';
-import { supabase } from '../supabase';
 import useAuthStore from '../store/authStore';
+import { customerService } from '../services/customerService';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -41,12 +41,8 @@ const Customers = () => {
     const fetchCustomers = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
-                .from('master_customers')
-                .select('*')
-                .order('created_at', { ascending: false });
-            if (error) throw error;
-            setCustomers(data || []);
+            const data = await customerService.getAll();
+            setCustomers(data);
         } catch (error) {
             console.error('Error fetching customers:', error);
             toast.error('Failed to fetch customers');
@@ -109,17 +105,10 @@ const Customers = () => {
 
         try {
             if (editingCustomer) {
-                const { error } = await supabase
-                    .from('master_customers')
-                    .update(formData)
-                    .eq('id', editingCustomer.id);
-                if (error) throw error;
+                await customerService.update(editingCustomer.id, formData);
                 toast.success('Customer updated successfully');
             } else {
-                const { error } = await supabase
-                    .from('master_customers')
-                    .insert([formData]);
-                if (error) throw error;
+                await customerService.create(formData);
                 toast.success('Customer created successfully');
             }
             handleCloseModal();
@@ -139,11 +128,7 @@ const Customers = () => {
         if (!itemToDelete) return;
         setIsDeleting(true);
         try {
-            const { error } = await supabase
-                .from('master_customers')
-                .delete()
-                .eq('id', itemToDelete.id);
-            if (error) throw error;
+            await customerService.delete(itemToDelete.id);
             toast.success('Customer deleted successfully');
             fetchCustomers();
             setIsDeleteModalOpen(false);
@@ -196,8 +181,10 @@ const Customers = () => {
                     <table className="erp-table">
                         <thead className="erp-table-thead">
                             <tr className="erp-table-tr">
-                                <th className="erp-table-th">Customer Details</th>
-                                <th className="erp-table-th">Contact Info</th>
+                                <th className="erp-table-th">Customer Name</th>
+                                <th className="erp-table-th">Location</th>
+                                <th className="erp-table-th">Phone</th>
+                                <th className="erp-table-th">Email</th>
                                 <th className="erp-table-th">GST Number</th>
                                 <th className="erp-table-th">CRM Follow Up</th>
                                 <th className="erp-table-th text-right">Actions</th>
@@ -205,9 +192,9 @@ const Customers = () => {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {loading ? (
-                                <tr><td colSpan="5" className="px-4 py-8 text-center text-slate-500 text-sm">Loading...</td></tr>
+                                <tr><td colSpan="7" className="px-4 py-8 text-center text-slate-500 text-sm">Loading...</td></tr>
                             ) : currentItems.length === 0 ? (
-                                <tr><td colSpan="5" className="px-4 py-8 text-center text-slate-500 text-sm">No customers found.</td></tr>
+                                <tr><td colSpan="7" className="px-4 py-8 text-center text-slate-500 text-sm">No customers found.</td></tr>
                             ) : (
                                 currentItems.map((customer) => (
                                     <tr key={customer.id} className="erp-table-tr group">
@@ -216,31 +203,32 @@ const Customers = () => {
                                                 <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 shrink-0 group-hover:bg-blue-600 group-hover:text-white transition-all duration-300">
                                                     <User size={18} />
                                                 </div>
-                                                <div>
-                                                    <div className="font-bold text-slate-900 text-sm">{customer.customer_name}</div>
-                                                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1">
-                                                        <MapPin size={10} className="text-primary" /> {customer.location || 'N/A'}
-                                                    </div>
-                                                </div>
+                                                <div className="font-bold text-slate-900 text-sm">{customer.customer_name}</div>
                                             </div>
                                         </td>
                                         <td className="erp-table-td">
-                                            <div className="space-y-1">
-                                                <div className="flex items-center gap-1.5 text-sm text-slate-700 font-bold">
-                                                    <Phone size={14} className="text-slate-400" />
-                                                    {customer.customer_number || 'N/A'}
-                                                </div>
-                                                <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium">
-                                                    <Mail size={14} className="text-slate-400" />
-                                                    {customer.email_id || 'N/A'}
-                                                </div>
+                                            <div className="flex items-center gap-1 text-sm text-slate-500">
+                                                <MapPin size={14} className="text-slate-400 shrink-0" />
+                                                {customer.location || ''}
                                             </div>
                                         </td>
                                         <td className="erp-table-td">
-                                            <div className="text-sm font-black text-slate-400 bg-slate-50 px-2 py-1 rounded inline-block">{customer.gst_number || 'N/A'}</div>
+                                            <div className="flex items-center gap-1.5 text-sm text-slate-700 font-bold">
+                                                <Phone size={14} className="text-slate-400 shrink-0" />
+                                                {customer.customer_number || ''}
+                                            </div>
                                         </td>
                                         <td className="erp-table-td">
-                                            <div className="text-[11px] font-medium text-slate-500 italic truncate max-w-[150px]" title={customer.crm_follow_up}>{customer.crm_follow_up || 'No follow up'}</div>
+                                            <div className="flex items-center gap-1.5 text-sm text-slate-500">
+                                                <Mail size={14} className="text-slate-400 shrink-0" />
+                                                {customer.email_id || ''}
+                                            </div>
+                                        </td>
+                                        <td className="erp-table-td">
+                                            <span className="text-sm font-black text-slate-400 bg-slate-50 px-2 py-1 rounded inline-block">{customer.gst_number || ''}</span>
+                                        </td>
+                                        <td className="erp-table-td">
+                                            <span className="text-sm text-slate-500">{customer.crm_follow_up || ''}</span>
                                         </td>
                                         <td className="erp-table-td text-right">
                                             <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
@@ -256,7 +244,7 @@ const Customers = () => {
                                 ))
                             )}
                             {!loading && Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
-                                <tr key={`empty-${i}`}><td colSpan="5" className="h-16"></td></tr>
+                                <tr key={`empty-${i}`}><td colSpan="7" className="h-16"></td></tr>
                             ))}
                         </tbody>
                     </table>

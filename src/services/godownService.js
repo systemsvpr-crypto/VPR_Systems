@@ -70,4 +70,10 @@ export const godownService = {
         if (error) throw error;
         return data;
     },
+
+    async generateGodownId() {
+        const { data, error } = await supabase.rpc('generate_godown_id');
+        if (error) throw error;
+        return data;
+    },
 };

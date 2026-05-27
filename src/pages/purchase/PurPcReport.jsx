@@ -3,7 +3,7 @@ import { RefreshCw, Search, ChevronUp, ChevronDown, AlertCircle, Package } from 
 import { supabase } from '../../supabase';
 import toast from 'react-hot-toast';
 
-const TS = () => <>{[...Array(6)].map((_, i) => <tr key={i} className="border-b border-gray-50">{[...Array(12)].map((_, j) => <td key={j} className="px-4 py-4"><div className="h-4 bg-gray-100 rounded relative overflow-hidden"><div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent animate-shimmer" /></div></td>)}</tr>)}</>;
+const TS = () => <>{[...Array(6)].map((_, i) => <tr key={i} className="border-b border-gray-50">{[...Array(13)].map((_, j) => <td key={j} className="px-4 py-4"><div className="h-4 bg-gray-100 rounded relative overflow-hidden"><div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/60 to-transparent animate-shimmer" /></div></td>)}</tr>)}</>;
 
 const STEPS = [
   { key: 'indent', label: 'Indent (Pending VS)', color: 'bg-orange-400' },
@@ -11,11 +11,13 @@ const STEPS = [
   { key: 'vendor_approval', label: 'Approved (Pending Delivery)', color: 'bg-yellow-400' },
   { key: 'delivery', label: 'Delivery (In Transit)', color: 'bg-red-400' },
   { key: 'completed', label: 'Arrived (Completed)', color: 'bg-green-500' },
+  { key: 'cancelled', label: 'Cancelled', color: 'bg-gray-500' },
 ];
 
 const PurPcReport = () => {
   const [indents, setIndents] = useState([]);
   const [deliveries, setDeliveries] = useState([]);
+  const [cancellations, setCancellations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -25,13 +27,15 @@ const PurPcReport = () => {
   const fetchAll = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
-      const [indRes, delRes] = await Promise.all([
+      const [indRes, delRes, canRes] = await Promise.all([
         supabase.from('purchase_indent').select('*'),
         supabase.from('purchase_delivery').select('*'),
+        supabase.from('purchase_indent_cancellations').select('*'),
       ]);
       if (indRes.error) throw indRes.error;
       setIndents(indRes.data || []);
       setDeliveries(delRes.data || []);
+      setCancellations(canRes.data || []);
     } catch (err) { toast.error('Load failed: ' + err.message); }
     finally { setLoading(false); setRefreshing(false); }
   }, []);
@@ -40,21 +44,13 @@ const PurPcReport = () => {
 
   // Build pipeline report rows
   const reportRows = useMemo(() => {
-    // Group deliveries by indent
     const delMap = {};
     deliveries.forEach(d => {
       if (!delMap[d.indent_id]) {
-        delMap[d.indent_id] = { 
-          total_qty: 0, 
-          last_no: d.delivery_number,
-          last_trans: d.transporter_name,
-          last_godown: d.godown_name,
-          last_status: d.arrival_status,
-          last_date: d.delivery_date || d.created_at,
-          created_at: d.created_at
-        };
+        delMap[d.indent_id] = { kg: 0, bags: 0, last_no: d.delivery_number, last_trans: d.transporter_name, last_godown: d.godown_name, last_status: d.arrival_status, last_date: d.delivery_date || d.created_at, created_at: d.created_at };
       }
-      delMap[d.indent_id].total_qty += parseFloat(d.received_qty_kg) || 0;
+      delMap[d.indent_id].kg += parseFloat(d.received_qty_kg) || 0;
+      delMap[d.indent_id].bags += parseInt(d.received_qty_bags) || 0;
       if (d.created_at > (delMap[d.indent_id].created_at || '')) {
         delMap[d.indent_id].last_no = d.delivery_number;
         delMap[d.indent_id].last_trans = d.transporter_name;
@@ -65,20 +61,36 @@ const PurPcReport = () => {
       }
     });
 
+    const canMap = {};
+    cancellations.forEach(c => {
+      if (!canMap[c.indent_number]) canMap[c.indent_number] = { kg: 0, bags: 0 };
+      canMap[c.indent_number].kg += parseFloat(c.cancelled_qty_kg) || 0;
+      canMap[c.indent_number].bags += parseInt(c.cancelled_qty_bags) || 0;
+    });
+
     return indents.map(ind => {
       const del = delMap[ind.id];
+      const can = canMap[ind.indent_number];
 
-      const delivered = del ? del.total_qty : 0;
-      const total = parseFloat(ind.qty_kg) || 0;
-      const remaining = total - delivered;
+      const delKg = del ? del.kg : 0;
+      const delBags = del ? del.bags : 0;
+      const canKg = can ? can.kg : 0;
+      const canBags = can ? can.bags : 0;
+
+      const totalKg = parseFloat(ind.qty_kg) || 0;
+      const totalBags = parseInt(ind.qty_bags) || 0;
+      const remKg = Math.max(0, totalKg - delKg - canKg);
+      const remBags = Math.max(0, totalBags - delBags - canBags);
 
       let step, stepLabel, stepColor;
 
       if (ind.indent_type === 'Rejected') {
         step = 'rejected'; stepLabel = 'Rejected'; stepColor = 'bg-gray-100 text-gray-500';
-      } else if (del?.last_status === 'Arrived' && remaining <= 0) {
+      } else if (canBags >= totalBags && totalBags > 0) {
+        step = 'cancelled'; stepLabel = 'Cancelled'; stepColor = 'bg-gray-200 text-gray-700';
+      } else if (del?.last_status === 'Arrived' && remKg <= 0 && remBags <= 0) {
         step = 'completed'; stepLabel = 'Arrived (Completed)'; stepColor = 'bg-green-100 text-green-700';
-      } else if (delivered > 0) {
+      } else if (delKg > 0 || delBags > 0) {
         step = 'delivery'; stepLabel = del.last_status || 'In Transit'; stepColor = 'bg-blue-100 text-blue-700';
       } else if (ind.vendor_approval === true || ind.indent_type === 'Direct') {
         step = 'vendor_approval'; stepLabel = 'Approved (Pending DLV)'; stepColor = 'bg-yellow-100 text-yellow-700';
@@ -92,9 +104,13 @@ const PurPcReport = () => {
         id: ind.id,
         indent_number: ind.indent_number,
         product_name: ind.product_name,
-        qty: total,
-        delivered_qty: delivered.toFixed(2),
-        pending_qty: remaining.toFixed(2),
+        qty_bags: totalBags,
+        qty_kg: totalKg,
+        del_bags: delBags,
+        del_kg: delKg,
+        can_bags: canBags,
+        rem_bags: remBags,
+        rem_kg: remKg,
         vendor_name: ind.vendor_name || '—',
         rate: ind.rate || '—',
         lifting_no: del?.last_no || '—',
@@ -106,7 +122,7 @@ const PurPcReport = () => {
         stepColor,
       };
     });
-  }, [indents, deliveries]);
+  }, [indents, deliveries, cancellations]);
 
   const filtered = useMemo(() => {
     let r = reportRows.filter(row => {
@@ -141,9 +157,10 @@ const PurPcReport = () => {
   const COLS = [
     { key: 'indent_number', label: 'Indent No' },
     { key: 'product_name', label: 'Product' },
-    { key: 'qty', label: 'Qty(kg)', align: 'right' },
-    { key: 'delivered_qty', label: 'Recv(kg)', align: 'right' },
-    { key: 'pending_qty', label: 'Rem(kg)', align: 'right' },
+    { key: 'qty_bags', label: 'Qty (Bags)', align: 'right' },
+    { key: 'del_bags', label: 'Recv (Bags)', align: 'right' },
+    { key: 'can_bags', label: 'Cancel (Bags)', align: 'right' },
+    { key: 'rem_bags', label: 'Rem (Bags)', align: 'right' },
     { key: 'vendor_name', label: 'Vendor' },
     { key: 'rate', label: 'Rate', align: 'right' },
     { key: 'lifting_no', label: 'Lifting No' },
@@ -213,10 +230,14 @@ const PurPcReport = () => {
                   <td className="px-4 py-4">
                     <div className="font-bold text-gray-800 leading-tight">{row.product_name}</div>
                   </td>
-                  <td className="px-4 py-4 text-right font-black text-gray-700">{row.qty.toLocaleString()}</td>
-                  <td className="px-4 py-4 text-right text-green-600 font-black">{row.delivered_qty}</td>
-                  <td className="px-4 py-3 text-right">
-                    <span className={`font-black ${row.pending_qty > 0 ? 'text-red-500' : 'text-green-500'}`}>{row.pending_qty}</span>
+                  <td className="px-4 py-4 text-right">
+                    <span className="font-black text-gray-700">{row.qty_bags?.toLocaleString()}</span>
+                    <div className="text-[9px] text-gray-400 font-bold">{row.qty_kg?.toLocaleString()} kg</div>
+                  </td>
+                  <td className="px-4 py-4 text-right text-green-600 font-black">{row.del_bags?.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-right text-red-500 font-black">{row.can_bags?.toLocaleString()}</td>
+                  <td className="px-4 py-4 text-right">
+                    <span className={`font-black ${row.rem_bags > 0 ? 'text-red-500' : 'text-green-500'}`}>{row.rem_bags?.toLocaleString()}</span>
                   </td>
                   <td className="px-4 py-4">
                     <div className="font-bold text-gray-600 leading-tight truncate max-w-[150px]">{row.vendor_name}</div>

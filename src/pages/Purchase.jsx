@@ -1,4 +1,5 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useEffect, lazy, Suspense } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -55,15 +56,16 @@ const Purchase = () => {
     (user?.page_access || []).includes('purchase-dashboard')
   );
 
-  const [activeTab, setActiveTab] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || allowedTabs[0]?.id || '';
   const ActiveComponent = allowedTabs.find(t => t.id === activeTab)?.component ?? (allowedTabs[0]?.component || PurDashboard);
 
-  // Handle real-time permission changes
+  // Handle real-time permission changes and default tab
   useEffect(() => {
     if (allowedTabs.length > 0 && (!activeTab || !allowedTabs.find(t => t.id === activeTab))) {
-      setActiveTab(allowedTabs[0].id);
+      setSearchParams({ tab: allowedTabs[0].id }, { replace: true });
     }
-  }, [allowedTabs, activeTab]);
+  }, [allowedTabs, activeTab, setSearchParams]);
 
   return (
     <div className="flex flex-col min-h-screen -m-4 sm:-m-6 lg:-m-8 bg-[#F5F5F5]">
@@ -86,7 +88,7 @@ const Purchase = () => {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => setSearchParams({ tab: tab.id })}
                 className={`
                   group relative flex items-center gap-2 px-4 py-3 text-sm font-bold whitespace-nowrap
                   border-b-2 transition-all duration-200 flex-shrink-0 outline-none

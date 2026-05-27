@@ -4,6 +4,7 @@ import { supabase } from '../../supabase';
 import useAuthStore from '../../store/authStore';
 import toast from 'react-hot-toast';
 import SearchableDropdown from '../../components/SearchableDropdown';
+import { stockManagementService } from '../../services/stockManagementService';
 
 const TS = ({ cols = 8 }) => <>{[...Array(4)].map((_, i) => (
   <tr key={i} className="border-b border-gray-50">
@@ -46,7 +47,7 @@ const PurArrival = () => {
       const [delRes, godRes, prodRes] = await Promise.all([
         supabase.from('purchase_delivery').select('*, purchase_indent(qty_kg)').order('created_at', { ascending: false }),
         supabase.from('godowns').select('id, godown_id, name').eq('is_active', true).order('name'),
-        supabase.from('products').select('name, mux')
+        supabase.from('products').select('name, mux, product_id, godown_id')
       ]);
       
       if (delRes.error) throw delRes.error;
@@ -173,13 +174,15 @@ const PurArrival = () => {
             
             if (globalProd) {
               // Generate a new unique product_id for this godown entry
-              let newId;
-              try {
-                const { data: rpcId } = await supabase.rpc('generate_product_id');
-                newId = rpcId;
-              } catch (e) {
-                newId = `PROD-${Date.now().toString().slice(-6)}`;
+              let nextCount = 1;
+              const lastProductId = await stockManagementService.getLastProductId();
+              if (lastProductId) {
+                const match = lastProductId.match(/\d+$/);
+                if (match) {
+                  nextCount = parseInt(match[0], 10) + 1;
+                }
               }
+              const newId = `PROD-${nextCount.toString().padStart(4, '0')}`;
 
               // Auto-create product entry for target godown
               const { data: newProd, error: createError } = await supabase
@@ -191,9 +194,8 @@ const PurArrival = () => {
                   unit: globalProd.unit,
                   mux: globalProd.mux,
                   godown_id: targetGodown.godown_id,
-                  opening_quantity: 0,
-                  closing_quantity: 0,
-                  quantity: 0,
+                  godown_name: targetGodown.name,
+                  current_stock: 0,
                   is_active: true
                 }])
                 .select().single();
@@ -206,56 +208,72 @@ const PurArrival = () => {
           if (product) {
             const addBags = parseInt(row.received_qty_bags) || 0;
             const addWeight = parseFloat(row.received_qty_kg) || 0;
-            const currentStockBags = parseFloat(product.closing_quantity) || 0;
-            const currentWeightKg = parseFloat(product.quantity) || 0;
+            const currentStockBags = parseFloat(product.current_stock) || 0;
             const newClosingQty = currentStockBags + addBags;
-            const newTotalWeight = currentWeightKg + addWeight;
 
             // Generate unique entry ID
             const entryId = `ARR-${original.delivery_number}`;
 
-            // CHECK FOR EXISTING RECORD TO AVOID 409 CONFLICT
-            const { data: existing } = await supabase.from('stock_management').select('id').eq('entry_id', entryId).maybeSingle();
+            // CHECK FOR EXISTING RECORD — reverse old stock entry if godown/qty changed
+            const { data: existing } = await supabase.from('stock_management').select('id, product_id, quantity, godown_id').eq('entry_id', entryId).maybeSingle();
             if (existing) {
-              console.log('Stock record already exists for', entryId);
-              // If it exists, we just proceed to update the delivery status
-            } else {
-              // 3. Update Product Master (Live Stock)
-              const { error: stockUpError } = await supabase.from('products').update({
-                closing_quantity: newClosingQty,
-                quantity: newTotalWeight,
-                updated_at: new Date().toISOString()
-              }).eq('id', product.id);
-              if (stockUpError) throw new Error(`Stock Update Failed: ${stockUpError.message}`);
+              // Reverse the old stock change before re-applying
+              const { data: oldProduct } = await supabase
+                .from('products')
+                .select('id, current_stock')
+                .eq('product_id', existing.product_id)
+                .maybeSingle();
 
-              // 4. Insert Stock Management Record
-              const { error: smError } = await supabase.from('stock_management').insert({
-                entry_id: entryId,
-                product_id: product.product_id,
-                godown_id: targetGodown.godown_id,
-                transaction_type: 'in',
-                quantity: addBags,
-                opening_stock: currentStockBags,
-                closing_stock: newClosingQty,
-                date: new Date().toISOString().split('T')[0],
-                reference_number: original.delivery_number,
-                notes: `Purchase Arrival: ${original.indent_number} via ${original.transporter_name}`,
-                created_by: user?.email,
-                from_location: null, // Schema foreign key requires valid godown_id, VENDOR is not one.
-                lr_number: row.lr_number
-              });
-              if (smError) throw new Error(`Stock Management Insert Failed: ${smError.message}`);
+              if (oldProduct) {
+                const oldQty = parseInt(existing.quantity) || 0;
+                const oldStock = parseFloat(oldProduct.current_stock) || 0;
+                const reversedStock = Math.max(0, oldStock - oldQty);
 
-              // 5. Add Notification
-              await supabase.from('stock_notifications').insert([{
-                notification_type: 'stock_in',
-                title: 'Purchase Arrival',
-                message: `${addBags} units of ${product.name} arrived at ${targetGodown.name}`,
-                product_id: product.product_id,
-                godown_id: targetGodown.godown_id,
-                related_id: entryId
-              }]);
+                await supabase
+                  .from('products')
+                  .update({ current_stock: reversedStock, updated_at: new Date().toISOString() })
+                  .eq('id', oldProduct.id);
+              }
+
+              // Delete old record (entry_id is UNIQUE, must remove before creating new)
+              await supabase.from('stock_management').delete().eq('id', existing.id);
             }
+
+            // 3. Update Product Master (Live Stock)
+            const { error: stockUpError } = await supabase.from('products').update({
+              current_stock: newClosingQty,
+              updated_at: new Date().toISOString()
+            }).eq('id', product.id);
+            if (stockUpError) throw new Error(`Stock Update Failed: ${stockUpError.message}`);
+
+            // 4. Insert Stock Management Record
+            const { error: smError } = await supabase.from('stock_management').insert({
+              entry_id: entryId,
+              product_id: product.product_id,
+              godown_id: targetGodown.godown_id,
+              transaction_type: 'in',
+              quantity: addBags,
+              balance_after_transaction: newClosingQty,
+              date: new Date().toISOString().split('T')[0],
+              reference_number: original.delivery_number,
+              notes: `Purchase Arrival: ${original.indent_number} via ${original.transporter_name}`,
+              created_by: user?.email,
+              from_location: null,
+              lr_number: row.lr_number,
+              product_uuid: product.id,
+              godown_uuid: targetGodown.id,
+            });
+            if (smError) throw new Error(`Stock Management Insert Failed: ${smError.message}`);
+
+            // 5. Add Notification
+            await supabase.from('stock_notifications').insert([{
+              notification_type: 'stock_in',
+              title: 'Purchase Arrival',
+              message: `${addBags} units of ${product.name} arrived at ${targetGodown.name}`,
+              product_id: product.product_id,
+              godown_id: targetGodown.godown_id,
+              related_id: entryId
+            }]);
           } else {
             throw new Error(`Product ${original.product_name} not found in master list.`);
           }

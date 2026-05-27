@@ -242,29 +242,56 @@ const PurDelivery = () => {
   };
 
   const handleCancelBagsChange = (bags) => {
-    const product = products.find(p => p.name === cancellingIndent?.product_name);
+    const indent = cancellingIndent;
+    if (!indent) return;
+    const orig = parseInt(indent.qty_bags) || 0;
+    const cancelled = cancelledMap[indent.indent_number]?.bags || 0;
+    const delivered = deliveredMap[indent.id]?.bags || 0;
+    const remaining = Math.max(0, orig - cancelled - delivered);
+    const clamped = Math.min(parseInt(bags) || 0, remaining);
+
+    const product = products.find(p => p.name === indent?.product_name);
     const mux = product?.mux || 0;
-    const kg = bags * mux;
+    const kg = clamped * mux;
     setCancelForm(prev => ({
       ...prev,
-      cancelled_qty_bags: bags,
+      cancelled_qty_bags: clamped || '',
       cancelled_qty_kg: kg > 0 ? kg.toFixed(2) : ''
     }));
   };
 
   const handleCancelKgChange = (kg) => {
-    const product = products.find(p => p.name === cancellingIndent?.product_name);
+    const indent = cancellingIndent;
+    if (!indent) return;
+    const origKg = parseFloat(indent.qty_kg) || 0;
+    const cancelled = cancelledMap[indent.indent_number]?.kg || 0;
+    const delivered = deliveredMap[indent.id]?.kg || 0;
+    const remainingKg = Math.max(0, origKg - cancelled - delivered);
+    const clamped = Math.min(parseFloat(kg) || 0, remainingKg);
+
+    const product = products.find(p => p.name === indent?.product_name);
     const mux = product?.mux || 0;
-    const bags = mux > 0 ? Math.round(kg / mux) : 0;
+    const bags = mux > 0 ? Math.round(clamped / mux) : 0;
     setCancelForm(prev => ({
       ...prev,
-      cancelled_qty_kg: kg,
+      cancelled_qty_kg: clamped || '',
       cancelled_qty_bags: bags > 0 ? bags : ''
     }));
   };
 
   const handleCancel = async () => {
     if (!cancellingIndent || !cancelForm.cancelled_qty_kg) return;
+
+    const indent = cancellingIndent;
+    const orig = parseInt(indent.qty_bags) || 0;
+    const cancelled = cancelledMap[indent.indent_number]?.bags || 0;
+    const delivered = deliveredMap[indent.id]?.bags || 0;
+    const remaining = Math.max(0, orig - cancelled - delivered);
+    if ((parseInt(cancelForm.cancelled_qty_bags) || 0) > remaining) {
+      toast.error(`Cannot cancel more than remaining ${remaining} bags`);
+      return;
+    }
+
     setCancelSaving(true);
     try {
       const { error } = await supabase.from('purchase_indent_cancellations').insert({
@@ -523,9 +550,39 @@ const PurDelivery = () => {
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">Original Qty</p>
-                  <p className="text-sm font-black text-orange-600">{cancellingIndent?.qty_kg?.toLocaleString()} KG</p>
+                  <p className="text-sm font-black text-orange-600">{cancellingIndent?.qty_bags?.toLocaleString()} Bags</p>
                 </div>
               </div>
+
+              {/* Quantity Summary */}
+              {(() => {
+                const indent = cancellingIndent;
+                if (!indent) return null;
+                const orig = parseInt(indent.qty_bags) || 0;
+                const cancelled = cancelledMap[indent.indent_number]?.bags || 0;
+                const delivered = deliveredMap[indent.id]?.bags || 0;
+                const remaining = Math.max(0, orig - cancelled - delivered);
+                return (
+                  <div className="grid grid-cols-4 gap-3">
+                    <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 text-center">
+                      <p className="text-[10px] font-black text-gray-400 uppercase">Original</p>
+                      <p className="text-lg font-black text-gray-800">{orig}</p>
+                    </div>
+                    <div className="p-3 bg-red-50 rounded-xl border border-red-100 text-center">
+                      <p className="text-[10px] font-black text-red-400 uppercase">Cancelled</p>
+                      <p className="text-lg font-black text-red-600">{cancelled}</p>
+                    </div>
+                    <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 text-center">
+                      <p className="text-[10px] font-black text-blue-400 uppercase">In Delivery</p>
+                      <p className="text-lg font-black text-blue-600">{delivered}</p>
+                    </div>
+                    <div className="p-3 bg-green-50 rounded-xl border border-green-100 text-center">
+                      <p className="text-[10px] font-black text-green-400 uppercase">Remaining</p>
+                      <p className="text-lg font-black text-green-600">{remaining}</p>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Input Grid */}
               <div className="grid grid-cols-2 gap-6">
@@ -538,6 +595,8 @@ const PurDelivery = () => {
                       type="number" 
                       value={cancelForm.cancelled_qty_bags} 
                       onChange={e => handleCancelBagsChange(e.target.value)}
+                      max={(() => { const i = cancellingIndent; if (!i) return 0; return Math.max(0, (parseInt(i.qty_bags) || 0) - (cancelledMap[i.indent_number]?.bags || 0) - (deliveredMap[i.id]?.bags || 0)); })()}
+                      min="0"
                       className="w-full pl-5 pr-4 py-4 bg-gray-50 border border-gray-200 rounded-2xl text-lg font-black text-red-700 focus:ring-4 focus:ring-red-500/10 focus:border-red-400 outline-none transition-all placeholder:text-gray-300" 
                       placeholder="0" 
                     />
@@ -554,6 +613,8 @@ const PurDelivery = () => {
                       step="0.01" 
                       value={cancelForm.cancelled_qty_kg} 
                       onChange={e => handleCancelKgChange(e.target.value)}
+                      max={(() => { const i = cancellingIndent; if (!i) return 0; return Math.max(0, (parseFloat(i.qty_kg) || 0) - (cancelledMap[i.indent_number]?.kg || 0) - (deliveredMap[i.id]?.kg || 0)); })()}
+                      min="0"
                       className="w-full pl-5 pr-4 py-4 bg-red-50/50 border border-red-100 rounded-2xl text-lg font-black text-red-800 focus:ring-4 focus:ring-red-500/10 focus:border-red-400 outline-none transition-all" 
                       placeholder="0.00" 
                     />

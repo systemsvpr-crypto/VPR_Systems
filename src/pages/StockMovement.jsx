@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../supabase';
+import { stockMovementService } from '../services/stockMovementService';
 import toast from 'react-hot-toast';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Input } from '@/components/ui/input';
@@ -71,28 +71,10 @@ const StockMovement = () => {
     // Fetch Reference Data
     const fetchMetadata = async () => {
         try {
-            const godownsRes = await supabase.from('godowns').select('godown_id, name, is_active').order('name');
-            if (godownsRes.error) throw godownsRes.error;
-            setGodowns(godownsRes.data || []);
+            const godownsData = await stockMovementService.getGodowns();
+            setGodowns(godownsData || []);
 
-            // Fetch all products using pagination to overcome the 1000-record PostgREST limit
-            let allProducts = [];
-            let page = 0;
-            const pageSize = 1000;
-            while (true) {
-                const { data, error } = await supabase
-                    .from('products')
-                    .select('id, product_id, name, godown_id, mux, is_active, product_type')
-                    .eq('is_active', true)
-                    .range(page * pageSize, (page + 1) * pageSize - 1);
-
-                if (error) throw error;
-                if (!data || data.length === 0) break;
-                allProducts = allProducts.concat(data);
-                if (data.length < pageSize) break;
-                page++;
-            }
-
+            const allProducts = await stockMovementService.getAllProductsPaginated();
             setProducts(allProducts);
         } catch (error) {
             console.error('Error fetching metadata:', error);
@@ -106,21 +88,8 @@ const StockMovement = () => {
         else setLoadingData(true);
 
         try {
-            let transfersQuery = supabase
-                .from('stock_management')
-                .select('*')
-                .not('godown_id', 'is', null)
-                .order('date', { ascending: false })
-                .order('created_at', { ascending: false });
-
-            if (startDate) transfersQuery = transfersQuery.gte('date', startDate);
-            if (endDate) transfersQuery = transfersQuery.lte('date', endDate);
-
-            const transfersRes = await transfersQuery;
-
-            if (transfersRes.error) throw transfersRes.error;
-
-            setTransfers(transfersRes.data || []);
+            const transfersData = await stockMovementService.getTransfers(startDate, endDate);
+            setTransfers(transfersData || []);
 
             if (isRefresh) toast.success('Transfer log synchronized');
         } catch (error) {
@@ -152,22 +121,7 @@ const StockMovement = () => {
         }
         setLoadingSummary(true);
         try {
-            let query = supabase
-                .from('stock_management')
-                .select('transaction_type, quantity, product_id, date')
-                .eq('godown_id', godownId)
-                .not('entry_id', 'like', '%-SRC')
-                .order('date', { ascending: false })
-                .limit(20000);
-
-            if (date) {
-                query = query.gte('date', date).lte('date', date);
-            }
-
-            const { data, error } = await query;
-            if (error) throw error;
-
-            const rows = data || [];
+            const rows = await stockMovementService.getGodownSummary(godownId, date);
             let totalIn = 0;
             let totalOut = 0;
             let inCount = 0;
@@ -330,25 +284,10 @@ const StockMovement = () => {
 
         try {
             // Fetch all transactions for this product, sorted ASC for balance computation
-            const { data, error } = await supabase
-                .from('stock_management')
-                .select('*')
-                .eq('product_id', row.product_id)
-                .order('date', { ascending: true })
-                .order('created_at', { ascending: true });
-
-            if (error) throw error;
-
-            const transactions = data || [];
+            const transactions = await stockMovementService.getProductTransactions(row.product_id);
 
             // Get current closing quantity from products to use as anchor
-            const { data: productData } = await supabase
-                .from('products')
-                .select('closing_quantity')
-                .eq('product_id', row.product_id)
-                .single();
-
-            const currentClosing = parseFloat(productData?.closing_quantity) || 0;
+            const currentClosing = await stockMovementService.getProductClosingQuantity(row.product_id);
 
             // Compute running balance dynamically by replaying all transactions in order
             let runningBalance = 0;
@@ -715,7 +654,7 @@ const StockMovement = () => {
                                                     {parseFloat(t.quantity).toLocaleString()} <span className="text-xs text-slate-400 font-normal">Bags</span>
                                                 </td>
                                                 <td className="px-6 py-4 text-right font-black text-primary whitespace-nowrap">
-                                                    {parseFloat(t.closing_stock || 0).toLocaleString()} <span className="text-[10px] text-primary/70 font-normal">Bags</span>
+                                                    {parseFloat(t.balance_after_transaction || 0).toLocaleString()} <span className="text-[10px] text-primary/70 font-normal">Bags</span>
                                                 </td>
                                                 <td className="px-6 py-4 max-w-[200px] truncate">
                                                     <span className="text-xs text-slate-600">
@@ -883,7 +822,7 @@ const StockMovement = () => {
                                                         </td>
                                                         <td className="px-4 py-3 text-right whitespace-nowrap">
                                                             <span className="font-black text-primary">
-                                                                {parseFloat(dt.computed_running_balance ?? dt.closing_stock ?? 0).toLocaleString()} <span className="text-[10px] font-normal text-primary/70">Bags</span>
+                                                                {parseFloat(dt.computed_running_balance ?? dt.balance_after_transaction ?? 0).toLocaleString()} <span className="text-[10px] font-normal text-primary/70">Bags</span>
                                                             </span>
                                                         </td>
                                                     </tr>

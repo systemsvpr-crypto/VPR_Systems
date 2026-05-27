@@ -64,7 +64,7 @@ const PurVendorSelection = () => {
     if (activeTab === 'pending') {
       return records.filter(i => i.indent_type === 'Process' && !i.vendor_name);
     } else {
-      return records.filter(i => i.indent_type === 'Process' && i.vendor_name && i.vendor_approval === false);
+      return records.filter(i => i.indent_type === 'Process' && i.vendor_name);
     }
   }, [records, activeTab]);
 

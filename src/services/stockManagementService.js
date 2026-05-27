@@ -21,24 +21,20 @@ export const stockManagementService = {
     },
 
     async create(entryData) {
-        const { data, error } = await supabase
+        const { error } = await supabase
             .from('stock_management')
-            .insert([entryData])
-            .select()
-            .single();
+            .insert([entryData]);
         if (error) throw error;
-        return data;
+        return true;
     },
 
     async update(entryId, entryData) {
-        const { data, error } = await supabase
+        const { error } = await supabase
             .from('stock_management')
             .update({ ...entryData, updated_at: new Date().toISOString() })
-            .eq('entry_id', entryId)
-            .select()
-            .single();
+            .eq('entry_id', entryId);
         if (error) throw error;
-        return data;
+        return true;
     },
 
     async delete(entryId) {
@@ -89,5 +85,144 @@ export const stockManagementService = {
             .order('created_at', { ascending: false });
         if (error) throw error;
         return data;
+    },
+
+    // ─── Enhanced Stock Management Operations ─────────────────────────────────
+
+    async getActiveGodowns() {
+        const { data, error } = await supabase
+            .from('godowns')
+            .select('*')
+            .eq('is_active', true)
+            .order('name', { ascending: true });
+        if (error) throw error;
+        return data || [];
+    },
+
+    async getActiveTransporters() {
+        const { data, error } = await supabase
+            .from('transporters')
+            .select('*')
+            .eq('is_active', true)
+            .order('name', { ascending: true });
+        if (error) throw error;
+        return data || [];
+    },
+
+    async fetchAllProducts() {
+        let accumulated = [];
+        let pageIndex = 0;
+        const pageSize = 1000;
+        let done = false;
+
+        while (!done) {
+            const from = pageIndex * pageSize;
+            const to = from + pageSize - 1;
+            const { data, error } = await supabase
+                .from('products')
+                .select('*')
+                .eq('is_active', true)
+                .order('name', { ascending: true })
+                .range(from, to);
+
+            if (error) throw error;
+            accumulated = [...accumulated, ...(data || [])];
+            if (!data || data.length < pageSize) done = true;
+            else pageIndex++;
+        }
+        return accumulated;
+    },
+
+    async getLastProductId() {
+        const { data, error } = await supabase
+            .from('products')
+            .select('product_id')
+            .order('product_id', { ascending: false })
+            .limit(1);
+        if (error) throw error;
+        return data && data.length > 0 ? data[0].product_id : null;
+    },
+
+    async getProductClosingQuantity(productId) {
+        const { data, error } = await supabase
+            .from('products')
+            .select('current_stock, mux')
+            .eq('product_id', productId)
+            .single();
+        if (error) throw error;
+        return { current_stock: parseFloat(data?.current_stock) || 0, mux: parseFloat(data?.mux) || 0 };
+    },
+
+    async updateProductStock(productId, currentStock) {
+        const { error } = await supabase
+            .from('products')
+            .update({
+                current_stock: currentStock,
+                updated_at: new Date().toISOString()
+            })
+            .eq('product_id', productId);
+        if (error) throw error;
+        return true;
+    },
+
+    async createProduct(productData) {
+        const { data, error } = await supabase
+            .from('products')
+            .insert([productData])
+            .select()
+            .single();
+        if (error) throw error;
+        return data;
+    },
+
+    async createNotification(notificationData) {
+        const { error } = await supabase
+            .from('stock_notifications')
+            .insert([notificationData]);
+        if (error) throw error;
+        return true;
+    },
+
+    async recalculateProductStock(productId) {
+        if (!productId) return;
+        try {
+            const { data: product, error: prodErr } = await supabase
+                .from('products')
+                .select('mux')
+                .eq('product_id', productId)
+                .single();
+            if (prodErr || !product) return;
+            const mux = parseFloat(product.mux) || 0;
+            const { data: transactions } = await supabase
+                .from('stock_management')
+                .select('transaction_type, quantity')
+                .eq('product_id', productId);
+            let running = 0;
+            (transactions || []).forEach(t => {
+                const qty = parseFloat(t.quantity) || 0;
+                if (t.transaction_type === 'in' || t.transaction_type === 'adjustment') running += qty;
+                else running -= qty;
+            });
+            running = Math.max(0, running);
+            await supabase
+                .from('products')
+                .update({
+                    current_stock: running,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('product_id', productId);
+        } catch (err) {
+            console.error(`Error recalculating stock for ${productId}:`, err);
+        }
+    },
+
+    async getSourceEntry(sourceEntryId) {
+        const { data, error } = await supabase
+            .from('stock_management')
+            .select('product_id')
+            .eq('entry_id', sourceEntryId)
+            .maybeSingle();
+        if (error) throw error;
+        return data || null;
     },
 };

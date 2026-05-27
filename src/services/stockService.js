@@ -7,11 +7,7 @@ export const stockService = {
             .select('*')
             .order('updated_at', { ascending: false });
         if (error) throw error;
-        // Map products fields to stock-like fields for backward compatibility if needed
-        return data.map(p => ({
-            ...p,
-            current_stock: p.closing_quantity
-        }));
+        return data || [];
     },
 
     async getByGodown(godownId) {
@@ -20,10 +16,7 @@ export const stockService = {
             .select('*')
             .eq('godown_id', godownId);
         if (error) throw error;
-        return data.map(p => ({
-            ...p,
-            current_stock: p.closing_quantity
-        }));
+        return data || [];
     },
 
     async getByProduct(productId) {
@@ -33,134 +26,97 @@ export const stockService = {
             .eq('product_id', productId)
             .single();
         if (error) throw error;
-        return {
-            ...data,
-            current_stock: data.closing_quantity
-        };
+        return data;
     },
 
     async getStock(productId, godownId) {
-        // Since we are consolidating to the products table, we check by productId.
-        // We can also verify godownId if needed.
         const { data, error } = await supabase
             .from('products')
             .select('*')
             .eq('product_id', productId)
             .single();
         if (error && error.code !== 'PGRST116') throw error;
-        if (!data) return null;
-        return {
-            ...data,
-            current_stock: data.closing_quantity
-        };
+        return data || null;
     },
 
     async updateStock(productId, godownId, quantity) {
-        const { data: product, error: fetchError } = await supabase
-            .from('products')
-            .select('mux')
-            .eq('product_id', productId)
-            .single();
-        
-        if (fetchError) throw fetchError;
-
-        const mux = parseFloat(product.mux) || 0;
-        const totalWeight = quantity * mux;
-
         const { data, error } = await supabase
             .from('products')
             .update({
-                closing_quantity: quantity,
-                quantity: totalWeight,
+                current_stock: quantity,
                 updated_at: new Date().toISOString()
             })
             .eq('product_id', productId)
             .select()
             .single();
-        
+
         if (error) throw error;
-        return {
-            ...data,
-            current_stock: data.closing_quantity
-        };
+        return data;
     },
 
     async addStock(productId, godownId, quantity) {
         const { data: product, error: fetchError } = await supabase
             .from('products')
-            .select('closing_quantity, mux')
+            .select('current_stock')
             .eq('product_id', productId)
             .single();
-        
+
         if (fetchError) throw fetchError;
 
-        const newClosingQty = (parseFloat(product.closing_quantity) || 0) + parseFloat(quantity);
-        const mux = parseFloat(product.mux) || 0;
-        const newTotalWeight = newClosingQty * mux;
+        const newCurrentStock = (parseFloat(product.current_stock) || 0) + parseFloat(quantity);
 
         const { data, error } = await supabase
             .from('products')
             .update({
-                closing_quantity: newClosingQty,
-                quantity: newTotalWeight,
+                current_stock: newCurrentStock,
                 updated_at: new Date().toISOString()
             })
             .eq('product_id', productId)
             .select()
             .single();
-        
+
         if (error) throw error;
-        return {
-            ...data,
-            current_stock: data.closing_quantity
-        };
+        return data;
     },
 
     async removeStock(productId, godownId, quantity) {
         const { data: product, error: fetchError } = await supabase
             .from('products')
-            .select('closing_quantity, mux')
+            .select('current_stock')
             .eq('product_id', productId)
             .single();
-        
+
         if (fetchError) throw fetchError;
 
-        const currentClosingQty = parseFloat(product.closing_quantity) || 0;
-        const newClosingQty = currentClosingQty - parseFloat(quantity);
+        const currentStock = parseFloat(product.current_stock) || 0;
+        const newCurrentStock = currentStock - parseFloat(quantity);
 
-        if (newClosingQty < 0) {
+        if (newCurrentStock < 0) {
             throw new Error('Insufficient stock');
         }
-
-        const mux = parseFloat(product.mux) || 0;
-        const newTotalWeight = newClosingQty * mux;
 
         const { data, error } = await supabase
             .from('products')
             .update({
-                closing_quantity: newClosingQty,
-                quantity: newTotalWeight,
+                current_stock: newCurrentStock,
                 updated_at: new Date().toISOString()
             })
             .eq('product_id', productId)
             .select()
             .single();
-        
+
         if (error) throw error;
-        return {
-            ...data,
-            current_stock: data.closing_quantity
-        };
+        return data;
     },
 
     async getTotalStockByProduct(productId) {
         const { data, error } = await supabase
             .from('products')
-            .select('closing_quantity')
+            .select('current_stock')
             .eq('product_id', productId)
             .single();
         if (error) throw error;
-        return parseFloat(data.closing_quantity) || 0;
+        return parseFloat(data.current_stock) || 0;
     },
 
     async getAllStockWithDetails() {
@@ -172,10 +128,9 @@ export const stockService = {
             `)
             .order('name', { ascending: true });
         if (error) throw error;
-        return data.map(p => ({
+        return (data || []).map(p => ({
             ...p,
-            current_stock: p.closing_quantity,
-            product_name: p.name, // compatibility
+            product_name: p.name,
             godown_name: p.godowns?.name
         }));
     },

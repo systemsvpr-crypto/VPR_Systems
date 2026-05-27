@@ -122,7 +122,7 @@ export const sellService = {
   async getPendingOrdersWithStock() {
     const [ordersRes, stockRes, plansRes] = await Promise.all([
       supabase.from('app_orders').select('*').order('created_at', { ascending: false }),
-      supabase.from('products').select('name, godown_id, closing_quantity'),
+      supabase.from('products').select('name, godown_id, current_stock'),
       supabase.from('dispatch_plans').select('order_id, planned_qty, status, dispatch_completed').neq('status', 'Canceled'),
     ]);
     if (ordersRes.error) throw ordersRes.error;
@@ -132,7 +132,7 @@ export const sellService = {
     const stockMap = {};
     stockRes.data.forEach(s => {
       const key = `${String(s.name).trim().toLowerCase()}|${String(s.godown_id).trim().toLowerCase()}`;
-      stockMap[key] = s.closing_quantity;
+      stockMap[key] = s.current_stock;
     });
 
     // Build planned-qty map

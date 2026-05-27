@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useDeferredValue } from 'react';
 import { Search, Download, RefreshCcw, ClipboardList, FileSpreadsheet, Printer, ChevronDown, ChevronRight, Filter, Package, ArrowLeft, ArrowUp } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../supabase';
+import { liveStockService } from '../services/liveStockService';
 import toast from 'react-hot-toast';
 import { Button } from '@/components/ui/button';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -43,30 +43,15 @@ const StockLedger = () => {
     const fetchData = useCallback(async (silent = false) => {
         if (!silent) setLoading(true);
         try {
-            const promises = [
-                supabase.from('products').select('*').eq('is_active', true).order('id').limit(10000),
-                supabase.from('daily_stock_summary').select('*').eq('date', selectedDate).limit(10000),
-                supabase.from('stock_management').select('*').eq('date', selectedDate).limit(10000)
-            ];
+            const data = await liveStockService.fetchLedgerData(selectedDate, silent);
 
-            const shouldFetchMetadata = !silent;
-            if (shouldFetchMetadata) {
-                promises.push(supabase.from('godowns').select('*').eq('is_active', true).order('name'));
-                promises.push(supabase.from('master_product').select('*').eq('is_active', true).order('name'));
-            }
+            setProducts(data.products);
+            setDailySnapshots(data.dailySnapshots);
+            setTransactions(data.transactions);
 
-            const results = await Promise.all(promises);
-
-            setProducts(results[0].data || []);
-            setDailySnapshots(results[1].data || []);
-            setTransactions(results[2].data || []);
-
-            if (shouldFetchMetadata && results[3] && results[4]) {
-                setGodowns(results[3].data || []);
-                
-                const mpMap = {};
-                (results[4].data || []).forEach(mp => { mpMap[mp.id] = mp.name; });
-                setMasterProducts(mpMap);
+            if (data.godowns && data.masterProducts) {
+                setGodowns(data.godowns);
+                setMasterProducts(data.masterProducts);
             }
         } catch (error) {
             console.error('Error fetching ledger data:', error);
@@ -83,16 +68,13 @@ const StockLedger = () => {
 
     // Real-time subscription
     useEffect(() => {
-        const channel = supabase
-            .channel('live-stock-ledger')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => fetchData(true))
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_management' }, () => fetchData(true))
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_stock_summary' }, () => fetchData(true))
-            .subscribe();
+        const unsubscribe = liveStockService.createSubscription(
+            'live-stock-ledger',
+            ['products', 'stock_management', 'daily_stock_summary'],
+            () => fetchData(true)
+        );
 
-        return () => {
-            supabase.removeChannel(channel);
-        };
+        return unsubscribe;
     }, [fetchData]);
 
 
@@ -167,12 +149,12 @@ const StockLedger = () => {
             
             let qty = 0;
             if (viewMode === 'closing') {
-                qty = isToday ? (parseFloat(p.closing_quantity) || 0) : (snapMap[p.product_id] || 0);
+                qty = isToday ? (parseFloat(p.current_stock) || 0) : (snapMap[p.product_id] || 0);
             } else if (viewMode === 'opening') {
                 if (isToday) {
                     const in_t = todayInMap[p.product_id] || 0;
                     const out_t = todayOutMap[p.product_id] || 0;
-                    qty = (parseFloat(p.closing_quantity) || 0) - in_t + out_t;
+                    qty = (parseFloat(p.current_stock) || 0) - in_t + out_t;
                 } else {
                     qty = openingMap[p.product_id] || 0;
                 }
@@ -279,7 +261,7 @@ const StockLedger = () => {
             const outgoingTransfers = gTxns.filter(t => t.from_location === gId)
                 .reduce((s, t) => s + (parseFloat(t.quantity) || 0), 0);
 
-            const totalClosing = gProducts.reduce((s, p) => s + (parseFloat(p.closing_quantity) || 0), 0);
+            const totalClosing = gProducts.reduce((s, p) => s + (parseFloat(p.current_stock) || 0), 0);
             const totalIn = directIn;
             const totalOut = directOut + outgoingTransfers;
             const totalOpening = totalClosing - totalIn + totalOut;

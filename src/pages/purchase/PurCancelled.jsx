@@ -88,8 +88,8 @@ const PurCancelled = () => {
                 <th className="px-4 py-4">Vendor</th>
                 {activeTab === 'cancellations' ? (
                   <>
-                    <th className="px-4 py-4 text-right">Original Qty</th>
-                    <th className="px-4 py-4 text-right text-red-600">Cancelled Qty</th>
+                    <th className="px-4 py-4 text-right">Original Bags</th>
+                    <th className="px-4 py-4 text-right text-red-600">Cancelled Bags</th>
                   </>
                 ) : (
                   <th className="px-4 py-4 text-right">Qty (kg)</th>
@@ -114,8 +114,8 @@ const PurCancelled = () => {
                   
                   {activeTab === 'cancellations' ? (
                     <>
-                      <td className="px-4 py-4 text-right">{parseFloat(r.original_qty_kg || 0).toLocaleString()}</td>
-                      <td className="px-4 py-4 text-right text-red-600 font-black">{parseFloat(r.cancelled_qty_kg || 0).toLocaleString()}</td>
+                      <td className="px-4 py-4 text-right">{parseInt(r.original_qty_bags || 0).toLocaleString()}</td>
+                      <td className="px-4 py-4 text-right text-red-600 font-black">{parseInt(r.cancelled_qty_bags || 0).toLocaleString()}</td>
                     </>
                   ) : (
                     <td className="px-4 py-4 text-right font-black">{parseFloat(r.qty_kg || 0).toLocaleString()}</td>

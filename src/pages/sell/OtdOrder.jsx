@@ -88,7 +88,7 @@ const OtdOrder = () => {
     setLoadingStock(true);
     try {
       const [allStock, godownsData] = await Promise.all([
-        fetchAllRows('products', 'name, godown_id, closing_quantity', 'name'),
+        fetchAllRows('products', 'name, godown_id, current_stock', 'name'),
         fetchAllRows('godowns', 'name, godown_id', 'name')
       ]);
 
@@ -102,7 +102,7 @@ const OtdOrder = () => {
         const itemKey = normalize(row.name);
         const godownId = String(row.godown_id || "").trim();
         const godownName = godownMap[godownId] || godownId;
-        const stock = Number(row.closing_quantity) || 0;
+        const stock = Number(row.current_stock) || 0;
 
         if (!sMap[itemKey]) sMap[itemKey] = [];
         sMap[itemKey].push({

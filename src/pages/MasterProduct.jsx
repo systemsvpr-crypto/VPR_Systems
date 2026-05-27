@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Search, Plus, Edit2, X, Package, Layers, Check, Eye, Trash2 } from 'lucide-react';
-import { supabase } from '../supabase';
+import { Search, Plus, Edit2, X, Package, Layers, Check, Eye } from 'lucide-react';
 import useAuthStore from '../store/authStore';
+import { masterProductService } from '../services/masterProductService';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import DeleteModal from '@/components/ui/DeleteModal';
 import Pagination from '@/components/ui/Pagination';
 import { cn } from '@/lib/utils';
 
@@ -27,9 +26,6 @@ const MasterProduct = () => {
     const [currentPage, setCurrentPage] = useState(1);
     const [formData, setFormData] = useState(DEFAULT_FORM_DATA);
     const [errors, setErrors] = useState({});
-    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-    const [itemToDelete, setItemToDelete] = useState(null);
-    const [isDeleting, setIsDeleting] = useState(false);
 
     const [variantModal, setVariantModal] = useState(null);
     const [allProducts, setAllProducts] = useState([]);
@@ -45,28 +41,10 @@ const MasterProduct = () => {
     const fetchItems = useCallback(async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
-                .from('master_product')
-                .select('*')
-                .eq('is_active', true)
-                .order('created_at', { ascending: false });
-            if (error) throw error;
-            setItems(data || []);
+            const data = await masterProductService.getAll();
+            setItems(data);
 
-            const { data: products, error: prodError } = await supabase
-                .from('products')
-                .select('master_product_id')
-                .eq('is_active', true)
-                .order('id')
-                .limit(10000);
-            if (prodError) throw prodError;
-
-            const counts = {};
-            (products || []).forEach(p => {
-                if (p.master_product_id) {
-                    counts[p.master_product_id] = (counts[p.master_product_id] || 0) + 1;
-                }
-            });
+            const counts = await masterProductService.getVariantCounts();
             setVariantCounts(counts);
         } catch (error) {
             console.error('Error fetching product types:', error);
@@ -124,17 +102,10 @@ const MasterProduct = () => {
 
         try {
             if (editingItem) {
-                const { error } = await supabase
-                    .from('master_product')
-                    .update({ ...formData, updated_at: new Date().toISOString() })
-                    .eq('id', editingItem.id);
-                if (error) throw error;
+                await masterProductService.update(editingItem.id, formData);
                 toast.success('Product type updated');
             } else {
-                const { error } = await supabase
-                    .from('master_product')
-                    .insert([formData]);
-                if (error) throw error;
+                await masterProductService.create(formData);
                 toast.success('Product type created');
             }
             handleCloseModal();
@@ -144,57 +115,13 @@ const MasterProduct = () => {
         }
     };
 
-    const handleDelete = (item) => {
-        setItemToDelete(item);
-        setIsDeleteModalOpen(true);
-    };
-
-    const confirmDelete = async () => {
-        if (!itemToDelete) return;
-        setIsDeleting(true);
-        try {
-            // Check if there are any products linked to this master product
-            const { count, error: countError } = await supabase
-                .from('products')
-                .select('*', { count: 'exact', head: true })
-                .eq('master_product_id', itemToDelete.id);
-            
-            if (countError) throw countError;
-            
-            if (count > 0) {
-                toast.error(`Cannot delete: ${count} product(s) are linked to this type. Unlink them first.`);
-                setIsDeleteModalOpen(false);
-                return;
-            }
-
-            const { error } = await supabase
-                .from('master_product')
-                .delete()
-                .eq('id', itemToDelete.id);
-            if (error) throw error;
-            toast.success('Product type deleted');
-            fetchItems();
-            setIsDeleteModalOpen(false);
-            setItemToDelete(null);
-        } catch (error) {
-            toast.error(`Error: ${error.message}`);
-        } finally {
-            setIsDeleting(false);
-        }
-    };
-
     const handleOpenVariants = async (item) => {
         setVariantModal(item);
         setVariantLoading(true);
         setVariantSearch('');
         try {
-            const { data, error } = await supabase
-                .from('products')
-                .select('id, name, product_id, unit, master_product_id')
-                .order('name', { ascending: true })
-                .limit(10000);
-            if (error) throw error;
-            setAllProducts(data || []);
+            const data = await masterProductService.getAllProducts();
+            setAllProducts(data);
             setSelectedVariantIds(new Set(
                 (data || []).filter(p => p.master_product_id === item.id).map(p => p.id)
             ));
@@ -238,30 +165,14 @@ const MasterProduct = () => {
         if (!variantModal) return;
         setSavingVariants(true);
         try {
-            // Save previously linked IDs for rollback
-            const { data: prevLinked } = await supabase
-                .from('products')
-                .select('id')
-                .eq('master_product_id', variantModal.id);
-            const prevIds = (prevLinked || []).map(p => p.id);
-
-            const { error: unlinkError } = await supabase
-                .from('products')
-                .update({ master_product_id: null })
-                .eq('master_product_id', variantModal.id);
-            if (unlinkError) throw unlinkError;
+            const prevIds = await masterProductService.getPreviouslyLinkedIds(variantModal.id);
+            await masterProductService.unlinkAll(variantModal.id);
 
             if (selectedVariantIds.size > 0) {
-                const { error: linkError } = await supabase
-                    .from('products')
-                    .update({ master_product_id: variantModal.id })
-                    .in('id', Array.from(selectedVariantIds));
-                if (linkError) {
-                    // Rollback: restore previous links
-                    await supabase
-                        .from('products')
-                        .update({ master_product_id: variantModal.id })
-                        .in('id', prevIds);
+                try {
+                    await masterProductService.linkProducts(variantModal.id, Array.from(selectedVariantIds));
+                } catch (linkError) {
+                    await masterProductService.linkProducts(variantModal.id, prevIds);
                     throw linkError;
                 }
             }
@@ -280,13 +191,7 @@ const MasterProduct = () => {
         setViewModal(item);
         setViewLoading(true);
         try {
-            const { data, error } = await supabase
-                .from('products')
-                .select('name, product_id, unit, description')
-                .eq('master_product_id', item.id)
-                .order('name', { ascending: true })
-                .limit(1000); // Individual master product variants likely won't exceed 1000
-            if (error) throw error;
+            const data = await masterProductService.getVariantsByMasterId(item.id);
             setViewVariants(data || []);
         } catch (error) {
             toast.error('Failed to load variants');
@@ -388,7 +293,7 @@ const MasterProduct = () => {
                                         </td>
                                         <td className="erp-table-td">
                                             <div className="text-sm text-slate-500 italic truncate max-w-[200px]" title={item.description}>
-                                                {item.description || '\u2014'}
+                                                {item.description || ''}
                                             </div>
                                         </td>
                                         <td className="erp-table-td">
@@ -418,21 +323,13 @@ const MasterProduct = () => {
                                                 >
                                                     <Layers size={16} />
                                                 </Button>
-                                                <Button
-                                                    variant="ghost" size="icon"
-                                                    onClick={() => handleOpenModal(item)}
-                                                    className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded transition-all"
-                                                >
-                                                    <Edit2 size={16} />
-                                                </Button>
                                                 {user?.role === 'SUPER ADMIN' && (
                                                     <Button
                                                         variant="ghost" size="icon"
-                                                        onClick={() => handleDelete(item)}
-                                                        className="p-1.5 text-slate-400 hover:text-destructive hover:bg-destructive/5 rounded transition-all"
-                                                        title="Delete"
+                                                        onClick={() => handleOpenModal(item)}
+                                                        className="p-1.5 text-slate-400 hover:text-primary hover:bg-primary/5 rounded transition-all"
                                                     >
-                                                        <Trash2 size={16} />
+                                                        <Edit2 size={16} />
                                                     </Button>
                                                 )}
                                             </div>
@@ -704,16 +601,6 @@ const MasterProduct = () => {
                     </div>
                 </div>
             )}
-
-            <DeleteModal
-                isOpen={isDeleteModalOpen}
-                onClose={() => setIsDeleteModalOpen(false)}
-                onConfirm={confirmDelete}
-                title="Delete Product Type"
-                description="Are you sure you want to delete this product type? This action cannot be undone."
-                itemLabel={itemToDelete?.name}
-                loading={isDeleting}
-            />
 
         </div>
     );

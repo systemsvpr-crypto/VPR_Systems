@@ -153,7 +153,7 @@ const OtdDispatchDone = () => {
   const fetchMasterData = useCallback(async () => {
     try {
       const [productsRes, godownsRes] = await Promise.all([
-        supabase.from('products').select('product_id, name, godown_id, closing_quantity, is_active').eq('is_active', true),
+        supabase.from('products').select('product_id, name, godown_id, current_stock, is_active').eq('is_active', true),
         supabase.from('godowns').select('godown_id, name, is_active').eq('is_active', true).order('name')
       ]);
       if (productsRes.error) throw productsRes.error;
@@ -177,7 +177,7 @@ const OtdDispatchDone = () => {
     const godownObj = godownsData.find(g => g.name === godownName);
     if (!godownObj) return godownName;
     const prodStock = productsData.find(p => p.name === productName && p.godown_id === godownObj.godown_id);
-    const availableQty = prodStock ? parseFloat(prodStock.closing_quantity) || 0 : 0;
+    const availableQty = prodStock ? parseFloat(prodStock.current_stock) || 0 : 0;
     return `${godownName} (${availableQty} units)`;
   }, [godownsData, productsData]);
 
@@ -185,7 +185,7 @@ const OtdDispatchDone = () => {
   const getGodownOptionsForProduct = useCallback((productName) => {
     return godownsData.map(g => {
       const prodStock = productsData.find(p => p.name === productName && p.godown_id === g.godown_id);
-      const availableQty = prodStock ? parseFloat(prodStock.closing_quantity) || 0 : 0;
+      const availableQty = prodStock ? parseFloat(prodStock.current_stock) || 0 : 0;
       return `${g.name} (${availableQty} units)`;
     });
   }, [godownsData, productsData]);
@@ -308,7 +308,7 @@ const OtdDispatchDone = () => {
         }
 
         const prodStock = productsData.find(p => p.name === finalProduct && p.godown_id === godownObj.godown_id);
-        const availableStock = prodStock ? parseFloat(prodStock.closing_quantity) || 0 : 0;
+        const availableStock = prodStock ? parseFloat(prodStock.current_stock) || 0 : 0;
 
         if (finalQty > availableStock) {
           toast.error(`Insufficient stock for "${finalProduct}" in "${finalGodown}" for dispatch ${item.dispatchNo}.\nAvailable: ${availableStock}, Requested: ${finalQty}`);
@@ -371,14 +371,11 @@ const OtdDispatchDone = () => {
               if (pErr) throw pErr;
 
               if (pData) {
-                const currentStock = parseFloat(pData.closing_quantity) || 0;
+                const currentStock = parseFloat(pData.current_stock) || 0;
                 const newStock = currentStock - finalQty;
-                const mux = parseFloat(pData.mux) || 0;
 
-                // Update product table closing stock and derived quantity
                 const { error: prodUpErr } = await supabase.from('products').update({
-                  closing_quantity: newStock,
-                  quantity: (newStock * mux).toFixed(3),
+                  current_stock: newStock,
                   updated_at: now
                 }).eq('product_id', pData.product_id);
                 if (prodUpErr) throw prodUpErr;
@@ -391,8 +388,7 @@ const OtdDispatchDone = () => {
                   product_id: pData.product_id,
                   transaction_type: 'out',
                   quantity: finalQty,
-                  opening_stock: currentStock,
-                  closing_stock: newStock,
+                  balance_after_transaction: newStock,
                   reference_number: item.dispatchNo,
                   date: now.split('T')[0],
                   notes: `Sales Dispatch: ${item.dispatchNo} for ${item.clientName}`,

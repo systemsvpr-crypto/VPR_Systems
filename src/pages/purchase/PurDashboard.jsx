@@ -84,7 +84,7 @@ const PurDashboard = () => {
     const cancelledCount = cancellations.length;
     const cancelledQty = cancellations.reduce((acc, c) => acc + (parseFloat(c.cancelled_qty_kg) || 0), 0);
 
-    const liveStockQty = products.reduce((acc, p) => acc + (parseFloat(p.closing_quantity) || 0), 0);
+    const liveStockQty = products.reduce((acc, p) => acc + (parseFloat(p.current_stock) || 0), 0);
 
     return { total, pendingSelection, pendingApproval, approved, arrivedCount, cancelledCount, cancelledQty, liveStockQty };
   }, [indents, deliveries, cancellations, products]);
@@ -97,7 +97,7 @@ const PurDashboard = () => {
 
   const topProducts = useMemo(() => {
     return [...products]
-      .sort((a, b) => (parseFloat(b.closing_quantity) || 0) - (parseFloat(a.closing_quantity) || 0))
+      .sort((a, b) => (parseFloat(b.current_stock) || 0) - (parseFloat(a.current_stock) || 0))
       .slice(0, 5);
   }, [products]);
 

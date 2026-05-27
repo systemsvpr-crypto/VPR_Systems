@@ -45,6 +45,7 @@ const PurIndent = () => {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [lockedIds, setLockedIds] = useState(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [sort, setSort] = useState({ key: 'created_at', dir: 'desc' });
   const [isOpen, setIsOpen] = useState(false);
@@ -62,9 +63,13 @@ const PurIndent = () => {
   const fetchRecords = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     try {
-      const { data, error } = await supabase.from('purchase_indent').select('*').order('created_at', { ascending: false });
-      if (error) throw error;
-      setRecords(data || []);
+      const [indentRes, delRes] = await Promise.all([
+        supabase.from('purchase_indent').select('*').order('created_at', { ascending: false }),
+        supabase.from('purchase_delivery').select('indent_id')
+      ]);
+      if (indentRes.error) throw indentRes.error;
+      setLockedIds(new Set((delRes.data || []).map(d => d.indent_id)));
+      setRecords(indentRes.data || []);
     } catch (e) { toast.error(e.message); }
     finally { setLoading(false); setRefreshing(false); }
   }, []);
@@ -116,6 +121,10 @@ const PurIndent = () => {
     <ChevronDown size={9} className={sort.key === k && sort.dir === 'desc' ? 'text-orange-500' : 'text-gray-300'} />
   </span>;
 
+  const isRecordLocked = useCallback(r =>
+    (r.indent_type === 'Process' && r.vendor_name) || lockedIds.has(r.id)
+  , [lockedIds]);
+
   const updateItem = (i, f, v) => { 
     const n = [...items]; 
     n[i] = { ...n[i], [f]: v }; 
@@ -139,6 +148,7 @@ const PurIndent = () => {
   };
 
   const openEdit = r => {
+    if (isRecordLocked(r)) { toast.error('Cannot edit: indent is already in forward process'); return; }
     setEditId(r.id);
     setIndentNo(r.indent_number);
     setHeader({
@@ -202,9 +212,10 @@ const PurIndent = () => {
     finally { setSaving(false); }
   };
 
-  const handleDelete = async id => {
+  const handleDelete = async (r) => {
+    if (isRecordLocked(r)) { toast.error('Cannot delete: indent is already in forward process'); return; }
     if (!window.confirm('Delete this record?')) return;
-    const { error } = await supabase.from('purchase_indent').delete().eq('id', id);
+    const { error } = await supabase.from('purchase_indent').delete().eq('id', r.id);
     if (error) { toast.error(error.message); return; }
     toast.success('Deleted'); fetchRecords(true);
   };
@@ -286,10 +297,14 @@ const PurIndent = () => {
                   </td>
                   <td className="px-4 py-3.5 text-gray-400 text-xs">{r.created_by || '—'}</td>
                   <td className="px-4 py-3.5 text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button onClick={() => openEdit(r)} className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg"><Save size={14} /></button>
-                      <button onClick={() => handleDelete(r.id)} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
-                    </div>
+                    {isRecordLocked(r) ? (
+                      <span className="text-[10px] font-black text-gray-400 italic tracking-wider">LOCKED</span>
+                    ) : (
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button onClick={() => openEdit(r)} className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg"><Save size={14} /></button>
+                        <button onClick={() => handleDelete(r)} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

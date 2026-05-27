@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Plus, Edit2, X, Trash2, Building, Phone, MapPin, Mail, Hash } from 'lucide-react';
-import { supabase } from '../supabase';
 import useAuthStore from '../store/authStore';
+import { vendorService } from '../services/vendorService';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -40,12 +40,8 @@ const Vendors = () => {
     const fetchVendors = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
-                .from('master_vendors')
-                .select('*')
-                .order('created_at', { ascending: false });
-            if (error) throw error;
-            setVendors(data || []);
+            const data = await vendorService.getAll();
+            setVendors(data);
         } catch (error) {
             console.error('Error fetching vendors:', error);
             toast.error('Failed to fetch vendors');
@@ -107,17 +103,10 @@ const Vendors = () => {
 
         try {
             if (editingVendor) {
-                const { error } = await supabase
-                    .from('master_vendors')
-                    .update(formData)
-                    .eq('id', editingVendor.id);
-                if (error) throw error;
+                await vendorService.update(editingVendor.id, formData);
                 toast.success('Vendor updated successfully');
             } else {
-                const { error } = await supabase
-                    .from('master_vendors')
-                    .insert([formData]);
-                if (error) throw error;
+                await vendorService.create(formData);
                 toast.success('Vendor created successfully');
             }
             handleCloseModal();
@@ -137,11 +126,7 @@ const Vendors = () => {
         if (!itemToDelete) return;
         setIsDeleting(true);
         try {
-            const { error } = await supabase
-                .from('master_vendors')
-                .delete()
-                .eq('id', itemToDelete.id);
-            if (error) throw error;
+            await vendorService.delete(itemToDelete.id);
             toast.success('Vendor deleted successfully');
             fetchVendors();
             setIsDeleteModalOpen(false);
@@ -194,17 +179,19 @@ const Vendors = () => {
                     <table className="erp-table">
                         <thead className="erp-table-thead">
                             <tr className="erp-table-tr">
-                                <th className="erp-table-th">Purchase Vendor Details</th>
-                                <th className="erp-table-th">Contact Info</th>
+                                <th className="erp-table-th">Vendor Name</th>
+                                <th className="erp-table-th">Location</th>
+                                <th className="erp-table-th">Phone</th>
+                                <th className="erp-table-th">Email</th>
                                 <th className="erp-table-th">GST Number</th>
                                 <th className="erp-table-th text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {loading ? (
-                                <tr><td colSpan="4" className="px-4 py-8 text-center text-slate-500 text-sm">Loading...</td></tr>
+                                <tr><td colSpan="6" className="px-4 py-8 text-center text-slate-500 text-sm">Loading...</td></tr>
                             ) : currentItems.length === 0 ? (
-                                <tr><td colSpan="4" className="px-4 py-8 text-center text-slate-500 text-sm">No vendors found.</td></tr>
+                                <tr><td colSpan="6" className="px-4 py-8 text-center text-slate-500 text-sm">No vendors found.</td></tr>
                             ) : (
                                 currentItems.map((vendor) => (
                                     <tr key={vendor.id} className="erp-table-tr group">
@@ -213,28 +200,29 @@ const Vendors = () => {
                                                 <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600 shrink-0 group-hover:bg-amber-600 group-hover:text-white transition-all duration-300">
                                                     <Building size={18} />
                                                 </div>
-                                                <div>
-                                                    <div className="font-bold text-slate-900 text-sm">{vendor.vendor_name}</div>
-                                                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1">
-                                                        <MapPin size={10} className="text-primary" /> {vendor.location || 'N/A'}
-                                                    </div>
-                                                </div>
+                                                <div className="font-bold text-slate-900 text-sm">{vendor.vendor_name}</div>
                                             </div>
                                         </td>
                                         <td className="erp-table-td">
-                                            <div className="space-y-1">
-                                                <div className="flex items-center gap-1.5 text-sm text-slate-700 font-bold">
-                                                    <Phone size={14} className="text-slate-400" />
-                                                    {vendor.vendor_number || 'N/A'}
-                                                </div>
-                                                <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium">
-                                                    <Mail size={14} className="text-slate-400" />
-                                                    {vendor.email_id || 'N/A'}
-                                                </div>
+                                            <div className="flex items-center gap-1 text-sm text-slate-500">
+                                                <MapPin size={14} className="text-slate-400 shrink-0" />
+                                                {vendor.location || ''}
                                             </div>
                                         </td>
                                         <td className="erp-table-td">
-                                            <div className="text-sm font-black text-slate-400 bg-slate-50 px-2 py-1 rounded inline-block">{vendor.gst_number || 'N/A'}</div>
+                                            <div className="flex items-center gap-1.5 text-sm text-slate-700 font-bold">
+                                                <Phone size={14} className="text-slate-400 shrink-0" />
+                                                {vendor.vendor_number || ''}
+                                            </div>
+                                        </td>
+                                        <td className="erp-table-td">
+                                            <div className="flex items-center gap-1.5 text-sm text-slate-500">
+                                                <Mail size={14} className="text-slate-400 shrink-0" />
+                                                {vendor.email_id || ''}
+                                            </div>
+                                        </td>
+                                        <td className="erp-table-td">
+                                            <span className="text-sm font-black text-slate-400 bg-slate-50 px-2 py-1 rounded inline-block">{vendor.gst_number || ''}</span>
                                         </td>
                                         <td className="erp-table-td text-right">
                                             <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
@@ -250,7 +238,7 @@ const Vendors = () => {
                                 ))
                             )}
                             {!loading && Array.from({ length: Math.max(0, ITEMS_PER_PAGE - currentItems.length) }).map((_, i) => (
-                                <tr key={`empty-${i}`}><td colSpan="4" className="h-16"></td></tr>
+                                <tr key={`empty-${i}`}><td colSpan="6" className="h-16"></td></tr>
                             ))}
                         </tbody>
                     </table>

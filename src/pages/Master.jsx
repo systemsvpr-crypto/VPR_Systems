@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { LayoutGrid, MapPin, Truck, Shield, Package, Users, Building2 } from 'lucide-react';
 import Products from './Products';
 import Godowns from './Godowns';
@@ -11,7 +12,8 @@ import { cn } from '@/lib/utils';
 
 const Master = () => {
     const { user } = useAuthStore();
-    const [activeTab, setActiveTab] = useState('');
+    const [searchParams, setSearchParams] = useSearchParams();
+    const activeTab = searchParams.get('tab') || '';
 
     // Filter tabs based on user access
     const allowedTabs = useMemo(() => {
@@ -44,7 +46,7 @@ const Master = () => {
     // Set initial active tab if default is not allowed
     useEffect(() => {
         if (allowedTabs.length > 0 && (!activeTab || !allowedTabs.find(t => t.id === activeTab))) {
-            setActiveTab(allowedTabs[0].id);
+            setSearchParams({ tab: allowedTabs[0].id }, { replace: true });
         }
     }, [allowedTabs, activeTab]);
 
@@ -85,7 +87,7 @@ const Master = () => {
                     {allowedTabs.map(tab => (
                         <button
                             key={tab.id}
-                            onClick={() => setActiveTab(tab.id)}
+                            onClick={() => setSearchParams({ tab: tab.id })}
                             className={cn(
                                 "flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 relative whitespace-nowrap",
                                 activeTab === tab.id

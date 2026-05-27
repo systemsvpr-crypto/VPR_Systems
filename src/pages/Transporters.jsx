@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Plus, Edit2, X, Trash2, Truck, Phone, Package, ArrowDown, Tag } from 'lucide-react';
-import { supabase } from '../supabase';
 import useAuthStore from '../store/authStore';
+import { transporterService } from '../services/transporterService';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -64,15 +64,14 @@ const Transporters = ({ isTab = false }) => {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const [transportersRes, godownsRes, productsRes] = await Promise.all([
-                supabase.from('transporters').select('*').order('created_at', { ascending: false }),
-                supabase.from('godowns').select('*').eq('is_active', true).order('name', { ascending: true }),
-                supabase.from('products').select('*').eq('is_active', true).order('name', { ascending: true })
+            const [transporters, godowns, products] = await Promise.all([
+                transporterService.getAll(),
+                transporterService.getActiveGodowns(),
+                transporterService.getActiveProducts()
             ]);
-            if (transportersRes.error) throw transportersRes.error;
-            setTransporters(transportersRes.data || []);
-            setGodowns(godownsRes.data || []);
-            setProducts(productsRes.data || []);
+            setTransporters(transporters);
+            setGodowns(godowns);
+            setProducts(products);
         } catch (error) {
             console.error('Error fetching data:', error);
             toast.error('Failed to fetch data');
@@ -83,15 +82,7 @@ const Transporters = ({ isTab = false }) => {
 
     const fetchHistoryEntries = async () => {
         try {
-            const { data, error } = await supabase
-                .from('stock_management')
-                .select('*, godowns!stock_management_from_location_fkey(name), transporters!stock_management_transporter_id_fkey(name)')
-                .eq('transaction_type', 'in')
-                .not('transporter_id', 'is', null)
-                .order('created_at', { ascending: false });
-
-            if (error) throw error;
-            return data || [];
+            return await transporterService.getFreightHistory();
         } catch (error) {
             console.error('Error fetching history:', error);
             return [];
@@ -155,17 +146,10 @@ const Transporters = ({ isTab = false }) => {
 
         try {
             if (editingTransporter) {
-                const { error } = await supabase
-                    .from('transporters')
-                    .update({ ...formData, updated_at: new Date().toISOString() })
-                    .eq('transporter_id', editingTransporter.transporter_id);
-                if (error) throw error;
+                await transporterService.update(editingTransporter.transporter_id, formData);
                 toast.success('Transporter updated successfully');
             } else {
-                const { error } = await supabase
-                    .from('transporters')
-                    .insert([formData]);
-                if (error) throw error;
+                await transporterService.create(formData);
                 toast.success('Transporter created successfully');
             }
             handleCloseModal();
@@ -185,11 +169,7 @@ const Transporters = ({ isTab = false }) => {
         if (!itemToDelete) return;
         setIsDeleting(true);
         try {
-            const { error } = await supabase
-                .from('transporters')
-                .delete()
-                .eq('transporter_id', itemToDelete.transporter_id);
-            if (error) throw error;
+            await transporterService.delete(itemToDelete.transporter_id);
             toast.success('Transporter deleted successfully');
             fetchData();
             setIsDeleteModalOpen(false);
@@ -239,7 +219,7 @@ const Transporters = ({ isTab = false }) => {
 
     const getGodownName = (id) => godowns.find(g => g.godown_id === id)?.name || id;
     const getProductName = (id) => products.find(p => p.product_id === id)?.name || id;
-    const getTransporterName = (id) => transporters.find(t => t.transporter_id === id)?.name || '-';
+    const getTransporterName = (id) => transporters.find(t => t.transporter_id === id)?.name || '';
 
     return (
         <div className="flex flex-col gap-4 pb-6">
@@ -494,7 +474,7 @@ const Transporters = ({ isTab = false }) => {
                                                         <span className="text-sm text-slate-600">{entry.date}</span>
                                                     </td>
                                                     <td className="px-4 py-3">
-                                                        <span className="text-sm font-mono text-slate-700">{entry.lr_number || '-'}</span>
+                                                        <span className="text-sm font-mono text-slate-700">{entry.lr_number || ''}</span>
                                                     </td>
                                                     <td className="px-4 py-3">
                                                         <span className="text-sm text-slate-600">{getGodownName(entry.from_location)}</span>
@@ -675,12 +655,12 @@ const TransporterRow = ({ transporter, user, onEdit, onDelete }) => (
             </div>
         </td>
         <td className="erp-table-td">
-            <div className="text-sm text-slate-600 font-black italic">{transporter.vehicle_number || '-'}</div>
+            <div className="text-sm text-slate-600 font-black italic">{transporter.vehicle_number || ''}</div>
         </td>
         <td className="erp-table-td">
             <div className="flex items-center gap-1.5 text-sm text-slate-900 font-bold">
                 <Phone size={14} className="text-slate-400" />
-                {transporter.driver_phone || '-'}
+                {transporter.driver_phone || ''}
             </div>
         </td>
         <td className="erp-table-td text-center">
