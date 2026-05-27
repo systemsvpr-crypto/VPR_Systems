@@ -141,14 +141,8 @@ const LiveStockDashboard = () => {
         let cancelled = false;
         const computeBalances = async () => {
             try {
-                const fetchData = await liveStockDashboardService.fetchDashboardData(summaryDate);
-                const data = (fetchData.transactions || [])
-                    .filter(t => productIds.includes(t.product_id))
-                    .sort((a, b) => {
-                        const dateCmp = new Date(a.date) - new Date(b.date);
-                        if (dateCmp !== 0) return dateCmp;
-                        return new Date(a.created_at) - new Date(b.created_at);
-                    });
+                // Fetch ALL transactions up to summaryDate for accurate running balance
+                const data = await liveStockDashboardService.fetchHistoricalTransactions(productIds, summaryDate);
 
                 if (cancelled) return;
 
@@ -210,9 +204,8 @@ const LiveStockDashboard = () => {
 
     // Dynamic Master Summary Logic
     const dynamicSummary = useMemo(() => {
-        return products.map(p => {
-            const isToday = summaryDate === today;
-            if (isFutureDate) {
+        if (isFutureDate) {
+            return products.map(p => {
                 const godown = getGodownDetails(p.godown_id);
                 return {
                     product_id: p.product_id,
@@ -227,69 +220,85 @@ const LiveStockDashboard = () => {
                     closing_stock: '-',
                     current_stock: 0,
                 };
-            }
+            });
+        }
 
-            // 1. Try to find the snapshot for this specific date
-            const snapshot = dailySnapshots.find(s => s.product_id === p.product_id && s.godown_id === p.godown_id);
+        const isToday = summaryDate === today;
 
-            // 2. Real-time calculations for Today (if snapshot isn't available or for live feel)
-            const pTransactions = dayTransactions.filter(t =>
-                (t.godown_id === p.godown_id && t.product_id === p.product_id) ||
-                (t.from_location === p.godown_id && t.product_name === p.name)
-            ).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        if (isToday) {
+            return products.map(p => {
+                const snapshot = dailySnapshots.find(s => s.product_id === p.product_id && s.godown_id === p.godown_id);
+                const pTransactions = dayTransactions.filter(t =>
+                    (t.godown_id === p.godown_id && t.product_id === p.product_id) ||
+                    (t.from_location === p.godown_id && t.product_name === p.name)
+                ).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
-            const in_stock = pTransactions.filter(t => t.godown_id === p.godown_id && t.transaction_type === 'in').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
-            const out_stock = pTransactions.filter(t => t.transaction_type === 'out' && t.godown_id === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0) +
-                pTransactions.filter(t => t.from_location === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
+                const in_stock = pTransactions.filter(t => t.godown_id === p.godown_id && t.transaction_type === 'in').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
+                const out_stock = pTransactions.filter(t => t.transaction_type === 'out' && t.godown_id === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0) +
+                    pTransactions.filter(t => t.from_location === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
 
-            let opening_stock, closing_stock, display_in, display_out;
+                const display_in = in_stock;
+                const display_out = out_stock;
+                const closing_stock = p.current_stock;
+                const opening_stock = p.current_stock - in_stock + out_stock;
 
-            if (isToday) {
-                // Live data for today
-                display_in = in_stock;
-                display_out = out_stock;
-                closing_stock = p.current_stock;
-                opening_stock = p.current_stock - in_stock + out_stock;
-            } else if (snapshot) {
-                // Snapshot data for past dates
-                opening_stock = snapshot.opening_stock;
-                closing_stock = snapshot.closing_stock;
-                display_in = snapshot.in_stock;
-                display_out = snapshot.out_stock;
-            } else {
-                // Historical computation from transactions up to summaryDate
-                const histClosing = historicalBalances[`${p.product_id}-${p.godown_id}`];
-                if (histClosing !== undefined) {
-                    closing_stock = Math.max(0, histClosing);
-                    opening_stock = Math.max(0, histClosing - in_stock + out_stock);
-                } else {
-                    opening_stock = '-';
-                    closing_stock = '-';
-                }
-                display_in = in_stock;
-                display_out = out_stock;
-            }
+                const godown = getGodownDetails(p.godown_id);
+                const pTransfers = pTransactions.filter(t => t.from_location || (t.godown_id === p.godown_id && t.from_location));
 
-            const godown = getGodownDetails(p.godown_id);
-            const pTransfers = pTransactions.filter(t => t.from_location || (t.godown_id === p.godown_id && t.from_location));
+                return {
+                    product_id: p.product_id,
+                    product_name: p.name,
+                    godown_id: p.godown_id,
+                    godown_name: godown.name || p.godown_id,
+                    mux: p.mux || '',
+                    opening_stock: opening_stock ?? '-',
+                    in_stock: display_in,
+                    out_stock: display_out,
+                    transfers: pTransfers.length > 0
+                        ? pTransfers.reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0)
+                        : 0,
+                    closing_stock: closing_stock ?? '-',
+                    current_stock: p.current_stock || 0,
+                };
+            });
+        }
 
+        // ─── Past dates: ONLY from daily_stock_summary ───
+        const prodLookup = {};
+        products.forEach(p => { prodLookup[p.product_id] = p; });
+
+        let snapshots = dailySnapshots;
+        if (filterGodown) {
+            snapshots = snapshots.filter(s => s.godown_id === filterGodown);
+        }
+        if (searchTerm) {
+            const term = searchTerm.toLowerCase();
+            snapshots = snapshots.filter(s => {
+                const prod = prodLookup[s.product_id];
+                const name = (prod?.name || '').toLowerCase();
+                const id = (s.product_id || '').toLowerCase();
+                return name.includes(term) || id.includes(term);
+            });
+        }
+
+        return snapshots.map(snapshot => {
+            const prod = prodLookup[snapshot.product_id] || {};
+            const godown = getGodownDetails(snapshot.godown_id);
             return {
-                product_id: p.product_id,
-                product_name: p.name,
-                godown_id: p.godown_id,
-                godown_name: godown.name || p.godown_id,
-                mux: p.mux || '',
-                opening_stock: opening_stock ?? '-',
-                in_stock: display_in,
-                out_stock: display_out,
-                transfers: pTransfers.length > 0
-                    ? pTransfers.reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0)
-                    : 0,
-                closing_stock: closing_stock ?? '-',
-                current_stock: p.current_stock || 0,
+                product_id: snapshot.product_id,
+                product_name: prod.name || snapshot.product_id,
+                godown_id: snapshot.godown_id,
+                godown_name: godown.name || snapshot.godown_id,
+                mux: prod.mux || '',
+                opening_stock: snapshot.opening_stock,
+                in_stock: snapshot.in_stock,
+                out_stock: snapshot.out_stock,
+                transfers: 0,
+                closing_stock: snapshot.closing_stock,
+                current_stock: 0,
             };
         });
-    }, [products, dayTransactions, summaryDate, godowns, dailySnapshots, historicalBalances]);
+    }, [products, dayTransactions, summaryDate, godowns, dailySnapshots, historicalBalances, isFutureDate, today, searchTerm, filterGodown]);
 
     // Server-side filtering already applies to dynamicSummary base (which depends on products)
     const filteredSummary = dynamicSummary;
@@ -549,18 +558,16 @@ const LiveStockDashboard = () => {
                                                 const totalOpening = totalClosing - totalIn + totalOut;
                                                 const isToday = summaryDate === today;
 
-                                                // Snapshot-based aggregates for past dates
+                                                // Past dates: aggregates from daily_stock_summary only
                                                 const gSnapshots = dailySnapshots.filter(s => s.godown_id === godown.godown_id);
-                                                const hasSnapshots = gSnapshots.length > 0;
                                                 const snapOpening = gSnapshots.reduce((s, sn) => s + (parseFloat(sn.opening_stock) || 0), 0);
                                                 const snapClosing = gSnapshots.reduce((s, sn) => s + (parseFloat(sn.closing_stock) || 0), 0);
                                                 const snapIn = gSnapshots.reduce((s, sn) => s + (parseFloat(sn.in_stock) || 0), 0);
                                                 const snapOut = gSnapshots.reduce((s, sn) => s + (parseFloat(sn.out_stock) || 0), 0);
-                                                // Fall back to live transaction data when no snapshots exist yet
-                                                const displayOpening = isToday ? totalOpening : (hasSnapshots ? snapOpening : totalOpening);
-                                                const displayClosing = isToday ? totalClosing : (hasSnapshots ? snapClosing : totalClosing);
-                                                const displayIn = isToday ? totalIn : (hasSnapshots ? snapIn : totalIn);
-                                                const displayOut = isToday ? totalOut : (hasSnapshots ? snapOut : totalOut);
+                                                const displayOpening = isToday ? totalOpening : snapOpening;
+                                                const displayClosing = isToday ? totalClosing : snapClosing;
+                                                const displayIn = isToday ? totalIn : snapIn;
+                                                const displayOut = isToday ? totalOut : snapOut;
 
                                                 return (
                                                     <tr key={godown.godown_id} className="group hover:bg-slate-50/80 transition-colors">
@@ -689,7 +696,7 @@ const LiveStockDashboard = () => {
                                             </table>
                                         </div>
                                     </div>
-                                    {hasMore && (
+                                    {summaryDate === today && hasMore && (
                                         <button 
                                             onClick={() => fetchProducts(page + 1)}
                                             disabled={loadingMore}

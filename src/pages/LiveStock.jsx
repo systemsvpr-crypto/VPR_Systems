@@ -84,6 +84,13 @@ const StockLedger = () => {
 
     const filteredProducts = useMemo(() => {
         let filtered = [...products];
+
+        // For past dates: only show products that have snapshot data
+        if (selectedDate !== today) {
+            const snapshotPids = new Set(dailySnapshots.map(s => s.product_id));
+            filtered = filtered.filter(p => snapshotPids.has(p.product_id));
+        }
+
         if (deferredSearchTerm) {
             const lowSearch = deferredSearchTerm.toLowerCase();
             filtered = filtered.filter(p => 
@@ -96,7 +103,7 @@ const StockLedger = () => {
             filtered = filtered.filter(p => p.godown_id === selectedGodown);
         }
         return filtered;
-    }, [products, deferredSearchTerm, selectedGodown]);
+    }, [products, deferredSearchTerm, selectedGodown, selectedDate, today, dailySnapshots]);
 
     const productGrid = useMemo(() => {
         const isToday = selectedDate === today;
