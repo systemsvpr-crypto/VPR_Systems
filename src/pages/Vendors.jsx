@@ -88,7 +88,6 @@ const Vendors = () => {
     const validateForm = (data) => {
         const newErrors = {};
         if (!data.vendor_name) newErrors.vendor_name = 'Vendor Name is required';
-        if (!data.vendor_number) newErrors.vendor_number = 'Vendor Number is required';
         return newErrors;
     };
 
@@ -283,12 +282,11 @@ const Vendors = () => {
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="space-y-1.5">
-                                        <label className="text-sm font-medium text-slate-700">Vendor Number *</label>
+                                        <label className="text-sm font-medium text-slate-700">Vendor Number</label>
                                         <div className="relative">
                                             <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                             <Input name="vendor_number" value={formData.vendor_number} onChange={handleInputChange} className="pl-10" placeholder="Phone number" />
                                         </div>
-                                        {errors.vendor_number && <p className="text-red-500 text-xs mt-1">{errors.vendor_number}</p>}
                                     </div>
                                     <div className="space-y-1.5">
                                         <label className="text-sm font-medium text-slate-700">Email ID</label>
