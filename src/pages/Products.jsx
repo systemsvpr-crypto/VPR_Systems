@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Search, Plus, Edit2, X, Package, ToggleLeft, ToggleRight, Layers, Tag, Weight, FileText, CheckCircle2, Info, RefreshCw, Upload } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Search, Plus, Edit2, X, Package, Layers, Tag, Weight, ToggleLeft, ToggleRight, CheckCircle2, Info, RefreshCw } from 'lucide-react';
 import { productService } from '../services/productService';
-import * as XLSX from 'xlsx';
 import useAuthStore from '../store/authStore';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
@@ -49,13 +48,6 @@ const Products = ({ isTab = false }) => {
     const [confirmDisable, setConfirmDisable] = useState(null);
     const [stats, setStats] = useState({ total: 0, active: 0 });
     const [totalFiltered, setTotalFiltered] = useState(0);
-
-    // Import Excel States
-    const fileInputRef = useRef(null);
-    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-    const [importRows, setImportRows] = useState([]);
-    const [isImporting, setIsImporting] = useState(false);
-    const [importSummary, setImportSummary] = useState(null);
 
     // Bulk Edit Opening Balances States
     const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
@@ -209,168 +201,6 @@ const Products = ({ isTab = false }) => {
 
         name = name.replace(/\s+/g, ' ').trim();
         return { name, product_type, mux };
-    };
-
-    // ── Import Excel Handlers ──
-    const handleImportFile = async (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = async (ev) => {
-            try {
-                const wb = XLSX.read(ev.target.result, { type: 'binary' });
-                const raw = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
-                if (!raw.length) {
-                    toast.error('No valid rows found in file');
-                    return;
-                }
-
-                const godownNameToId = {};
-                godowns.forEach(g => { godownNameToId[g.name.toLowerCase()] = g.godown_id; });
-
-                const col = (row, ...keys) => {
-                    for (const k of keys) {
-                        const v = row[k];
-                        if (v !== undefined && v !== null && v !== '') return String(v);
-                    }
-                    return '';
-                };
-
-                const mapped = raw.map(row => {
-                    const itemRaw = col(row, 'Item Name', 'item_name', 'ItemName', 'ITEM NAME', 'Product Name', 'product_name').trim();
-                    const godownName = col(row, 'Godown Name', 'godown_name', 'GodownName', 'GODOWN NAME', 'Godown name').trim();
-                    const newStock = parseFloat(col(row, 'current stock', 'Current Stock', 'current_stock', 'CURRENT_STOCK', 'Stock', 'stock', 'Quantity', 'quantity', 'Qty', 'qty')) || 0;
-                    const godownId = godownNameToId[godownName.toLowerCase()];
-                    const { name, product_type, mux } = parseItemName(itemRaw);
-                    const valid = !!name && !!godownId;
-
-                    return {
-                        name,
-                        product_type,
-                        mux,
-                        godown_name: godownName,
-                        new_stock: newStock,
-                        existing_stock: null,
-                        _productId: null,
-                        _godownId: godownId || '',
-                        _status: valid ? 'pending' : 'unmatched',
-                        _error: !name ? 'Missing Item Name' : !godownId ? 'Godown not found' : '',
-                    };
-                }).filter(row => row.name);
-
-                if (!mapped.length) {
-                    toast.error('No valid rows after mapping. Check column names (Item Name, Godown Name, current_stock)');
-                    return;
-                }
-
-                // Fetch existing stock for matched rows
-                const enriched = await Promise.all(mapped.map(async (row) => {
-                    if (row._status === 'unmatched') return row;
-                    try {
-                        const found = await productService.findByNameAndGodown(row.name, row._godownId);
-                        if (found) {
-                            row._productId = found.product_id;
-                            row.existing_stock = parseFloat(found.current_stock) || 0;
-                            row._status = 'existing';
-                        } else {
-                            row._status = 'new';
-                        }
-                    } catch {
-                        row._status = 'unmatched';
-                        row._error = 'Lookup failed';
-                    }
-                    return row;
-                }));
-
-                setImportRows(enriched);
-                setImportSummary(null);
-                setIsImportModalOpen(true);
-            } catch (err) {
-                toast.error('Failed to parse file: ' + err.message);
-            }
-        };
-        reader.readAsBinaryString(file);
-        e.target.value = '';
-    };
-
-    const handleConfirmImport = async () => {
-        setIsImporting(true);
-        let success = 0;
-        let created = 0;
-        const errors = [];
-
-        try {
-            let nextCount = null;
-
-            for (let i = 0; i < importRows.length; i++) {
-                const row = importRows[i];
-                try {
-                    if (row._status === 'unmatched') {
-                        errors.push(`Row ${i + 1}: ${row._error}`);
-                        continue;
-                    }
-
-                    if (row._status === 'existing') {
-                        await productService.updateProductBulk(row._productId, {
-                            current_stock: row.new_stock,
-                        });
-                        success++;
-                    } else {
-                        // New product – create it
-                        if (nextCount === null) {
-                            const lastId = await productService.getLastProductId();
-                            const match = lastId ? lastId.match(/\d+$/) : null;
-                            nextCount = match ? parseInt(match[0], 10) + 1 : (stats.total || 0) + 1;
-                        }
-                        const product_id = `PROD-${String(nextCount).padStart(4, '0')}`;
-                        nextCount++;
-
-                        const selectedGodown = godowns.find(g => g.godown_id === row._godownId);
-                        await productService.create({
-                            product_id,
-                            name: row.name,
-                            product_type: row.product_type,
-                            mux: row.mux,
-                            godown_id: row._godownId,
-                            godown_name: row.godown_name,
-                            current_stock: row.new_stock,
-                            unit: 'KG',
-                            is_active: true,
-                        });
-                        created++;
-                        success++;
-                    }
-                } catch (err) {
-                    errors.push(`Row ${i + 1}: ${err.message}`);
-                }
-            }
-
-            setImportSummary({ success, created, errors });
-
-            if (success > 0) {
-                toast.success(`${success} product(s) processed (${created} created)`);
-                fetchProducts();
-                fetchStats();
-            }
-            if (errors.length > 0) {
-                toast.error(`${errors.length} row(s) failed`);
-            }
-        } catch (err) {
-            toast.error('Import failed: ' + err.message);
-        } finally {
-            setIsImporting(false);
-        }
-    };
-
-    const handleCloseImportModal = () => {
-        setIsImportModalOpen(false);
-        setImportRows([]);
-        setImportSummary(null);
-        setIsImporting(false);
-    };
-
-    const handleOpenImport = () => {
-        fileInputRef.current?.click();
     };
 
     const filteredBulkProducts = useMemo(() => {
@@ -634,21 +464,6 @@ const Products = ({ isTab = false }) => {
 
                         {!loading && (
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:flex gap-2 w-full sm:w-auto shrink-0">
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    accept=".xlsx,.xls,.csv"
-                                    className="hidden"
-                                    onChange={handleImportFile}
-                                />
-                                <Button
-                                    onClick={handleOpenImport}
-                                    variant="outline"
-                                    className="w-full md:w-auto gap-2 px-4 shadow-sm font-medium border-slate-200 hover:bg-slate-50 h-10"
-                                >
-                                    <Upload size={18} className="text-primary" />
-                                    <span>Import Excel</span>
-                                </Button>
                                 <Button 
                                     onClick={handleOpenBulkModal} 
                                     variant="outline" 
@@ -1137,124 +952,6 @@ const Products = ({ isTab = false }) => {
                                 {savingBulk ? 'Saving changes...' : 'Save Bulk Stock'}
                             </Button>
                         </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Import Excel Modal */}
-            {isImportModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-                    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={handleCloseImportModal}></div>
-                    <div className="relative bg-white rounded-2xl shadow-xl w-full sm:max-w-4xl max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200 overflow-hidden">
-                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0 bg-slate-50/50 rounded-t-2xl">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-                                    <Upload size={22} />
-                                </div>
-                                <div>
-                                    <h2 className="text-xl font-bold text-slate-800">Import Stock via Excel</h2>
-                                    <p className="text-xs text-slate-500">
-                                        {importSummary ? 'Import results' : `Review ${importRows.length} row(s) before importing`}
-                                    </p>
-                                </div>
-                            </div>
-                            {!isImporting && (
-                                <Button variant="ghost" size="icon" type="button" onClick={handleCloseImportModal} className="rounded-full text-slate-400 hover:text-slate-600 transition-colors">
-                                    <X size={20} />
-                                </Button>
-                            )}
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                            {importSummary ? (
-                                <div className="text-center py-12">
-                                    <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
-                                        <CheckCircle2 size={32} className="text-green-600" />
-                                    </div>
-                                    <h3 className="text-lg font-bold text-slate-900 mb-2">Import Complete</h3>
-                                    <p className="text-sm text-slate-500 mb-4">
-                                        {importSummary.created > 0 ? `${importSummary.created} created, ` : ''}
-                                        {importSummary.success - importSummary.created} updated.
-                                        {importSummary.errors.length > 0 && ` ${importSummary.errors.length} error(s).`}
-                                    </p>
-                                    {importSummary.errors.length > 0 && (
-                                        <div className="max-h-40 overflow-y-auto space-y-1 bg-red-50 rounded-xl p-4 border border-red-100 max-w-lg mx-auto text-left">
-                                            {importSummary.errors.map((err, i) => (
-                                                <p key={i} className="text-xs text-red-600 flex items-start gap-2">
-                                                    <Info size={12} className="mt-0.5 shrink-0" />
-                                                    <span>{err}</span>
-                                                </p>
-                                            ))}
-                                        </div>
-                                    )}
-                                    <Button onClick={handleCloseImportModal} className="mt-6">Done</Button>
-                                </div>
-                            ) : importRows.length === 0 ? (
-                                <div className="text-center py-12 text-slate-500 font-bold">No rows to import.</div>
-                            ) : (
-                                <div className="erp-table-container">
-                                    <div className="overflow-x-auto custom-scrollbar">
-                                        <table className="erp-table">
-                                            <thead className="erp-table-thead">
-                                                <tr className="erp-table-tr">
-                                                    <th className="erp-table-th">#</th>
-                                                    <th className="erp-table-th">Item Name</th>
-                                                    <th className="erp-table-th">Type</th>
-                                                    <th className="erp-table-th">MUX</th>
-                                                    <th className="erp-table-th">Godown Name</th>
-                                                    <th className="erp-table-th text-right">Existing Stock</th>
-                                                    <th className="erp-table-th text-right">New Stock</th>
-                                                    <th className="erp-table-th text-center">Status</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-slate-100">
-                                                {importRows.map((row, i) => (
-                                                    <tr key={i} className="erp-table-tr">
-                                                        <td className="erp-table-td text-xs text-slate-400">{i + 1}</td>
-                                                        <td className="erp-table-td font-medium text-slate-900">{row.name}</td>
-                                                        <td className="erp-table-td text-xs font-bold text-violet-600">
-                                                            {row.product_type || '-'}
-                                                        </td>
-                                                        <td className="erp-table-td text-xs font-bold text-slate-600">
-                                                            {row.mux || '-'}
-                                                        </td>
-                                                        <td className="erp-table-td text-slate-600 text-sm">{row.godown_name}</td>
-                                                        <td className="erp-table-td text-right font-bold text-slate-500">
-                                                            {row.existing_stock !== null ? row.existing_stock : '-'}
-                                                        </td>
-                                                        <td className="erp-table-td text-right font-bold">{row.new_stock}</td>
-                                                        <td className="erp-table-td text-center">
-                                                            {row._status === 'existing' && (
-                                                                <span className="text-blue-600 text-xs font-bold bg-blue-50 px-2 py-0.5 rounded">Update</span>
-                                                            )}
-                                                            {row._status === 'new' && (
-                                                                <span className="text-green-600 text-xs font-bold bg-green-50 px-2 py-0.5 rounded">New</span>
-                                                            )}
-                                                            {row._status === 'unmatched' && (
-                                                                <span className="text-red-600 text-xs font-bold bg-red-50 px-2 py-0.5 rounded" title={row._error}>Error</span>
-                                                            )}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        {!importSummary && importRows.length > 0 && (
-                            <div className="p-4 sm:px-6 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex justify-end gap-3 shrink-0">
-                                <Button type="button" variant="outline" onClick={handleCloseImportModal} disabled={isImporting}>Cancel</Button>
-                                <Button onClick={handleConfirmImport} disabled={isImporting}>
-                                    {isImporting ? (
-                                        <span className="flex items-center gap-2"><RefreshCw className="animate-spin" size={16} /> Importing...</span>
-                                    ) : (
-                                        `Import ${importRows.length} Row(s)`
-                                    )}
-                                </Button>
-                            </div>
-                        )}
                     </div>
                 </div>
             )}

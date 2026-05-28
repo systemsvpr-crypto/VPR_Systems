@@ -264,7 +264,7 @@ const LiveStockDashboard = () => {
 
         // ─── Past dates: ONLY from daily_stock_summary ───
         const prodLookup = {};
-        products.forEach(p => { prodLookup[p.product_id] = p; });
+        allProducts.forEach(p => { prodLookup[p.product_id] = p; });
 
         let snapshots = dailySnapshots;
         if (filterGodown) {
@@ -297,7 +297,7 @@ const LiveStockDashboard = () => {
                 current_stock: 0,
             };
         });
-    }, [products, dayTransactions, summaryDate, godowns, dailySnapshots, historicalBalances, isFutureDate, today, searchTerm, filterGodown]);
+    }, [products, dayTransactions, summaryDate, godowns, dailySnapshots, historicalBalances, isFutureDate, today, searchTerm, filterGodown, allProducts]);
 
     // Server-side filtering already applies to dynamicSummary base (which depends on products)
     const filteredSummary = dynamicSummary;
