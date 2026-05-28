@@ -346,11 +346,15 @@ const LiveStockDashboard = () => {
                 return;
             }
 
-            const headers = ["Product Name", "Product Type", "Closing Quantity"];
+            const godownMap = {};
+            godowns.forEach(g => { godownMap[g.godown_id] = g.name; });
+
+            const headers = ["Item Name", "Product Type", "Godown Name", "Current Quantity"];
             const rows = accumulated.map(p => {
                 return [
                     p.name || '',
                     p.product_type || '',
+                    godownMap[p.godown_id] || p.godown_id || 'Not Assigned',
                     p.current_stock ?? 0
                 ];
             });

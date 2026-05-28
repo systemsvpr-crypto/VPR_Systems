@@ -312,6 +312,16 @@ const StockLedger = () => {
                 return maxChars.map(w => ({ wch: Math.min(Math.max(w + 2, 8), 50) })); // Min 8, max 50 chars
             };
 
+            // Stock Detail sheet (first sheet)
+            const detailData = [['Item Name', 'Product Type', 'Godown Name', 'Current Quantity']];
+            products.forEach(p => {
+                const godownName = godownList[p.godown_id]?.name || p.godown_id || 'Not Assigned';
+                detailData.push([p.name || '', p.product_type || '', godownName, parseFloat(p.current_stock) || 0]);
+            });
+            const ws0 = XLSX.utils.aoa_to_sheet(detailData);
+            ws0['!cols'] = getColWidths(detailData);
+            XLSX.utils.book_append_sheet(wb, ws0, 'Stock Detail');
+
             // Summary sheet
             const summaryData = [['Godown', 'Opening', 'Inward', 'Outward', 'Closing']];
             Object.entries(godownSummaries).forEach(([id, s]) => {

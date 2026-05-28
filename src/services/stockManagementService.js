@@ -226,6 +226,31 @@ export const stockManagementService = {
         return data || null;
     },
 
+    async getNextEntryId(date) {
+        const dateStr = date.replace(/-/g, '');
+        const prefix = `STK-${dateStr}-`;
+
+        const { data, error } = await supabase
+            .from('stock_management')
+            .select('entry_id')
+            .ilike('entry_id', `${prefix}%`);
+
+        if (error) throw error;
+
+        let maxNum = 0;
+        for (const row of data || []) {
+            const rest = row.entry_id.slice(prefix.length);
+            const numMatch = rest.match(/^(\d{4})(?:-|$)/);
+            if (numMatch) {
+                const num = parseInt(numMatch[1], 10);
+                if (num > maxNum) maxNum = num;
+            }
+        }
+
+        const nextNum = Math.max(maxNum + 1, 1);
+        return `STK-${dateStr}-${nextNum.toString().padStart(4, '0')}`;
+    },
+
     async regenerateDailySummary(date) {
         const { data, error } = await supabase
             .rpc('generate_daily_summary', { target_date: date });

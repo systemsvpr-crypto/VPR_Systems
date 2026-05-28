@@ -194,10 +194,13 @@ const StockManagement = () => {
         resetForm();
     };
 
-    const generateEntryId = () => {
-        const count = entries.length + 1;
-        const date = formData.date.replace(/-/g, '');
-        setFormData(prev => ({ ...prev, entry_id: `STK-${date}-${count.toString().padStart(4, '0')}` }));
+    const generateEntryId = async () => {
+        try {
+            const entryId = await stockManagementService.getNextEntryId(formData.date);
+            setFormData(prev => ({ ...prev, entry_id: entryId }));
+        } catch (err) {
+            console.error('Error generating entry ID:', err);
+        }
     };
 
     const handleInputChange = (e) => {
@@ -208,7 +211,7 @@ const StockManagement = () => {
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
-    const handleDateChange = (e) => {
+    const handleDateChange = async (e) => {
         const selectedDate = e.target.value;
         if (selectedDate && !isEditableDate(selectedDate)) {
             toast.error('You can only select today or yesterday');
@@ -217,10 +220,15 @@ const StockManagement = () => {
         setFormData(prev => ({
             ...prev,
             date: selectedDate,
-            entry_id: editingEntry
-                ? prev.entry_id
-                : `STK-${selectedDate.replace(/-/g, '')}-${(entries.length + 1).toString().padStart(4, '0')}`
         }));
+        if (!editingEntry) {
+            try {
+                const entryId = await stockManagementService.getNextEntryId(selectedDate);
+                setFormData(prev => ({ ...prev, entry_id: entryId }));
+            } catch (err) {
+                console.error('Error generating entry ID:', err);
+            }
+        }
     };
 
     const addProductItem = () => {
@@ -595,7 +603,7 @@ const StockManagement = () => {
 
                 toast.success('Entry updated successfully');
             } else {
-                const baseEntryId = formData.entry_id;
+                const baseEntryId = await stockManagementService.getNextEntryId(formData.date);
 
                 let nextCount = 1;
                 const lastProductId = await stockManagementService.getLastProductId();
