@@ -191,7 +191,9 @@ const PurDelivery = () => {
           vehicle_number: d.vehicle_number,
           remarks: d.remarks,
           rate: ind.rate || 0, // Move rate into payload here
-          arrival_status: 'In Transit'
+          arrival_status: 'In Transit',
+          planned_qty_kg: parseFloat(d.received_qty_kg),
+          planned_qty_bags: parseInt(d.received_qty_bags) || 0,
         };
       });
 

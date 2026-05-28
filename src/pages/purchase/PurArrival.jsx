@@ -20,6 +20,9 @@ const TS = ({ cols = 8 }) => <>{[...Array(4)].map((_, i) => (
 
 const STATUS_OPTS = ['In Transit', 'AT TPT GDN', 'Arrived'];
 
+const today = new Date().toISOString().split('T')[0];
+const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+
 const PurArrival = () => {
   const { user } = useAuthStore();
   const [deliveries, setDeliveries] = useState([]);
@@ -80,9 +83,9 @@ const PurArrival = () => {
 
   const displayDeliveries = useMemo(() => {
     if (activeTab === 'active') {
-      return deliveries.filter(d => d.arrival_status !== 'Arrived');
+      return deliveries.filter(d => d.arrival_status !== 'Arrived' || (d.shortfall_qty_bags || 0) > 0);
     } else {
-      return deliveries.filter(d => d.arrival_status === 'Arrived');
+      return deliveries.filter(d => d.arrival_status === 'Arrived' && !(d.shortfall_qty_bags || 0) > 0);
     }
   }, [deliveries, activeTab]);
 
@@ -149,9 +152,16 @@ const PurArrival = () => {
       for (const id of selectedIds) {
         const row = editData[id];
         const original = deliveries.find(d => d.id == id);
+        let shortfallBags = 0;
+        let shortfallKg = 0;
         
         // STOCK SYNCHRONIZATION LOGIC
-        if (row.arrival_status === 'Arrived' && original.arrival_status !== 'Arrived') {
+        const isFirstArrival = row.arrival_status === 'Arrived' && original.arrival_status !== 'Arrived';
+        const isQtyChange = row.arrival_status === 'Arrived' && original.arrival_status === 'Arrived' &&
+          (parseInt(original.received_qty_bags) !== parseInt(row.received_qty_bags) ||
+           original.godown_name !== row.godown_name);
+
+        if (isFirstArrival || isQtyChange) {
           const targetGodown = godowns.find(g => g.name === row.godown_name);
           if (!targetGodown) {
             toast.error(`Godown ${row.godown_name} not found for delivery ${original.delivery_number}`);
@@ -212,14 +222,20 @@ const PurArrival = () => {
             const addBags = parseInt(row.received_qty_bags) || 0;
             const addWeight = parseFloat(row.received_qty_kg) || 0;
             const currentStockBags = parseFloat(product.current_stock) || 0;
-            const newClosingQty = currentStockBags + addBags;
 
             // Generate unique entry ID
             const entryId = `ARR-${original.delivery_number}`;
 
             // CHECK FOR EXISTING RECORD — reverse old stock entry if godown/qty changed
             const { data: existing } = await supabase.from('stock_management').select('id, product_id, quantity, godown_id').eq('entry_id', entryId).maybeSingle();
+            let oldQty = 0;
             if (existing) {
+              // Only subtract old qty if it's the same product (re-sync for same product,
+              // not a godown change where old product differs)
+              if (existing.product_id === product.product_id) {
+                oldQty = parseInt(existing.quantity) || 0;
+              }
+
               // Reverse the old stock change before re-applying
               const { data: oldProduct } = await supabase
                 .from('products')
@@ -228,9 +244,9 @@ const PurArrival = () => {
                 .maybeSingle();
 
               if (oldProduct) {
-                const oldQty = parseInt(existing.quantity) || 0;
+                const oldEntryQty = parseInt(existing.quantity) || 0;
                 const oldStock = parseFloat(oldProduct.current_stock) || 0;
-                const reversedStock = Math.max(0, oldStock - oldQty);
+                const reversedStock = Math.max(0, oldStock - oldEntryQty);
 
                 await supabase
                   .from('products')
@@ -241,6 +257,14 @@ const PurArrival = () => {
               // Delete old record (entry_id is UNIQUE, must remove before creating new)
               await supabase.from('stock_management').delete().eq('id', existing.id);
             }
+
+            // Correct closing qty: reverse old addition, then apply new total
+            // For first sync: oldQty=0 → newClosingQty = currentStock + addBags
+            // For re-sync (same product): currentStock already has oldQty, so
+            //   newClosingQty = currentStock + addBags - oldQty
+            //   = (baseStock + oldQty) + addBags - oldQty = baseStock + addBags ✓
+            // For godown change (different product): oldQty=0 → newClosingQty = newProductStock + addBags ✓
+            const newClosingQty = currentStockBags + addBags - oldQty;
 
             // 3. Update Product Master (Live Stock)
             const { error: stockUpError } = await supabase.from('products').update({
@@ -277,6 +301,13 @@ const PurArrival = () => {
               godown_id: targetGodown.godown_id,
               related_id: entryId
             }]);
+
+            // 5b. Calculate shortfall (planned - received)
+            const plannedBags = original.planned_qty_bags || original.received_qty_bags || 0;
+            const receivedBags = parseInt(row.received_qty_bags) || 0;
+            shortfallBags = Math.max(0, plannedBags - receivedBags);
+            const prodMux = products.find(p => p.name === original.product_name)?.mux || 0;
+            shortfallKg = shortfallBags > 0 ? (shortfallBags * parseFloat(prodMux)).toFixed(2) : 0;
           } else {
             throw new Error(`Product ${original.product_name} not found in master list.`);
           }
@@ -292,7 +323,9 @@ const PurArrival = () => {
           remarks: row.remarks,
           arrival_status: row.arrival_status,
           driver_phone: row.driver_phone,
-          lr_number: row.lr_number
+          lr_number: row.lr_number,
+          shortfall_qty_kg: shortfallKg,
+          shortfall_qty_bags: shortfallBags,
         }).eq('id', parseInt(id));
 
         if (updateError) throw updateError;
@@ -427,7 +460,8 @@ const PurArrival = () => {
               ) : filteredDeliveries.map(d => {
                 const row = editData[d.id] || {};
                 const isSelected = row.checked;
-                const isEditable = activeTab === 'active' && isSelected;
+                const hasOpenShortfall = (d.shortfall_qty_bags || 0) > 0;
+                const isEditable = (activeTab === 'active' && isSelected) || (hasOpenShortfall && isSelected);
                 const isDisabled = !isEditable;
 
                 return (
@@ -461,7 +495,7 @@ const PurArrival = () => {
                         className={`w-24 px-2 py-1.5 border border-gray-200 rounded font-bold text-gray-700 text-xs focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all placeholder:text-gray-300 ${isDisabled ? 'bg-gray-50 border-transparent opacity-60' : 'bg-white'}`} placeholder="Vehicle #" />
                     </td>
                     <td className="px-1 py-4">
-                      <input type="date" value={row.delivery_date || ''} onChange={e => updateEditRow(d.id, 'delivery_date', e.target.value)} disabled={isDisabled || row.arrival_status === 'Arrived'}
+                      <input type="date" value={row.delivery_date || ''} onChange={e => updateEditRow(d.id, 'delivery_date', e.target.value)} disabled={isDisabled || row.arrival_status === 'Arrived'} min={yesterday} max={today}
                         className={`w-[120px] px-2 py-1.5 border border-gray-200 rounded font-bold text-gray-700 text-xs focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all ${isDisabled || row.arrival_status === 'Arrived' ? 'bg-gray-50 border-transparent opacity-60' : 'bg-white'}`} />
                     </td>
                     <td className="px-1 py-4 text-right">
@@ -487,14 +521,21 @@ const PurArrival = () => {
                         className={`w-full px-2 py-1.5 border border-gray-200 rounded font-bold text-gray-700 text-xs focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all placeholder:text-gray-300 ${isDisabled ? 'bg-gray-50 border-transparent opacity-60' : 'bg-white'}`} placeholder="Review notes..." />
                     </td>
                     <td className="px-4 py-4 text-center">
-                      <select value={row.arrival_status || 'In Transit'} onChange={e => updateEditRow(d.id, 'arrival_status', e.target.value)} disabled={isDisabled}
-                        className={`px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter shadow-sm border transition-all cursor-pointer ${
-                          row.arrival_status === 'Arrived' ? 'bg-green-100 text-green-700 border-green-200' : 
-                          row.arrival_status === 'AT TPT GDN' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' :
-                          'bg-orange-100 text-orange-700 border-orange-200'
-                        } ${isDisabled ? 'opacity-60 grayscale' : ''}`}>
-                        {STATUS_OPTS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                      </select>
+                      <div className="flex items-center justify-center gap-1">
+                        <select value={row.arrival_status || 'In Transit'} onChange={e => updateEditRow(d.id, 'arrival_status', e.target.value)} disabled={isDisabled}
+                          className={`px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter shadow-sm border transition-all cursor-pointer ${
+                            row.arrival_status === 'Arrived' ? 'bg-green-100 text-green-700 border-green-200' : 
+                            row.arrival_status === 'AT TPT GDN' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' :
+                            'bg-orange-100 text-orange-700 border-orange-200'
+                          } ${isDisabled ? 'opacity-60 grayscale' : ''}`}>
+                          {STATUS_OPTS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                        </select>
+                        {(d.shortfall_qty_bags || 0) > 0 && (
+                          <span className="text-[9px] font-black text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded-full border border-orange-200 whitespace-nowrap">
+                            {d.shortfall_qty_bags} pending
+                          </span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
