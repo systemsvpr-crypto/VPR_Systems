@@ -225,4 +225,11 @@ export const stockManagementService = {
         if (error) throw error;
         return data || null;
     },
+
+    async regenerateDailySummary(date) {
+        const { data, error } = await supabase
+            .rpc('generate_daily_summary', { target_date: date });
+        if (error) throw error;
+        return data;
+    },
 };

@@ -39,6 +39,13 @@ import {
 
 const ITEMS_PER_PAGE = 10;
 
+const isEditableDate = (dateStr) => {
+    if (!dateStr) return false;
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    return dateStr === today || dateStr === yesterday;
+};
+
 const DEFAULT_FORM_DATA = {
     entry_id: '',
     godown_id: '',
@@ -148,10 +155,9 @@ const StockManagement = () => {
 
     const handleOpenModal = (entry = null) => {
         if (entry) {
-            const today = new Date().toISOString().split('T')[0];
             const entryDate = entry.date || '';
-            if (entryDate !== today) {
-                toast.error('You can only edit current date entries');
+            if (!isEditableDate(entryDate)) {
+                toast.error('You can only edit entries from today or yesterday');
                 return;
             }
             const entryId = entry.entry_id || '';
@@ -190,7 +196,7 @@ const StockManagement = () => {
 
     const generateEntryId = () => {
         const count = entries.length + 1;
-        const date = new Date().toISOString().split('T')[0].replace(/-/g, '');
+        const date = formData.date.replace(/-/g, '');
         setFormData(prev => ({ ...prev, entry_id: `STK-${date}-${count.toString().padStart(4, '0')}` }));
     };
 
@@ -203,9 +209,18 @@ const StockManagement = () => {
     };
 
     const handleDateChange = (e) => {
-        // Force today's date — entries can only be created for the current date
-        const today = new Date().toISOString().split('T')[0];
-        setFormData(prev => ({ ...prev, date: today }));
+        const selectedDate = e.target.value;
+        if (selectedDate && !isEditableDate(selectedDate)) {
+            toast.error('You can only select today or yesterday');
+            return;
+        }
+        setFormData(prev => ({
+            ...prev,
+            date: selectedDate,
+            entry_id: editingEntry
+                ? prev.entry_id
+                : `STK-${selectedDate.replace(/-/g, '')}-${(entries.length + 1).toString().padStart(4, '0')}`
+        }));
     };
 
     const addProductItem = () => {
@@ -324,6 +339,8 @@ const StockManagement = () => {
             toast.error('Please fill required fields');
             return;
         }
+
+        const today = new Date().toISOString().split('T')[0];
 
         try {
             if (editingEntry) {
@@ -570,6 +587,12 @@ const StockManagement = () => {
                     await stockManagementService.recalculateProductStock(pid);
                 }
 
+                // 4. Regenerate daily_stock_summary for previous dates so the cascade flows forward
+                const editDate = formData.date || editingEntry.date;
+                if (editDate && editDate !== today) {
+                    await stockManagementService.regenerateDailySummary(editDate);
+                }
+
                 toast.success('Entry updated successfully');
             } else {
                 const baseEntryId = formData.entry_id;
@@ -702,6 +725,10 @@ const StockManagement = () => {
                     }
                 }
 
+                if (formData.date && formData.date !== today) {
+                    await stockManagementService.regenerateDailySummary(formData.date);
+                }
+
                 toast.success(`${formData.productItems.length} entries created successfully`);
             }
 
@@ -721,9 +748,8 @@ const StockManagement = () => {
     const confirmDelete = async () => {
         if (!itemToDelete) return;
 
-        const today = new Date().toISOString().split('T')[0];
-        if ((itemToDelete.date || '') !== today) {
-            toast.error('You can only delete current date entries');
+        if (!isEditableDate(itemToDelete.date || '')) {
+            toast.error('You can only delete entries from today or yesterday');
             setIsDeleteModalOpen(false);
             setItemToDelete(null);
             return;
@@ -745,31 +771,34 @@ const StockManagement = () => {
 
         setIsDeleting(true);
         try {
+            const today = new Date().toISOString().split('T')[0];
             const entry = itemToDelete;
-            const qty = parseFloat(entry.quantity) || 0;
             const wasTransfer = entry.from_location && entry.transaction_type === 'in';
 
-            // Get current stock and reverse the entry's effect
-            const { current_stock: mainStock } = await stockManagementService.getProductClosingQuantity(entry.product_id);
-            const revertedMain = entry.transaction_type === 'in'
-                ? Math.max(0, mainStock - qty)
-                : mainStock + qty;
-            await stockManagementService.updateProductStock(entry.product_id, revertedMain);
+            const affectedProducts = new Set();
+            affectedProducts.add(entry.product_id);
 
-            // If this was a transfer, also reverse the source product's stock and delete the -SRC row
+            // If this was a transfer, delete the -SRC entry too
             if (wasTransfer) {
                 const sourceEntryId = entry.entry_id + '-SRC';
                 const srcRow = await stockManagementService.getSourceEntry(sourceEntryId);
                 if (srcRow) {
-                    const { current_stock: srcStock } = await stockManagementService.getProductClosingQuantity(srcRow.product_id);
-                    const revertedSrc = srcStock + qty;
-                    await stockManagementService.updateProductStock(srcRow.product_id, revertedSrc);
+                    affectedProducts.add(srcRow.product_id);
                     await stockManagementService.delete(sourceEntryId);
                 }
             }
 
             // Delete the main entry
             await stockManagementService.delete(entry.entry_id);
+
+            // Recalculate stock for all affected products from transactions
+            for (const pid of affectedProducts) {
+                await stockManagementService.recalculateProductStock(pid);
+            }
+
+            if (entry.date && entry.date !== today) {
+                await stockManagementService.regenerateDailySummary(entry.date);
+            }
 
             toast.success('Entry deleted successfully');
             fetchData();
@@ -1134,12 +1163,12 @@ const StockManagement = () => {
                                                 onChange={handleDateChange}
                                                 disabled={(date) => {
                                                     const today = new Date();
-                                                    return date.getFullYear() !== today.getFullYear()
-                                                        || date.getMonth() !== today.getMonth()
-                                                        || date.getDate() !== today.getDate();
+                                                    const yesterday = new Date(Date.now() - 86400000);
+                                                    const normalize = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                                                    return normalize(date) !== normalize(today) && normalize(date) !== normalize(yesterday);
                                                 }}
                                             />
-                                            <p className="text-[10px] text-slate-400 font-medium mt-0.5">Only current date entries are allowed</p>
+                                            <p className="text-[10px] text-slate-400 font-medium mt-0.5">You can add entries for today or yesterday</p>
                                         </div>
 
                                         {formData.transaction_type === 'in' && (
@@ -1534,15 +1563,16 @@ const EntryRow = ({ entry, user, getGodownName, getProductName, onEdit, onDelete
     const isTransfer = entry.transaction_type === 'in' && entry.from_location && entry.from_location !== 'NEW_STOCK';
     const isOut = entry.transaction_type === 'out';
 
-    // Guard: only current-date, direct stock entries can be edited/deleted
+    // Guard: only today/yesterday entries that are direct stock entries can be edited/deleted
     const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
     const entryDate = entry.date || '';
-    const isCurrentDate = entryDate === today;
+    const isEditable = entryDate === today || entryDate === yesterday;
     const entryId = entry.entry_id || '';
     const isSRC = entryId.endsWith('-SRC');
     const baseId = isSRC ? entryId.slice(0, -4) : entryId;
     const isFromSellOrPurchase = baseId.startsWith('STK-SAL-') || baseId.startsWith('ARR-');
-    const canEditDelete = !isSRC && !isFromSellOrPurchase && isCurrentDate;
+    const canEditDelete = !isSRC && !isFromSellOrPurchase && isEditable;
 
     return (
         <tr className={cn(
