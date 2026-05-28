@@ -17,7 +17,6 @@ export const PAGES = [
             { id: 'live-stock-dashboard', label: 'Live Stock Dashboard' },
             { id: 'live-stock', label: 'Live Stock Ledger' },
             { id: 'stock-management', label: 'Stocks' },
-            { id: 'daily-ledger', label: 'Daily Ledger' },
             { id: 'products', label: 'Products' },
             { id: 'product-type', label: 'Master Product' },
             { id: 'godowns', label: 'Godowns' },
@@ -25,6 +24,7 @@ export const PAGES = [
             { id: 'customers', label: 'Customers' },
             { id: 'vendors', label: 'Vendors' },
             { id: 'stock-notifications', label: 'Notifications' },
+            { id: 'direct-transport', label: 'Direct Transport' },
         ]
     },
     {

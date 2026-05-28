@@ -98,10 +98,13 @@ const PurArrival = () => {
   }, [displayDeliveries, searchTerm, filterLiftNo, filterProd, filterTrans, filterDate]);
 
   const updateEditRow = (id, field, value) => {
-    setEditData(prev => ({
-      ...prev,
-      [id]: { ...prev[id], [field]: value }
-    }));
+    setEditData(prev => {
+      const updated = { ...prev[id], [field]: value };
+      if (field === 'arrival_status' && value === 'Arrived') {
+        updated.delivery_date = new Date().toISOString().split('T')[0];
+      }
+      return { ...prev, [id]: updated };
+    });
   };
 
   const handleBagsChange = (id, bags) => {
@@ -458,8 +461,8 @@ const PurArrival = () => {
                         className={`w-24 px-2 py-1.5 border border-gray-200 rounded font-bold text-gray-700 text-xs focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all placeholder:text-gray-300 ${isDisabled ? 'bg-gray-50 border-transparent opacity-60' : 'bg-white'}`} placeholder="Vehicle #" />
                     </td>
                     <td className="px-1 py-4">
-                      <input type="date" value={row.delivery_date || ''} onChange={e => updateEditRow(d.id, 'delivery_date', e.target.value)} disabled={isDisabled}
-                        className={`w-[120px] px-2 py-1.5 border border-gray-200 rounded font-bold text-gray-700 text-xs focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all ${isDisabled ? 'bg-gray-50 border-transparent opacity-60' : 'bg-white'}`} />
+                      <input type="date" value={row.delivery_date || ''} onChange={e => updateEditRow(d.id, 'delivery_date', e.target.value)} disabled={isDisabled || row.arrival_status === 'Arrived'}
+                        className={`w-[120px] px-2 py-1.5 border border-gray-200 rounded font-bold text-gray-700 text-xs focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none transition-all ${isDisabled || row.arrival_status === 'Arrived' ? 'bg-gray-50 border-transparent opacity-60' : 'bg-white'}`} />
                     </td>
                     <td className="px-1 py-4 text-right">
                       <input type="number" step="0.01" value={row.received_qty_kg || ''} onChange={e => handleKgChange(d.id, e.target.value)} disabled={isDisabled}

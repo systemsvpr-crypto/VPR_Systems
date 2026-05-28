@@ -14,10 +14,11 @@ import {
 } from "@/components/ui/popover"
 
 export function DatePicker({ value, onChange, name, placeholder = "Pick a date", className, disabled }) {
+  const [isOpen, setIsOpen] = React.useState(false)
   const date = (value && !isNaN(new Date(value).getTime())) ? new Date(value) : undefined
 
   return (
-    <Popover>
+    <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
         <Button
           type="button"
@@ -39,6 +40,7 @@ export function DatePicker({ value, onChange, name, placeholder = "Pick a date",
           onSelect={(newDate) => {
             if (disabled && disabled(newDate)) return
             onChange({ target: { name, value: newDate ? format(newDate, 'yyyy-MM-dd') : '' } })
+            setIsOpen(false)
           }}
           initialFocus
           captionLayout="dropdown"
