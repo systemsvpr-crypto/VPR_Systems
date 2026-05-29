@@ -6,6 +6,7 @@ export const stockCorrectionService = {
       .from('stock_management')
       .select('*')
       .eq('transaction_type', 'correction')
+      .is('deleted_at', null)
       .order('created_at', { ascending: false });
 
     if (startDate) query = query.gte('date', startDate);
@@ -29,6 +30,7 @@ export const stockCorrectionService = {
       .from('stock_management')
       .select('*')
       .eq('date', date)
+      .is('deleted_at', null)
       .order('created_at', { ascending: true });
 
     if (error) throw error;
@@ -115,18 +117,21 @@ export const stockCorrectionService = {
 
       if (prodErr || !product) return;
 
-      const mux = parseFloat(product.mux) || 0;
-
       const { data: transactions } = await supabase
         .from('stock_management')
         .select('transaction_type, quantity')
-        .eq('product_id', productId);
+        .eq('product_id', productId)
+        .is('deleted_at', null)
+        .or('is_reversed.is.null,is_reversed.eq.false');
 
       let running = 0;
       (transactions || []).forEach(t => {
         const qty = parseFloat(t.quantity) || 0;
-        if (t.transaction_type === 'in' || t.transaction_type === 'adjustment') running += qty;
-        else running -= qty;
+        if (['in', 'purchase', 'transfer_in', 'return_in', 'opening'].includes(t.transaction_type)) {
+          running += qty;
+        } else {
+          running -= qty;
+        }
       });
       running = Math.max(0, running);
 

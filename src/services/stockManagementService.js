@@ -5,6 +5,7 @@ export const stockManagementService = {
         const { data, error } = await supabase
             .from('stock_management')
             .select('*')
+            .is('deleted_at', null)
             .order('created_at', { ascending: false });
         if (error) throw error;
         return data;
@@ -37,10 +38,13 @@ export const stockManagementService = {
         return true;
     },
 
-    async delete(entryId) {
+    async delete(entryId, deletedBy = 'system') {
         const { error } = await supabase
             .from('stock_management')
-            .delete()
+            .update({
+                deleted_at: new Date().toISOString(),
+                deleted_by: deletedBy
+            })
             .eq('entry_id', entryId);
         if (error) throw error;
         return true;
@@ -51,6 +55,7 @@ export const stockManagementService = {
             .from('stock_management')
             .select('*')
             .eq('godown_id', godownId)
+            .is('deleted_at', null)
             .order('date', { ascending: false });
         if (error) throw error;
         return data;
@@ -61,6 +66,7 @@ export const stockManagementService = {
             .from('stock_management')
             .select('*')
             .eq('product_id', productId)
+            .is('deleted_at', null)
             .order('date', { ascending: false });
         if (error) throw error;
         return data;
@@ -72,6 +78,7 @@ export const stockManagementService = {
             .select('*')
             .gte('date', startDate)
             .lte('date', endDate)
+            .is('deleted_at', null)
             .order('date', { ascending: false });
         if (error) throw error;
         return data;
@@ -82,6 +89,7 @@ export const stockManagementService = {
             .from('stock_management')
             .select('*')
             .eq('transaction_type', transactionType)
+            .is('deleted_at', null)
             .order('created_at', { ascending: false });
         if (error) throw error;
         return data;
@@ -192,18 +200,25 @@ export const stockManagementService = {
                 .eq('product_id', productId)
                 .single();
             if (prodErr || !product) return;
-            const mux = parseFloat(product.mux) || 0;
+
             const { data: transactions } = await supabase
                 .from('stock_management')
                 .select('transaction_type, quantity')
-                .eq('product_id', productId);
+                .eq('product_id', productId)
+                .is('deleted_at', null)
+                .or('is_reversed.is.null,is_reversed.eq.false');
+
             let running = 0;
             (transactions || []).forEach(t => {
                 const qty = parseFloat(t.quantity) || 0;
-                if (t.transaction_type === 'in' || t.transaction_type === 'adjustment') running += qty;
-                else running -= qty;
+                if (['in', 'purchase', 'transfer_in', 'return_in', 'opening'].includes(t.transaction_type)) {
+                    running += qty;
+                } else {
+                    running -= qty;
+                }
             });
             running = Math.max(0, running);
+
             await supabase
                 .from('products')
                 .update({
@@ -233,7 +248,8 @@ export const stockManagementService = {
         const { data, error } = await supabase
             .from('stock_management')
             .select('entry_id')
-            .ilike('entry_id', `${prefix}%`);
+            .ilike('entry_id', `${prefix}%`)
+            .is('deleted_at', null);
 
         if (error) throw error;
 
@@ -254,6 +270,25 @@ export const stockManagementService = {
     async regenerateDailySummary(date) {
         const { data, error } = await supabase
             .rpc('generate_daily_summary', { target_date: date });
+        if (error) throw error;
+        return data;
+    },
+
+    // ─── Batch Operations (atomic via server-side RPC) ────────────────────────
+
+    async batchCreate(entries) {
+        const { data, error } = await supabase
+            .rpc('batch_create_stock_entries', { entries });
+        if (error) throw error;
+        return data;
+    },
+
+    async batchSoftDelete(entryIds, deletedBy = 'system') {
+        const { data, error } = await supabase
+            .rpc('batch_soft_delete_stock_entries', {
+                entry_ids: entryIds,
+                deleted_by: deletedBy
+            });
         if (error) throw error;
         return data;
     },

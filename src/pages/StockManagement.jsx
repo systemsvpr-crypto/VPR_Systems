@@ -348,8 +348,6 @@ const StockManagement = () => {
             return;
         }
 
-        const today = new Date().toISOString().split('T')[0];
-
         try {
             if (editingEntry) {
                 // We will collect all products we need to recalculate later
@@ -595,12 +593,6 @@ const StockManagement = () => {
                     await stockManagementService.recalculateProductStock(pid);
                 }
 
-                // 4. Regenerate daily_stock_summary for previous dates so the cascade flows forward
-                const editDate = formData.date || editingEntry.date;
-                if (editDate && editDate !== today) {
-                    await stockManagementService.regenerateDailySummary(editDate);
-                }
-
                 toast.success('Entry updated successfully');
             } else {
                 const baseEntryId = await stockManagementService.getNextEntryId(formData.date);
@@ -733,10 +725,6 @@ const StockManagement = () => {
                     }
                 }
 
-                if (formData.date && formData.date !== today) {
-                    await stockManagementService.regenerateDailySummary(formData.date);
-                }
-
                 toast.success(`${formData.productItems.length} entries created successfully`);
             }
 
@@ -779,33 +767,28 @@ const StockManagement = () => {
 
         setIsDeleting(true);
         try {
-            const today = new Date().toISOString().split('T')[0];
             const entry = itemToDelete;
             const wasTransfer = entry.from_location && entry.transaction_type === 'in';
 
             const affectedProducts = new Set();
             affectedProducts.add(entry.product_id);
 
-            // If this was a transfer, delete the -SRC entry too
+                // If this was a transfer, delete the -SRC entry too
             if (wasTransfer) {
                 const sourceEntryId = entry.entry_id + '-SRC';
                 const srcRow = await stockManagementService.getSourceEntry(sourceEntryId);
                 if (srcRow) {
                     affectedProducts.add(srcRow.product_id);
-                    await stockManagementService.delete(sourceEntryId);
+                    await stockManagementService.delete(sourceEntryId, user?.full_name || 'system');
                 }
             }
 
             // Delete the main entry
-            await stockManagementService.delete(entry.entry_id);
+            await stockManagementService.delete(entry.entry_id, user?.full_name || 'system');
 
             // Recalculate stock for all affected products from transactions
             for (const pid of affectedProducts) {
                 await stockManagementService.recalculateProductStock(pid);
-            }
-
-            if (entry.date && entry.date !== today) {
-                await stockManagementService.regenerateDailySummary(entry.date);
             }
 
             toast.success('Entry deleted successfully');
