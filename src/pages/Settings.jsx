@@ -120,6 +120,8 @@ const Settings = () => {
                 page_access: user.page_access || DEFAULT_USER_PAGES,
                 profile_picture: user.profile_picture || '',
                 // Ensure nulls are empty strings for inputs
+                email: user.email || '',
+                full_name: user.full_name || '',
                 designation: user.designation || '',
                 phone_number: user.phone_number || '',
                 date_of_birth: user.date_of_birth || '',
@@ -279,7 +281,7 @@ const Settings = () => {
             const existingNameUser = await userService.checkDuplicate('username', cleanedData.username, editingUser?.user_id);
 
             const conflictErrors = {};
-            if (existingNameUser) {
+            if (existingNameUser && existingNameUser.length > 0) {
                 conflictErrors.username = 'This Username is already taken';
             }
 
