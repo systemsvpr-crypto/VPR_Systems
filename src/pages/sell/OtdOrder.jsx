@@ -421,21 +421,7 @@ const OtdOrder = () => {
       return;
     }
 
-    const hasStockErrors = formData.items.some(item => {
-      if (!item.itemName || !item.godownName || !item.qty) return false;
-      const itemKey = normalize(item.itemName);
-      const godownKey = normalize(item.godownName);
-      const stockArr = stockDataMap[itemKey] || [];
-      const stockObj = stockArr.find(st => normalize(st.godown) === godownKey);
-      const availableStock = stockObj ? stockObj.stock : 0;
-      return Number(item.qty) > availableStock;
-    });
 
-    if (hasStockErrors) {
-      toast.error('One or more items exceed available stock. Please correct them before submitting.');
-      setIsSubmitting(false);
-      return;
-    }
 
     const hasDuplicateErrors = formData.items.some((item, index) => {
       if (!item.itemName || !item.godownName) return false;
@@ -952,7 +938,7 @@ const OtdOrder = () => {
                       const stockArr = itemKey ? (stockDataMap[itemKey] || []) : [];
                       const stockObj = godownKey ? stockArr.find(st => normalize(st.godown) === godownKey) : null;
                       const availableStock = stockObj ? stockObj.stock : 0;
-                      const hasStockError = Boolean(itemKey && godownKey && item.qty && Number(item.qty) > availableStock);
+                      const hasStockError = false;
                       
                       const usedGodownsForThisItem = formData.items
                         .map((otherItem, otherIndex) => (otherIndex !== index && otherItem.itemName && normalize(otherItem.itemName) === itemKey) ? normalize(otherItem.godownName) : null)
@@ -1008,7 +994,7 @@ const OtdOrder = () => {
                             <SearchableDropdown
                               value={item.godownName}
                               onChange={(val) => handleItemChange(index, 'godownName', val)}
-                              options={itemKey ? stockArr.filter(st => st.stock > 0 && !usedGodownsForThisItem.includes(normalize(st.godown))).map(st => st.godown) : godowns}
+                              options={itemKey ? stockArr.filter(st => !usedGodownsForThisItem.includes(normalize(st.godown))).map(st => st.godown) : godowns}
                               placeholder="Select Godown"
                               showAll={false}
                             />
