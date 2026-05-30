@@ -224,8 +224,7 @@ const LiveStockDashboard = () => {
     // Powers the Godown Distribution table — needs complete data for accurate totals.
     const fetchAllProducts = async () => {
         try {
-            const data = await liveStockDashboardService.fetchDashboardData(summaryDate);
-            let accumulated = data.products || [];
+            let accumulated = await stockManagementService.fetchAllProducts();
             if (filterGodown) {
                 accumulated = accumulated.filter(p => p.godown_id === filterGodown);
             }
@@ -242,8 +241,7 @@ const LiveStockDashboard = () => {
         else setLoadingMore(true);
 
         try {
-            const data = await liveStockDashboardService.fetchDashboardData(summaryDate);
-            let filtered = data.products || [];
+            let filtered = await stockManagementService.fetchAllProducts();
 
             if (searchTerm) {
                 const term = searchTerm.toLowerCase();
@@ -491,39 +489,34 @@ const LiveStockDashboard = () => {
     }, [summaryDate, searchTerm, filterGodown]);
 
     const handleExport = async () => {
-        const toastId = toast.loading("Preparing export of all records...");
+        const toastId = toast.loading("Preparing export...");
         try {
-            const data = await liveStockDashboardService.fetchDashboardData(summaryDate);
-            let accumulated = data.products || [];
-
-            if (searchTerm) {
-                const term = searchTerm.toLowerCase();
-                accumulated = accumulated.filter(p =>
-                    (p.name || '').toLowerCase().includes(term) ||
-                    (p.product_id || '').toLowerCase().includes(term)
-                );
-            }
-            if (filterGodown) {
-                accumulated = accumulated.filter(p => p.godown_id === filterGodown);
-            }
-
-            if (accumulated.length === 0) {
+            if (!editableSummary || editableSummary.length === 0) {
                 toast.error("No data found to export", { id: toastId });
                 return;
             }
 
-            const godownMap = {};
-            godowns.forEach(g => { godownMap[g.godown_id] = g.name; });
+            let exportData = editableSummary;
 
-            const headers = ["Item Name", "Product Type", "Godown Name", "Current Quantity"];
-            const rows = accumulated.map(p => {
-                return [
-                    p.name || '',
-                    p.product_type || '',
-                    godownMap[p.godown_id] || p.godown_id || 'Not Assigned',
-                    p.current_stock ?? 0
-                ];
-            });
+            if (filterGodown) {
+                exportData = exportData.filter(s => s.godown_id === filterGodown);
+            }
+            if (searchTerm) {
+                const term = searchTerm.toLowerCase();
+                exportData = exportData.filter(s =>
+                    (s.product_name || '').toLowerCase().includes(term) ||
+                    (s.product_id || '').toLowerCase().includes(term)
+                );
+            }
+
+            if (exportData.length === 0) {
+                toast.error("No data found to export", { id: toastId });
+                return;
+            }
+
+            const godownFilterLabel = filterGodown
+                ? (godowns.find(g => g.godown_id === filterGodown)?.name || filterGodown)
+                : 'All Godowns';
 
             let formattedDate = summaryDate;
             if (summaryDate && summaryDate.includes('-')) {
@@ -531,8 +524,24 @@ const LiveStockDashboard = () => {
                 formattedDate = `${day}/${month}/${year}`;
             }
 
+            const headers = ["Item Name", "Product Type", "Godown Name", "Opening", "Stock In", "Stock Out", "Closing", "Current Stock"];
+            const rows = exportData.map(s => {
+                const safeVal = (v) => typeof v === 'number' && !isNaN(v) ? v : 0;
+                return [
+                    s.product_name || '',
+                    s.product_type || '',
+                    s.godown_name || '',
+                    safeVal(s.opening_stock),
+                    safeVal(s.in_stock),
+                    safeVal(s.out_stock),
+                    safeVal(s.closing_stock),
+                    safeVal(s.current_stock),
+                ];
+            });
+
             const csvContent = [
                 ["Date:", formattedDate],
+                ["Godown:", godownFilterLabel],
                 [],
                 headers,
                 ...rows
@@ -550,7 +559,7 @@ const LiveStockDashboard = () => {
             link.click();
             document.body.removeChild(link);
 
-            toast.success(`Exported ${accumulated.length} records successfully!`, { id: toastId });
+            toast.success(`Exported ${exportData.length} records successfully!`, { id: toastId });
         } catch (error) {
             console.error('Error during export:', error);
             toast.error('Failed to export data: ' + error.message, { id: toastId });
@@ -561,71 +570,71 @@ const LiveStockDashboard = () => {
         <div className="min-h-screen bg-slate-50/50 flex flex-col">
             <main className="flex-1 px-4 lg:px-8 space-y-6 max-w-[1600px] mx-auto w-full animate-in fade-in duration-700">
                 {/* Global Controls */}
-                <div className="sticky top-0 z-40 bg-slate-50/50 pt-2 pb-3 -mx-4 lg:-mx-8 px-4 lg:px-8 flex flex-col lg:flex-row items-center gap-3">
-                    <div className="flex items-center gap-2 shrink-0">
+                <div className="sticky top-0 z-40 bg-slate-50/50 pt-2 pb-3 -mx-4 lg:-mx-8 px-4 lg:px-8 flex flex-row flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1.5 shrink-0">
                         <button
                             onClick={() => setActiveTab('master')}
                             className={cn(
-                                "px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all",
+                                "h-9 px-2.5 sm:px-4 rounded-lg text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all",
                                 activeTab === 'master' 
                                     ? "bg-white text-primary shadow-sm border border-slate-200/60" 
                                     : "text-slate-400 hover:text-slate-600"
                             )}
                         >
-                            Master Inventory
+                            Master
                         </button>
                         <button
                             onClick={() => setActiveTab('live')}
                             className={cn(
-                                "px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all",
+                                "h-9 px-2.5 sm:px-4 rounded-lg text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all",
                                 activeTab === 'live' 
                                     ? "bg-white text-primary shadow-sm border border-slate-200/60" 
                                     : "text-slate-400 hover:text-slate-600"
                             )}
                         >
-                            Live Status
+                            Live
                         </button>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row flex-1 items-center gap-3 w-full">
-                        <div className="relative w-full sm:flex-1">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <div className="flex flex-row flex-wrap items-center gap-1.5 sm:gap-2 flex-1 min-w-[260px]">
+                        <div className="relative w-[140px] sm:w-[180px] lg:w-[240px] shrink-0">
+                            <Search className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
                             <Input
                                 type="text"
                                 placeholder="Search..."
-                                className="pl-9 h-10 bg-white border-slate-200 focus:bg-white transition-all rounded-xl text-sm w-full"
+                                className="pl-8 sm:pl-9 h-9 bg-white border-slate-200 focus:bg-white transition-all rounded-xl text-xs w-full"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
                         </div>
                         
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1.5 shrink-0">
                             <select
                                 value={filterGodown}
                                 onChange={(e) => setFilterGodown(e.target.value)}
-                                className="text-xs font-medium text-slate-600 bg-transparent focus:outline-none cursor-pointer"
+                                className="h-9 text-[10px] sm:text-xs font-medium text-slate-600 bg-transparent focus:outline-none cursor-pointer max-w-[80px] sm:max-w-none truncate"
                             >
                                 <option value="">All Godowns</option>
                                 {godowns.map(g => (
                                     <option key={g.godown_id} value={g.godown_id}>{g.name}</option>
                                 ))}
                             </select>
-                            <span className="text-slate-200">|</span>
+                            <span className="text-slate-200 hidden sm:inline">|</span>
                             <DatePicker
                                 value={summaryDate}
                                 onChange={(e) => { if (e.target.value) setSummaryDate(e.target.value); }}
                                 name="summaryDate"
-                                className="border-none bg-transparent h-8 text-xs font-medium text-slate-600"
+                                className="border-none bg-transparent h-9 text-[10px] sm:text-xs font-medium text-slate-600"
                             />
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0 w-full lg:w-auto">
+                    <div className="flex items-center gap-1.5 shrink-0">
                         {Object.keys(changedRows).length > 0 && (
                             <button
                                 onClick={handleSaveAll}
                                 disabled={saving}
-                                className="h-9 px-4 rounded-lg bg-emerald-600 text-white text-[11px] font-bold uppercase tracking-wider hover:bg-emerald-500 transition-all flex items-center justify-center gap-1.5 w-full lg:w-auto disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="h-9 px-3 rounded-lg bg-emerald-600 text-white text-[10px] font-bold uppercase tracking-wider hover:bg-emerald-500 transition-all flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                                 <Save size={14} />
                                 {saving ? 'Saving...' : `Save (${Object.keys(changedRows).length})`}
@@ -633,7 +642,7 @@ const LiveStockDashboard = () => {
                         )}
                         <button
                             onClick={handleExport}
-                            className="h-9 px-4 rounded-lg bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider hover:bg-slate-800 transition-all flex items-center justify-center gap-1.5 w-full lg:w-auto"
+                            className="h-9 px-3 rounded-lg bg-slate-900 text-white text-[10px] font-bold uppercase tracking-wider hover:bg-slate-800 transition-all flex items-center justify-center gap-1"
                         >
                             <Download size={14} />
                             Export
@@ -642,7 +651,7 @@ const LiveStockDashboard = () => {
                             onClick={() => { fetchGodownsAndTransactions(); fetchProducts(0, true); }}
                             className="h-9 w-9 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-primary hover:border-primary/30 transition-all flex items-center justify-center"
                         >
-                            <RefreshCcw size={15} className={cn(loading && "animate-spin")} />
+                            <RefreshCcw size={14} className={cn(loading && "animate-spin")} />
                         </button>
                     </div>
                 </div>
@@ -662,12 +671,12 @@ const LiveStockDashboard = () => {
                                     <table className="w-full text-left border-collapse">
                                         <thead>
                                             <tr className="bg-slate-50/50 border-b border-slate-100">
-                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Godown Location</th>
-                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Opening</th>
-                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Stock In</th>
-                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Stock Out</th>
-                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Closing</th>
-                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Transfers</th>
+                                                <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Godown Location</th>
+                                                <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Opening</th>
+                                                <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Stock In</th>
+                                                <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Stock Out</th>
+                                                <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Closing</th>
+                                                <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Transfers</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-50">
@@ -675,7 +684,7 @@ const LiveStockDashboard = () => {
                                                 if (isFutureDate) {
                                                     return (
                                                         <tr key={godown.godown_id} className="group hover:bg-slate-50/80 transition-colors">
-                                                            <td className="px-6 py-4">
+                                                            <td className="px-3 sm:px-6 py-4">
                                                                 <div className="flex items-center gap-3">
                                                                     <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 group-hover:bg-primary/10 group-hover:text-primary transition-colors">
                                                                         <MapPin size={14} />
@@ -686,11 +695,11 @@ const LiveStockDashboard = () => {
                                                                     </div>
                                                                 </div>
                                                             </td>
-                                                            <td className="px-6 py-4 text-center text-xs text-slate-300">-</td>
-                                                            <td className="px-6 py-4 text-center text-xs text-slate-300">-</td>
-                                                            <td className="px-6 py-4 text-center text-xs text-slate-300">-</td>
-                                                            <td className="px-6 py-4 text-center text-xs text-slate-300">-</td>
-                                                            <td className="px-6 py-4 text-center text-xs text-slate-300">-</td>
+                                                            <td className="px-3 sm:px-6 py-4 text-center text-xs text-slate-300">-</td>
+                                                            <td className="px-3 sm:px-6 py-4 text-center text-xs text-slate-300">-</td>
+                                                            <td className="px-3 sm:px-6 py-4 text-center text-xs text-slate-300">-</td>
+                                                            <td className="px-3 sm:px-6 py-4 text-center text-xs text-slate-300">-</td>
+                                                            <td className="px-3 sm:px-6 py-4 text-center text-xs text-slate-300">-</td>
                                                         </tr>
                                                     );
                                                 }
@@ -721,7 +730,7 @@ const LiveStockDashboard = () => {
 
                                                 return (
                                                     <tr key={godown.godown_id} className="group hover:bg-slate-50/80 transition-colors">
-                                                        <td className="px-6 py-4">
+                                                        <td className="px-3 sm:px-6 py-4">
                                                             <div className="flex items-center gap-3">
                                                                 <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-500 group-hover:bg-primary/10 group-hover:text-primary transition-colors">
                                                                     <MapPin size={14} />
@@ -732,19 +741,19 @@ const LiveStockDashboard = () => {
                                                                 </div>
                                                             </div>
                                                         </td>
-                                                        <td className="px-6 py-4 text-center font-mono text-xs text-slate-600">
+                                                        <td className="px-3 sm:px-6 py-4 text-center font-mono text-xs text-slate-600">
                                                             {displayOpening.toLocaleString()}
                                                         </td>
-                                                        <td className="px-6 py-4 text-center">
+                                                        <td className="px-3 sm:px-6 py-4 text-center">
                                                             <span className="text-xs font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md">+{displayIn.toLocaleString()}</span>
                                                         </td>
-                                                        <td className="px-6 py-4 text-center">
+                                                        <td className="px-3 sm:px-6 py-4 text-center">
                                                             <span className="text-xs font-black text-rose-600 bg-rose-50 px-2 py-1 rounded-md">-{displayOut.toLocaleString()}</span>
                                                         </td>
-                                                        <td className="px-6 py-4 text-center text-sm font-black text-slate-900">
+                                                        <td className="px-3 sm:px-6 py-4 text-center text-sm font-black text-slate-900">
                                                             {displayClosing.toLocaleString()}
                                                         </td>
-                                                        <td className="px-6 py-4 text-center">
+                                                        <td className="px-3 sm:px-6 py-4 text-center">
                                                             <button
                                                                 onClick={() => setSelectedTransfer({ type: 'godown', id: godown.godown_id, name: godown.name })}
                                                                 className={cn(
@@ -792,15 +801,15 @@ const LiveStockDashboard = () => {
                                             <table className="w-full text-left border-collapse">
                                                 <thead>
                                                     <tr className="bg-slate-50/50 border-b border-slate-100">
-                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-10">#</th>
-                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Product Details</th>
-                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Location</th>
-                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Opening</th>
-                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">In</th>
-                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Out</th>
-                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Closing</th>
-                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Current Stock</th>
-                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Transfers</th>
+                                                        <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-10">#</th>
+                                                        <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Product Details</th>
+                                                        <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Location</th>
+                                                        <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Opening</th>
+                                                        <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">In</th>
+                                                        <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Out</th>
+                                                        <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Closing</th>
+                                                        <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Current Stock</th>
+                                                        <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Transfers</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-50">
@@ -826,30 +835,30 @@ const LiveStockDashboard = () => {
                                                                         }
                                                                     }}
                                                                 >
-                                                                    <td className="px-6 py-4 text-center text-xs font-mono text-slate-400">{++rowIndex}</td>
-                                                                    <td className="px-6 py-4">
+                                                                    <td className="px-3 sm:px-6 py-4 text-center text-xs font-mono text-slate-400">{++rowIndex}</td>
+                                                                    <td className="px-3 sm:px-6 py-4">
                                                                         <p className="text-sm font-bold text-slate-900 leading-none">{s.product_name}</p>
                                                                         <p className="text-[10px] text-slate-400 font-mono tracking-tighter mt-0.5">{s.product_id}</p>
                                                                     </td>
-                                                                    <td className="px-6 py-4">
+                                                                    <td className="px-3 sm:px-6 py-4">
                                                                         <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-2 py-1 rounded uppercase tracking-wider">{s.godown_name}</span>
                                                                     </td>
-                                                                     <td className="px-6 py-4 text-center font-mono text-xs text-slate-500">
+                                                                     <td className="px-3 sm:px-6 py-4 text-center font-mono text-xs text-slate-500">
                                                                          {displayOpening}
                                                                      </td>
-<td className="px-6 py-4 text-center">
+<td className="px-3 sm:px-6 py-4 text-center">
                                                                          <span className="text-xs font-black text-emerald-600">{String(displayIn) === '-' ? '-' : `+${displayIn}`}</span>
                                                                      </td>
-                                                                     <td className="px-6 py-4 text-center">
+                                                                     <td className="px-3 sm:px-6 py-4 text-center">
                                                                          <span className="text-xs font-black text-rose-600">{String(displayOut) === '-' ? '-' : `-${displayOut}`}</span>
                                                                      </td>
-                                                                     <td className="px-6 py-4 text-center">
+                                                                     <td className="px-3 sm:px-6 py-4 text-center">
                                                                          <span className={cn("text-xs font-black", isRowChanged ? "text-amber-700" : "text-slate-900")}>{displayClosing ?? '-'}</span>
                                                                      </td>
-                                                                    <td className="px-6 py-4 text-center font-mono text-xs text-slate-600">
+                                                                    <td className="px-3 sm:px-6 py-4 text-center font-mono text-xs text-slate-600">
                                                                         {parseFloat(s.current_stock) || 0}
                                                                     </td>
-                                                                    <td className="px-6 py-4 text-center">
+                                                                    <td className="px-3 sm:px-6 py-4 text-center">
                                                                         <button
                                                                             onClick={(e) => { e.stopPropagation(); setSelectedTransfer({ type: 'product', id: s.product_id, godown_id: s.godown_id, name: s.product_name }); }}
                                                                             className={cn(
@@ -936,16 +945,16 @@ const LiveStockDashboard = () => {
                                                 </tbody>
                                                 <tfoot>
                                                     <tr className="bg-slate-100 border-t-2 border-slate-300">
-                                                        <td className="px-4 py-3"></td>
-                                                        <td className="px-4 py-3 text-[10px] font-black text-slate-600 uppercase tracking-widest" colSpan={2}>
+                                                        <td className="px-3 sm:px-4 py-3"></td>
+                                                        <td className="px-3 sm:px-4 py-3 text-[10px] font-black text-slate-600 uppercase tracking-widest" colSpan={2}>
                                                             <span className="flex items-center gap-1"><Package size={12} /> Totals</span>
                                                         </td>
-                                                        <td className="px-4 py-3 text-center font-mono text-sm font-black text-slate-900">{totalStats.opening.toLocaleString()}</td>
-                                                        <td className="px-4 py-3 text-center font-mono text-sm font-black text-emerald-700">{totalStats.in_stock.toLocaleString()}</td>
-                                                        <td className="px-4 py-3 text-center font-mono text-sm font-black text-rose-700">{totalStats.out_stock.toLocaleString()}</td>
-                                                        <td className="px-4 py-3 text-center font-mono text-sm font-black text-slate-900">{totalStats.closing.toLocaleString()}</td>
-                                                        <td className="px-4 py-3 text-center font-mono text-sm font-black text-slate-600">{totalStats.currentStock.toLocaleString()}</td>
-                                                        <td className="px-4 py-3 text-center"></td>
+                                                        <td className="px-3 sm:px-4 py-3 text-center font-mono text-sm font-black text-slate-900">{totalStats.opening.toLocaleString()}</td>
+                                                        <td className="px-3 sm:px-4 py-3 text-center font-mono text-sm font-black text-emerald-700">{totalStats.in_stock.toLocaleString()}</td>
+                                                        <td className="px-3 sm:px-4 py-3 text-center font-mono text-sm font-black text-rose-700">{totalStats.out_stock.toLocaleString()}</td>
+                                                        <td className="px-3 sm:px-4 py-3 text-center font-mono text-sm font-black text-slate-900">{totalStats.closing.toLocaleString()}</td>
+                                                        <td className="px-3 sm:px-4 py-3 text-center font-mono text-sm font-black text-slate-600">{totalStats.currentStock.toLocaleString()}</td>
+                                                        <td className="px-3 sm:px-4 py-3 text-center"></td>
                                                     </tr>
                                                 </tfoot>
                                             </table>
@@ -1040,18 +1049,18 @@ const LiveStockDashboard = () => {
                                     <table className="w-full text-left border-collapse">
                                         <thead>
                                             <tr className="bg-slate-50/50 border-b border-slate-100">
-                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Asset Details</th>
-                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Location</th>
-                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">MUX</th>
-                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Units</th>
-                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Total Mass (KG)</th>
-                                                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Current Stock</th>
+                                                <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Asset Details</th>
+                                                <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Location</th>
+                                                <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">MUX</th>
+                                                <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Units</th>
+                                                <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Total Mass (KG)</th>
+                                                <th className="px-3 sm:px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Current Stock</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-50">
                                             {filteredStock.map((stock) => (
                                                 <tr key={`${stock.product_id}-${stock.godown_id}`} className="group hover:bg-slate-50/80 transition-colors">
-                                                    <td className="px-6 py-4">
+                                                    <td className="px-3 sm:px-6 py-4">
                                                         <div className="flex items-center gap-3">
                                                             <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all">
                                                                 <Package size={18} />
@@ -1062,20 +1071,20 @@ const LiveStockDashboard = () => {
                                                             </div>
                                                         </div>
                                                     </td>
-                                                    <td className="px-6 py-4">
+                                                    <td className="px-3 sm:px-6 py-4">
                                                         <div className="flex items-center gap-2">
                                                             <MapPin size={12} className="text-slate-400" />
                                                             <span className="text-xs font-black text-slate-600 uppercase tracking-tight">{stock.godown_name}</span>
                                                         </div>
                                                     </td>
-                                                    <td className="px-6 py-4 text-center font-bold text-slate-900">{stock.mux || '-'}</td>
-                                                    <td className="px-6 py-4 text-center font-black text-slate-900">{stock.current_stock}</td>
-                                                    <td className="px-6 py-4 text-center">
+                                                    <td className="px-3 sm:px-6 py-4 text-center font-bold text-slate-900">{stock.mux || '-'}</td>
+                                                    <td className="px-3 sm:px-6 py-4 text-center font-black text-slate-900">{stock.current_stock}</td>
+                                                    <td className="px-3 sm:px-6 py-4 text-center">
                                                         <span className="px-3 py-1 bg-primary/5 text-primary text-xs font-black rounded-lg border border-primary/10">
                                                             {((parseFloat(stock.mux) || 0) * (parseFloat(stock.current_stock) || 0)).toFixed(3)}
                                                         </span>
                                                     </td>
-                                                    <td className="px-6 py-4 text-center font-mono text-xs font-black text-slate-900">{stock.current_stock}</td>
+                                                    <td className="px-3 sm:px-6 py-4 text-center font-mono text-xs font-black text-slate-900">{stock.current_stock}</td>
                                                 </tr>
                                             ))}
                                         </tbody>

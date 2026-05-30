@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Plus, Edit2, X, Package, Layers, Tag, Weight, ToggleLeft, ToggleRight, CheckCircle2, Info, RefreshCw } from 'lucide-react';
+import { Search, Plus, Edit2, X, Package, Layers, Tag, Weight, ToggleLeft, ToggleRight, CheckCircle2, Info, RefreshCw, Download } from 'lucide-react';
 import { productService } from '../services/productService';
+import { stockManagementService } from '../services/stockManagementService';
 import useAuthStore from '../store/authStore';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { DatePicker } from '@/components/ui/date-picker';
 import Pagination from '@/components/ui/Pagination';
 import { cn } from '@/lib/utils';
 import {
@@ -40,6 +42,7 @@ const Products = ({ isTab = false }) => {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [filterStatus, setFilterStatus] = useState('all');
+    const [filterExportGodown, setFilterExportGodown] = useState('all');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
@@ -48,6 +51,8 @@ const Products = ({ isTab = false }) => {
     const [confirmDisable, setConfirmDisable] = useState(null);
     const [stats, setStats] = useState({ total: 0, active: 0 });
     const [totalFiltered, setTotalFiltered] = useState(0);
+    const todayStr = new Date().toISOString().split('T')[0];
+    const [exportDate, setExportDate] = useState(todayStr);
 
     // Bulk Edit Opening Balances States
     const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
@@ -258,6 +263,115 @@ const Products = ({ isTab = false }) => {
         }
     };
 
+    const handleExport = async () => {
+        const toastId = toast.loading("Preparing export...");
+        try {
+            const todayStr = new Date().toISOString().split('T')[0];
+            const nextDay = new Date(exportDate);
+            nextDay.setDate(nextDay.getDate() + 1);
+            const nextDayStr = nextDay.toISOString().split('T')[0];
+
+            const [allProducts, dayEntries, futureEntries] = await Promise.all([
+                productService.getAllBatched('', filterExportGodown),
+                stockManagementService.getByDateRange(exportDate, exportDate),
+                nextDayStr <= todayStr
+                    ? stockManagementService.getByDateRange(nextDayStr, todayStr)
+                    : Promise.resolve([]),
+            ]);
+
+            if (!allProducts || allProducts.length === 0) {
+                toast.error("No products found to export", { id: toastId });
+                return;
+            }
+
+            // Aggregate stock in/out by product_id + godown_id
+            const aggregate = (entries) => {
+                const map = {};
+                for (const tx of entries || []) {
+                    const key = `${tx.product_id}|${tx.godown_id}`;
+                    if (!map[key]) map[key] = { in: 0, out: 0 };
+                    if (tx.transaction_type === 'in') {
+                        map[key].in += parseFloat(tx.quantity) || 0;
+                    } else {
+                        map[key].out += parseFloat(tx.quantity) || 0;
+                    }
+                }
+                return map;
+            };
+
+            const dayMap = aggregate(dayEntries);
+            const futureMap = aggregate(futureEntries);
+
+            const godownName = filterExportGodown !== 'all'
+                ? (godowns.find(g => g.godown_id === filterExportGodown)?.name || filterExportGodown)
+                : 'All Godowns';
+
+            let formattedDate = exportDate;
+            if (exportDate && exportDate.includes('-')) {
+                const [y, m, d] = exportDate.split('-');
+                formattedDate = `${d}/${m}/${y}`;
+            }
+
+            const godownOrder = ["Top", "Godown", "DP", "Dusera", "Darba", "Bottom"];
+            const godownRank = {};
+            godownOrder.forEach((name, i) => { godownRank[name] = i; });
+
+            const headers = ["Item Name", "Godown Name", "Opening Stock", "Stock In", "Stock Out", "Closing Stock"];
+            let rows = allProducts.map(p => {
+                const key = `${p.product_id}|${p.godown_id}`;
+                const d = dayMap[key] || { in: 0, out: 0 };
+                const f = futureMap[key] || { in: 0, out: 0 };
+                const currentStock = parseFloat(p.current_stock) || 0;
+                // opening = currentStock - all 'in' from date onwards + all 'out' from date onwards
+                const opening = currentStock - d.in - f.in + d.out + f.out;
+                const closing = opening + d.in - d.out;
+                const godownName = godowns.find(g => g.godown_id === p.godown_id)?.name || p.godown_id;
+                return [
+                    p.name || '',
+                    godownName,
+                    opening,
+                    d.in || 0,
+                    d.out || 0,
+                    closing,
+                ];
+            });
+
+            rows.sort((a, b) => {
+                const rankA = godownRank[a[1]] ?? godownOrder.length;
+                const rankB = godownRank[b[1]] ?? godownOrder.length;
+                if (rankA !== rankB) return rankA - rankB;
+                return (a[0] || '').localeCompare(b[0] || '');
+            });
+
+            const csvContent = [
+                ["Date:", formattedDate],
+                ["Godown:", godownName],
+                ["Total Items:", allProducts.length],
+                [],
+                headers,
+                ...rows
+            ]
+                .map(row => row.map(cell => `"${(cell ?? '').toString().replace(/"/g, '""')}"`).join(","))
+                .join("\n");
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            const label = filterExportGodown !== 'all' ? filterExportGodown : 'AllGodowns';
+            link.setAttribute("download", `Stock_Summary_${exportDate}_${label}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+
+            toast.success(`Exported ${allProducts.length} records successfully!`, { id: toastId });
+        } catch (error) {
+            console.error('Error during export:', error);
+            toast.error('Failed to export: ' + error.message, { id: toastId });
+        }
+    };
+
     const fetchProducts = async () => {
         setLoading(true);
         try {
@@ -464,6 +578,32 @@ const Products = ({ isTab = false }) => {
 
                         {!loading && (
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:flex gap-2 w-full sm:w-auto shrink-0">
+                                <div className="flex items-center gap-1 border border-slate-200 rounded-lg overflow-hidden bg-white">
+                                    <select
+                                        value={filterExportGodown}
+                                        onChange={(e) => setFilterExportGodown(e.target.value)}
+                                        className="h-10 px-2 text-xs font-semibold text-slate-600 bg-transparent focus:outline-none cursor-pointer border-r border-slate-100 max-w-[110px]"
+                                    >
+                                        <option value="all">All Godowns</option>
+                                        {godowns.map(g => (
+                                            <option key={g.godown_id} value={g.godown_id}>{g.name}</option>
+                                        ))}
+                                    </select>
+                                    <div className="w-[160px] border-r border-slate-100">
+                                        <DatePicker
+                                            value={exportDate}
+                                            onChange={(e) => setExportDate(e.target.value)}
+                                            className="border-none bg-transparent h-10 text-xs font-semibold text-slate-600"
+                                        />
+                                    </div>
+                                    <button
+                                        onClick={handleExport}
+                                        className="h-10 px-3 flex items-center gap-1.5 text-slate-600 hover:text-primary hover:bg-slate-50 transition-all text-xs font-bold"
+                                    >
+                                        <Download size={14} />
+                                        Export
+                                    </button>
+                                </div>
                                 <Button 
                                     onClick={handleOpenBulkModal} 
                                     variant="outline" 

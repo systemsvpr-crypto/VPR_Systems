@@ -12,7 +12,8 @@ import {
     Trash2,
     Shield,
     RefreshCw,
-    ArrowLeft
+    ArrowLeft,
+    CalendarDays
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { stockManagementService } from '../services/stockManagementService';
@@ -38,13 +39,6 @@ import {
 } from '@/components/ui/Select';
 
 const ITEMS_PER_PAGE = 10;
-
-const isEditableDate = (dateStr) => {
-    if (!dateStr) return false;
-    const today = new Date().toISOString().split('T')[0];
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-    return dateStr === today || dateStr === yesterday;
-};
 
 const DEFAULT_FORM_DATA = {
     entry_id: '',
@@ -155,21 +149,6 @@ const StockManagement = () => {
 
     const handleOpenModal = (entry = null) => {
         if (entry) {
-            const entryDate = entry.date || '';
-            if (!isEditableDate(entryDate)) {
-                toast.error('You can only edit entries from today or yesterday');
-                return;
-            }
-            const entryId = entry.entry_id || '';
-            const baseId = entryId.endsWith('-SRC') ? entryId.slice(0, -4) : entryId;
-            if (baseId.startsWith('STK-SAL-') || baseId.startsWith('ARR-')) {
-                toast.error('Cannot edit entries created by sales or purchase');
-                return;
-            }
-            if (entryId.endsWith('-SRC')) {
-                toast.error('Transfer entries cannot be edited independently');
-                return;
-            }
             setEditingEntry(entry);
             // If this was a Stock-In with no from_location (null/empty) it was created as
             // "New Stock (From System)". Restore the sentinel value so the form pre-selects it.
@@ -213,10 +192,6 @@ const StockManagement = () => {
 
     const handleDateChange = async (e) => {
         const selectedDate = e.target.value;
-        if (selectedDate && !isEditableDate(selectedDate)) {
-            toast.error('You can only select today or yesterday');
-            return;
-        }
         setFormData(prev => ({
             ...prev,
             date: selectedDate,
@@ -746,27 +721,6 @@ const StockManagement = () => {
     const confirmDelete = async () => {
         if (!itemToDelete) return;
 
-        if (!isEditableDate(itemToDelete.date || '')) {
-            toast.error('You can only delete entries from today or yesterday');
-            setIsDeleteModalOpen(false);
-            setItemToDelete(null);
-            return;
-        }
-        const delEntryId = itemToDelete.entry_id || '';
-        const delBaseId = delEntryId.endsWith('-SRC') ? delEntryId.slice(0, -4) : delEntryId;
-        if (delBaseId.startsWith('STK-SAL-') || delBaseId.startsWith('ARR-')) {
-            toast.error('Cannot delete entries created by sales or purchase');
-            setIsDeleteModalOpen(false);
-            setItemToDelete(null);
-            return;
-        }
-        if (delEntryId.endsWith('-SRC')) {
-            toast.error('Transfer entries cannot be deleted independently');
-            setIsDeleteModalOpen(false);
-            setItemToDelete(null);
-            return;
-        }
-
         setIsDeleting(true);
         try {
             const today = new Date().toISOString().split('T')[0];
@@ -1002,6 +956,60 @@ const StockManagement = () => {
                     </div>
                 </div>
 
+                {/* Summary Banner */}
+                {(filterDate || filterGodown !== 'all') && (() => {
+                    const filtered = entries.filter(e => {
+                        if (filterDate) {
+                            const entryDate = e.date ? e.date.split('T')[0] : '';
+                            if (entryDate !== filterDate) return false;
+                        }
+                        if (filterGodown !== 'all' && e.godown_id !== filterGodown) return false;
+                        return true;
+                    });
+                    const totalIn = filtered
+                        .filter(e => e.transaction_type === 'in')
+                        .reduce((s, e) => s + (parseFloat(e.quantity) || 0), 0);
+                    const totalOut = filtered
+                        .filter(e => e.transaction_type === 'out')
+                        .reduce((s, e) => s + (parseFloat(e.quantity) || 0), 0);
+                    const net = totalIn - totalOut;
+                    const entryCount = filtered.length;
+                    const godownName = filterGodown !== 'all' ? getGodownName(filterGodown) : null;
+                    return (
+                        <div className="bg-gradient-to-r from-emerald-50 to-rose-50 rounded-xl border border-slate-200 shadow-sm p-4 flex items-center justify-between gap-4 flex-wrap">
+                            <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                                <Package size={16} className="text-slate-400" />
+                                Summary
+                                {filterDate && <span>for <span className="font-bold text-slate-900">{filterDate}</span></span>}
+                                {filterGodown !== 'all' && <span>for <span className="font-bold text-slate-900">{godownName}</span></span>}
+                                <span className="text-xs font-medium text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-200">{entryCount} entry{entryCount !== 1 ? 'ies' : 'y'}</span>
+                            </div>
+                            <div className="flex items-center gap-6">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                                    <span className="text-sm font-medium text-slate-600">Stock In:</span>
+                                    <span className="text-sm font-bold text-emerald-700">{totalIn.toLocaleString()}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 rounded-full bg-rose-500" />
+                                    <span className="text-sm font-medium text-slate-600">Stock Out:</span>
+                                    <span className="text-sm font-bold text-rose-700">{totalOut.toLocaleString()}</span>
+                                </div>
+                                <div className="h-6 w-px bg-slate-200" />
+                                <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium text-slate-600">Net:</span>
+                                    <span className={cn(
+                                        "text-sm font-bold",
+                                        net >= 0 ? "text-emerald-700" : "text-rose-700"
+                                    )}>
+                                        {net >= 0 ? '+' : ''}{net.toLocaleString()}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })()}
+
                 {/* Standard Table View */}
                 <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
                     <div className="overflow-x-auto custom-scrollbar min-h-[500px]">
@@ -1155,14 +1163,7 @@ const StockManagement = () => {
                                             <DatePicker
                                                 value={formData.date}
                                                 onChange={handleDateChange}
-                                                disabled={(date) => {
-                                                    const today = new Date();
-                                                    const yesterday = new Date(Date.now() - 86400000);
-                                                    const normalize = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-                                                    return normalize(date) !== normalize(today) && normalize(date) !== normalize(yesterday);
-                                                }}
                                             />
-                                            <p className="text-[10px] text-slate-400 font-medium mt-0.5">You can add entries for today or yesterday</p>
                                         </div>
 
                                         {formData.transaction_type === 'in' && (
@@ -1557,22 +1558,10 @@ const EntryRow = ({ entry, user, getGodownName, getProductName, onEdit, onDelete
     const isTransfer = entry.transaction_type === 'in' && entry.from_location && entry.from_location !== 'NEW_STOCK';
     const isOut = entry.transaction_type === 'out';
 
-    // Guard: only today/yesterday entries that are direct stock entries can be edited/deleted
-    const today = new Date().toISOString().split('T')[0];
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-    const entryDate = entry.date || '';
-    const isEditable = entryDate === today || entryDate === yesterday;
-    const entryId = entry.entry_id || '';
-    const isSRC = entryId.endsWith('-SRC');
-    const baseId = isSRC ? entryId.slice(0, -4) : entryId;
-    const isFromSellOrPurchase = baseId.startsWith('STK-SAL-') || baseId.startsWith('ARR-');
-    const canEditDelete = !isSRC && !isFromSellOrPurchase && isEditable;
+    const canEditDelete = true;
 
     return (
-        <tr className={cn(
-            "transition-colors h-[73px]",
-            canEditDelete ? "hover:bg-slate-50 group" : "opacity-50"
-        )}>
+        <tr className="transition-colors h-[73px] hover:bg-slate-50 group">
             <td className="px-6 py-4 whitespace-nowrap">
                 <div className="flex items-center gap-2">
                     <span className={cn(
