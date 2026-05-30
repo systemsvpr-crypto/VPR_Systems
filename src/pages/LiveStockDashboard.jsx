@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Package, MapPin, RotateCcw, X, ArrowUp, Download, RefreshCcw, Save } from 'lucide-react';
+import { Search, Package, MapPin, RotateCcw, X, Download, RefreshCcw, Save } from 'lucide-react';
 import { liveStockDashboardService } from '../services/liveStockDashboardService';
 import { stockManagementService } from '../services/stockManagementService';
 import toast from 'react-hot-toast';
@@ -27,7 +27,7 @@ const LiveStockDashboard = () => {
     const [loadingMore, setLoadingMore] = useState(false);
     
     const today = new Date().toISOString().split('T')[0];
-    const [summaryDate, setSummaryDate] = useState(today);
+    const [summaryDate, setSummaryDate] = useState(() => localStorage.getItem('vpr_summaryDate') || today);
     const [dayTransactions, setDayTransactions] = useState([]);
     const [futureTransactions, setFutureTransactions] = useState([]);
     const [selectedTransfer, setSelectedTransfer] = useState(null);
@@ -60,7 +60,7 @@ const LiveStockDashboard = () => {
         }
 
         const s = (filteredSummary || []).find(item => item.product_id === productId && item.godown_id === godownId);
-        const opening = parseFloat(edits[key]?.opening_stock ?? s?.opening_stock) || 0;
+        const opening = parseFloat(s?.opening_stock) || 0;
         const closing = opening + inTotal - outTotal;
 
         const origIn = parseFloat(s?.in_stock) || 0;
@@ -87,7 +87,6 @@ const LiveStockDashboard = () => {
         setEdits(prev => {
             if (isRowChanged) {
                 const row = { ...(prev[key] || {}) };
-                row.opening_stock = opening;
                 row.in_stock = inTotal;
                 row.out_stock = outTotal;
                 row.closing_stock = closing;
@@ -105,39 +104,6 @@ const LiveStockDashboard = () => {
         });
     };
 
-    const handleOpeningEdit = (productId, godownId, value) => {
-        const raw = parseFloat(value);
-        const num = isNaN(raw) ? 0 : raw;
-        const key = `${godownId}-${productId}`;
-        const s = (filteredSummary || []).find(item => item.product_id === productId && item.godown_id === godownId);
-        if (!s) return;
-
-        const edit = edits[key] || {};
-        const origOpening = parseFloat(s.opening_stock) || 0;
-        const currentIn = edit.in_stock ?? (parseFloat(s.in_stock) || 0);
-        const currentOut = edit.out_stock ?? (parseFloat(s.out_stock) || 0);
-        const closing = num + currentIn - currentOut;
-
-        const isChanged = num !== origOpening || edit.in_stock !== undefined || edit.out_stock !== undefined;
-
-        setEdits(prev => {
-            const row = { ...(prev[key] || {}) };
-            row.opening_stock = num;
-            row.in_stock = currentIn;
-            row.out_stock = currentOut;
-            row.closing_stock = closing;
-            if (isChanged) return { ...prev, [key]: row };
-            const next = { ...prev };
-            delete next[key];
-            return next;
-        });
-        setChangedRows(prev => {
-            if (isChanged) return { ...prev, [key]: true };
-            const next = { ...prev };
-            delete next[key];
-            return next;
-        });
-    };
 
     const handleCancelTxEdit = (productId, godownId, entryId) => {
         const key = `${godownId}-${productId}`;
@@ -318,6 +284,7 @@ const LiveStockDashboard = () => {
     };
 
     useEffect(() => {
+        localStorage.setItem('vpr_summaryDate', summaryDate);
         fetchGodownsAndTransactions();
     }, [summaryDate]);
 
@@ -484,7 +451,7 @@ const LiveStockDashboard = () => {
             const key = `${s.godown_id}-${s.product_id}`;
             const edit = edits[key];
             if (!edit) return s;
-            return { ...s, opening_stock: edit.opening_stock, in_stock: edit.in_stock, out_stock: edit.out_stock, closing_stock: edit.closing_stock };
+            return { ...s, in_stock: edit.in_stock, out_stock: edit.out_stock, closing_stock: edit.closing_stock };
         });
     }, [filteredSummary, edits]);
 
@@ -592,120 +559,90 @@ const LiveStockDashboard = () => {
 
     return (
         <div className="min-h-screen bg-slate-50/50 flex flex-col">
-            {/* Minimal Sticky Header */}
-            <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-slate-200/60 px-6 py-4">
-                <div className="max-w-[1600px] mx-auto flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                    <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-                            <Package size={22} strokeWidth={2.5} />
-                        </div>
-                        <div>
-                            <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">
-                                Stock <span className="text-primary">Dashboard</span>
-                            </h1>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1.5">
-                                Inventory Intelligence & Control
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="flex items-center gap-6 ml-auto">
-                        <div className="flex items-center gap-2 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60">
-                            <button
-                                onClick={() => setActiveTab('master')}
-                                className={cn(
-                                    "px-5 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all duration-200",
-                                    activeTab === 'master' 
-                                        ? "bg-white text-primary shadow-sm" 
-                                        : "text-slate-500 hover:text-slate-700 hover:bg-white/50"
-                                )}
-                            >
-                                Master Inventory
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('live')}
-                                className={cn(
-                                    "px-5 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all duration-200",
-                                    activeTab === 'live' 
-                                        ? "bg-white text-primary shadow-sm" 
-                                        : "text-slate-500 hover:text-slate-700 hover:bg-white/50"
-                                )}
-                            >
-                                Live Status
-                            </button>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                            <div className="hidden sm:flex flex-col text-right px-4 border-r border-slate-200">
-                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Active Assets</p>
-                                <p className="text-sm font-black text-slate-900">{totalProducts.toLocaleString()}</p>
-                            </div>
-                            <button
-                                onClick={() => { fetchGodownsAndTransactions(); fetchProducts(0, true); }}
-                                className="p-2.5 rounded-xl bg-white border border-slate-200 text-slate-500 hover:text-primary hover:border-primary/30 transition-all shadow-sm group"
-                            >
-                                <RefreshCcw size={18} className={cn(loading && "animate-spin", "group-hover:scale-110 transition-transform")} />
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </header>
-
-            <main className="flex-1 p-4 lg:p-8 space-y-6 max-w-[1600px] mx-auto w-full animate-in fade-in duration-700">
+            <main className="flex-1 px-4 lg:px-8 space-y-6 max-w-[1600px] mx-auto w-full animate-in fade-in duration-700">
                 {/* Global Controls */}
-                <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-4 flex flex-col lg:flex-row items-center gap-4">
-                    <div className="flex flex-col sm:flex-row flex-1 items-center gap-4 w-full">
+                <div className="sticky top-0 z-40 bg-slate-50/50 pt-2 pb-3 -mx-4 lg:-mx-8 px-4 lg:px-8 flex flex-col lg:flex-row items-center gap-3">
+                    <div className="flex items-center gap-2 shrink-0">
+                        <button
+                            onClick={() => setActiveTab('master')}
+                            className={cn(
+                                "px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all",
+                                activeTab === 'master' 
+                                    ? "bg-white text-primary shadow-sm border border-slate-200/60" 
+                                    : "text-slate-400 hover:text-slate-600"
+                            )}
+                        >
+                            Master Inventory
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('live')}
+                            className={cn(
+                                "px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all",
+                                activeTab === 'live' 
+                                    ? "bg-white text-primary shadow-sm border border-slate-200/60" 
+                                    : "text-slate-400 hover:text-slate-600"
+                            )}
+                        >
+                            Live Status
+                        </button>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row flex-1 items-center gap-3 w-full">
                         <div className="relative w-full sm:flex-1">
-                            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                             <Input
                                 type="text"
-                                placeholder="Search products, IDs or attributes..."
-                                className="pl-11 h-11 bg-slate-50/50 border-slate-200 focus:bg-white transition-all rounded-xl text-sm font-medium w-full"
+                                placeholder="Search..."
+                                className="pl-9 h-10 bg-white border-slate-200 focus:bg-white transition-all rounded-xl text-sm w-full"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
                         </div>
                         
-                        <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-1 h-11 w-full sm:w-auto justify-between sm:justify-start shrink-0">
-                            <div className="flex-1 sm:flex-initial px-3 border-r border-slate-200 flex items-center justify-center sm:justify-start gap-2">
-                                <MapPin size={14} className="text-primary" />
-                                <select
-                                    value={filterGodown}
-                                    onChange={(e) => setFilterGodown(e.target.value)}
-                                    className="bg-transparent text-xs font-black text-slate-700 focus:outline-none uppercase tracking-wider min-w-[120px] sm:min-w-[140px] cursor-pointer"
-                                >
-                                    <option value="">ALL GODOWNS</option>
-                                    {godowns.map(g => (
-                                        <option key={g.godown_id} value={g.godown_id}>{g.name.toUpperCase()}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div className="flex-1 sm:flex-initial w-[130px] sm:w-[140px]">
-                                <DatePicker
-                                    value={summaryDate}
-                                    onChange={(e) => setSummaryDate(e.target.value)}
-                                    name="summaryDate"
-                                    className="border-none bg-transparent h-9 text-xs font-bold text-slate-700 text-center sm:text-left"
-                                />
-                            </div>
+                        <div className="flex items-center gap-3">
+                            <select
+                                value={filterGodown}
+                                onChange={(e) => setFilterGodown(e.target.value)}
+                                className="text-xs font-medium text-slate-600 bg-transparent focus:outline-none cursor-pointer"
+                            >
+                                <option value="">All Godowns</option>
+                                {godowns.map(g => (
+                                    <option key={g.godown_id} value={g.godown_id}>{g.name}</option>
+                                ))}
+                            </select>
+                            <span className="text-slate-200">|</span>
+                            <DatePicker
+                                value={summaryDate}
+                                onChange={(e) => { if (e.target.value) setSummaryDate(e.target.value); }}
+                                name="summaryDate"
+                                className="border-none bg-transparent h-8 text-xs font-medium text-slate-600"
+                            />
                         </div>
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0 w-full lg:w-auto">
-                        <button
-                            onClick={handleSaveAll}
-                            disabled={saving || Object.keys(changedRows).length === 0}
-                            className="h-11 px-6 rounded-xl bg-emerald-600 text-white text-xs font-black uppercase tracking-widest hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-900/10 flex items-center justify-center gap-2 group w-full lg:w-auto disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                            <Save size={16} />
-                            {saving ? 'Saving...' : `Save Changes (${Object.keys(changedRows).length})`}
-                        </button>
+                        {Object.keys(changedRows).length > 0 && (
+                            <button
+                                onClick={handleSaveAll}
+                                disabled={saving}
+                                className="h-9 px-4 rounded-lg bg-emerald-600 text-white text-[11px] font-bold uppercase tracking-wider hover:bg-emerald-500 transition-all flex items-center justify-center gap-1.5 w-full lg:w-auto disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                <Save size={14} />
+                                {saving ? 'Saving...' : `Save (${Object.keys(changedRows).length})`}
+                            </button>
+                        )}
                         <button
                             onClick={handleExport}
-                            className="h-11 px-6 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10 flex items-center justify-center gap-2 group w-full lg:w-auto"
+                            className="h-9 px-4 rounded-lg bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider hover:bg-slate-800 transition-all flex items-center justify-center gap-1.5 w-full lg:w-auto"
                         >
-                            <Download size={16} className="group-hover:-translate-y-0.5 transition-transform" />
-                            Export Report
+                            <Download size={14} />
+                            Export
+                        </button>
+                        <button
+                            onClick={() => { fetchGodownsAndTransactions(); fetchProducts(0, true); }}
+                            className="h-9 w-9 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-primary hover:border-primary/30 transition-all flex items-center justify-center"
+                        >
+                            <RefreshCcw size={15} className={cn(loading && "animate-spin")} />
                         </button>
                     </div>
                 </div>
@@ -891,27 +828,14 @@ const LiveStockDashboard = () => {
                                                                 >
                                                                     <td className="px-6 py-4 text-center text-xs font-mono text-slate-400">{++rowIndex}</td>
                                                                     <td className="px-6 py-4">
-                                                                        <div className="flex items-center gap-3">
-                                                                            <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 font-black text-[10px] group-hover:bg-primary/10 group-hover:text-primary transition-colors">
-                                                                                {s.product_name.charAt(0)}
-                                                                            </div>
-                                                                            <div>
-                                                                                <p className="text-sm font-bold text-slate-900 leading-none">{s.product_name}</p>
-                                                                                <div className="flex items-center gap-2 mt-1">
-                                                                                    <span className="text-[10px] text-slate-400 font-mono tracking-tighter">{s.product_id}</span>
-                                                                                    {s.mux && <span className="text-[10px] font-black text-primary px-1.5 py-0.5 bg-primary/5 rounded">MUX: {s.mux}</span>}
-                                                                                </div>
-                                                                            </div>
-                                                                        </div>
+                                                                        <p className="text-sm font-bold text-slate-900 leading-none">{s.product_name}</p>
+                                                                        <p className="text-[10px] text-slate-400 font-mono tracking-tighter mt-0.5">{s.product_id}</p>
                                                                     </td>
                                                                     <td className="px-6 py-4">
                                                                         <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-2 py-1 rounded uppercase tracking-wider">{s.godown_name}</span>
                                                                     </td>
                                                                      <td className="px-6 py-4 text-center font-mono text-xs text-slate-500">
-                                                                         <input type="number" value={displayOpening}
-                                                                             onClick={(e) => e.stopPropagation()}
-                                                                             onChange={(e) => handleOpeningEdit(s.product_id, s.godown_id, e.target.value)}
-                                                                             className="w-16 text-center font-mono text-xs border border-transparent hover:border-slate-200 focus:border-primary focus:ring-1 focus:ring-primary/20 rounded px-1 py-0.5 focus:outline-none bg-transparent" />
+                                                                         {displayOpening}
                                                                      </td>
 <td className="px-6 py-4 text-center">
                                                                          <span className="text-xs font-black text-emerald-600">{String(displayIn) === '-' ? '-' : `+${displayIn}`}</span>
@@ -1172,9 +1096,6 @@ const LiveStockDashboard = () => {
                 )}
             </main>
 
-
-
-
             {selectedTransfer && (
                 <TransferModal
                     details={selectedTransfer}
@@ -1292,12 +1213,15 @@ const TransferModal = ({ details, transactions, godowns, products, onClose }) =>
     const getProductName = (id) => products.find(p => p.product_id === id)?.name || id;
 
     const filteredTransfers = useMemo(() => {
-        // Match by NAME for product transfers to catch all legs of the transfer
         if (details.type === 'godown') {
-            return transactions.filter(t => t.from_location === details.id || (t.godown_id === details.id && t.from_location));
-        } else {
-            return transactions.filter(t => t.product_name === details.name && (t.from_location === details.godown_id || (t.godown_id === details.godown_id && t.from_location)));
+            return transactions.filter(t =>
+                t.from_location === details.id || (t.godown_id === details.id && t.from_location)
+            );
         }
+        return transactions.filter(t =>
+            t.product_id === details.id &&
+            (t.from_location === details.godown_id || t.godown_id === details.godown_id)
+        );
     }, [details, transactions]);
 
     return (
@@ -1338,7 +1262,8 @@ const TransferModal = ({ details, transactions, godowns, products, onClose }) =>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
                                     {filteredTransfers.map((t, idx) => {
-                                        const isOut = t.from_location === (details.type === 'godown' ? details.id : details.godown_id);
+                                        const isInType = t.transaction_type === 'in' || t.transaction_type === 'adjustment' || t.transaction_type === 'transfer_in' || t.transaction_type === 'purchase' || t.transaction_type === 'return_in' || t.transaction_type === 'opening';
+                                        const isOutgoing = t.transaction_type === 'out';
                                         return (
                                             <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
                                                 <td className="px-4 py-3">
@@ -1354,17 +1279,17 @@ const TransferModal = ({ details, transactions, godowns, products, onClose }) =>
                                                 <td className="px-4 py-3 text-right">
                                                     <span className={cn(
                                                         "text-sm font-black tracking-tight",
-                                                        isOut ? "text-amber-600" : "text-emerald-600"
+                                                        isOutgoing ? "text-amber-600" : "text-emerald-600"
                                                     )}>
-                                                        {isOut ? '-' : '+'}{t.quantity}
+                                                        {isOutgoing ? '-' : '+'}{t.quantity}
                                                     </span>
                                                 </td>
                                                 <td className="px-4 py-3 text-center">
                                                     <span className={cn(
                                                         "px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border",
-                                                        isOut ? "bg-amber-50 text-amber-700 border-amber-100" : "bg-emerald-50 text-emerald-700 border-emerald-100"
+                                                        isInType ? "bg-emerald-50 text-emerald-700 border-emerald-100" : "bg-amber-50 text-amber-700 border-amber-100"
                                                     )}>
-                                                        {isOut ? 'Stock Out' : 'Stock In'}
+                                                        {t.transaction_type}
                                                     </span>
                                                 </td>
                                             </tr>
