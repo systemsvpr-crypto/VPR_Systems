@@ -52,7 +52,8 @@ const Products = ({ isTab = false }) => {
     const [stats, setStats] = useState({ total: 0, active: 0 });
     const [totalFiltered, setTotalFiltered] = useState(0);
     const todayStr = new Date().toISOString().split('T')[0];
-    const [exportDate, setExportDate] = useState(todayStr);
+    const [exportFromDate, setExportFromDate] = useState(todayStr);
+    const [exportToDate, setExportToDate] = useState(todayStr);
 
     // Bulk Edit Opening Balances States
     const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
@@ -266,17 +267,24 @@ const Products = ({ isTab = false }) => {
     const handleExport = async () => {
         const toastId = toast.loading("Preparing export...");
         try {
-            const todayStr = new Date().toISOString().split('T')[0];
-            const nextDay = new Date(exportDate);
-            nextDay.setDate(nextDay.getDate() + 1);
-            const nextDayStr = nextDay.toISOString().split('T')[0];
+            // Generate date list
+            const dates = [];
+            const cur = new Date(exportFromDate);
+            const end = new Date(exportToDate);
+            while (cur <= end) {
+                dates.push(cur.toISOString().split('T')[0]);
+                cur.setDate(cur.getDate() + 1);
+            }
 
-            const [allProducts, dayEntries, futureEntries] = await Promise.all([
+            if (dates.length === 0) {
+                toast.error("Invalid date range", { id: toastId });
+                return;
+            }
+
+            // Fetch all transactions from range start to today
+            const [allProducts, rangeEntries] = await Promise.all([
                 productService.getAllBatched('', filterExportGodown),
-                stockManagementService.getByDateRange(exportDate, exportDate),
-                nextDayStr <= todayStr
-                    ? stockManagementService.getByDateRange(nextDayStr, todayStr)
-                    : Promise.resolve([]),
+                stockManagementService.getByDateRange(exportFromDate, todayStr),
             ]);
 
             if (!allProducts || allProducts.length === 0) {
@@ -284,56 +292,76 @@ const Products = ({ isTab = false }) => {
                 return;
             }
 
-            // Aggregate stock in/out by product_id + godown_id
-            const aggregate = (entries) => {
-                const map = {};
-                for (const tx of entries || []) {
-                    const key = `${tx.product_id}|${tx.godown_id}`;
-                    if (!map[key]) map[key] = { in: 0, out: 0 };
-                    if (tx.transaction_type === 'in') {
-                        map[key].in += parseFloat(tx.quantity) || 0;
-                    } else {
-                        map[key].out += parseFloat(tx.quantity) || 0;
-                    }
+            // Aggregate by date + product_id + godown_id
+            const byDate = {};
+            for (const tx of rangeEntries || []) {
+                const d = tx.date;
+                if (!byDate[d]) byDate[d] = {};
+                const key = `${tx.product_id}|${tx.godown_id}`;
+                if (!byDate[d][key]) byDate[d][key] = { in: 0, out: 0 };
+                if (tx.transaction_type === 'in') {
+                    byDate[d][key].in += parseFloat(tx.quantity) || 0;
+                } else {
+                    byDate[d][key].out += parseFloat(tx.quantity) || 0;
                 }
-                return map;
-            };
-
-            const dayMap = aggregate(dayEntries);
-            const futureMap = aggregate(futureEntries);
+            }
 
             const godownName = filterExportGodown !== 'all'
                 ? (godowns.find(g => g.godown_id === filterExportGodown)?.name || filterExportGodown)
                 : 'All Godowns';
 
-            let formattedDate = exportDate;
-            if (exportDate && exportDate.includes('-')) {
-                const [y, m, d] = exportDate.split('-');
-                formattedDate = `${d}/${m}/${y}`;
-            }
+            const formatDate = (iso) => {
+                const [y, m, d] = iso.split('-');
+                return `${d}/${m}/${y}`;
+            };
 
             const godownOrder = ["Top", "Godown", "DP", "Dusera", "Darba", "Bottom"];
             const godownRank = {};
             godownOrder.forEach((name, i) => { godownRank[name] = i; });
 
-            const headers = ["Item Name", "Godown Name", "Opening Stock", "Stock In", "Stock Out", "Closing Stock"];
+            // Build headers: two-row format — date spans across Opening/In/Out
+            const headerRow1 = ["Item Name", "Godown Name"];
+            const headerRow2 = ["", ""];
+            for (const date of dates) {
+                const label = formatDate(date);
+                headerRow1.push(label, "", "");
+                headerRow2.push("Opening", "In", "Out");
+            }
+
+            // Helper: sum in/out on a specific date for a product+godown
+            const getDayTotals = (date, key) => {
+                const d = byDate[date];
+                if (!d || !d[key]) return { in: 0, out: 0 };
+                return d[key];
+            };
+
+            // Helper: sum in/out after a specific date (up to today) for a product+godown
+            const getAfterDayTotals = (date, key) => {
+                let inSum = 0, outSum = 0;
+                for (const d in byDate) {
+                    if (d > date && d <= todayStr) {
+                        if (byDate[d][key]) {
+                            inSum += byDate[d][key].in;
+                            outSum += byDate[d][key].out;
+                        }
+                    }
+                }
+                return { in: inSum, out: outSum };
+            };
+
             let rows = allProducts.map(p => {
                 const key = `${p.product_id}|${p.godown_id}`;
-                const d = dayMap[key] || { in: 0, out: 0 };
-                const f = futureMap[key] || { in: 0, out: 0 };
                 const currentStock = parseFloat(p.current_stock) || 0;
-                // opening = currentStock - all 'in' from date onwards + all 'out' from date onwards
-                const opening = currentStock - d.in - f.in + d.out + f.out;
-                const closing = opening + d.in - d.out;
-                const godownName = godowns.find(g => g.godown_id === p.godown_id)?.name || p.godown_id;
-                return [
-                    p.name || '',
-                    godownName,
-                    opening,
-                    d.in || 0,
-                    d.out || 0,
-                    closing,
-                ];
+                const gName = godowns.find(g => g.godown_id === p.godown_id)?.name || p.godown_id;
+                const row = [p.name || '', gName];
+
+                for (const date of dates) {
+                    const dayTotals = getDayTotals(date, key);
+                    const afterTotals = getAfterDayTotals(date, key);
+                    const opening = currentStock - dayTotals.in - afterTotals.in + dayTotals.out + afterTotals.out;
+                    row.push(opening, dayTotals.in, dayTotals.out);
+                }
+                return row;
             });
 
             rows.sort((a, b) => {
@@ -344,11 +372,12 @@ const Products = ({ isTab = false }) => {
             });
 
             const csvContent = [
-                ["Date:", formattedDate],
+                [`From: ${formatDate(exportFromDate)}`, `To: ${formatDate(exportToDate)}`],
                 ["Godown:", godownName],
                 ["Total Items:", allProducts.length],
                 [],
-                headers,
+                headerRow1,
+                headerRow2,
                 ...rows
             ]
                 .map(row => row.map(cell => `"${(cell ?? '').toString().replace(/"/g, '""')}"`).join(","))
@@ -359,7 +388,7 @@ const Products = ({ isTab = false }) => {
             const link = document.createElement("a");
             link.setAttribute("href", url);
             const label = filterExportGodown !== 'all' ? filterExportGodown : 'AllGodowns';
-            link.setAttribute("download", `Stock_Summary_${exportDate}_${label}.csv`);
+            link.setAttribute("download", `Stock_Summary_${exportFromDate}_to_${exportToDate}_${label}.csv`);
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
             link.click();
@@ -531,25 +560,23 @@ const Products = ({ isTab = false }) => {
     return (
         <div className="flex flex-col gap-4 pb-6">
             {!isTab && (
-                <div>
-                    <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Products</h1>
-                    <p className="text-slate-500 mt-1 text-sm">Manage product inventory and details.</p>
+                <div className="flex items-center justify-between gap-4">
+                    <div>
+                        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Products</h1>
+                        <p className="text-slate-500 mt-1 text-sm">Manage product inventory and details.</p>
+                    </div>
+                    <div className="flex items-center gap-4 px-3 py-2 bg-slate-50 rounded-lg border border-slate-200 shrink-0">
+                        <span className="text-sm font-semibold text-slate-700">{stats.total} Total Products</span>
+                        <div className="w-px h-5 bg-slate-300"></div>
+                        <span className="text-sm font-semibold text-green-700">{stats.active} Active</span>
+                    </div>
                 </div>
             )}
 
             <div className="flex flex-col gap-4">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 shrink-0">
-                    <div className="hidden xl:flex items-center gap-6">
-                        <StatItem label="Total Products" value={stats.total} />
-                        <div className="w-px h-8 bg-slate-200"></div>
-                        <StatItem
-                            label="Active"
-                            value={stats.active}
-                        />
-                    </div>
-
-                    <div className="flex flex-col md:flex-row md:items-center gap-3 w-full lg:w-auto">
-                        <div className="flex flex-col sm:flex-row gap-2 w-full">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 shrink-0">
+                        <div className="flex flex-col md:flex-row md:items-center gap-3 w-full lg:w-auto">
+                            <div className="flex flex-col sm:flex-row gap-2 w-full">
                             <div className="relative w-full sm:w-64">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 z-10" size={18} />
                                 <Input
@@ -589,12 +616,23 @@ const Products = ({ isTab = false }) => {
                                             <option key={g.godown_id} value={g.godown_id}>{g.name}</option>
                                         ))}
                                     </select>
-                                    <div className="w-[160px] border-r border-slate-100">
-                                        <DatePicker
-                                            value={exportDate}
-                                            onChange={(e) => setExportDate(e.target.value)}
-                                            className="border-none bg-transparent h-10 text-xs font-semibold text-slate-600"
-                                        />
+                                    <div className="flex items-center border-r border-slate-100">
+                                        <div className="w-[140px] border-r border-slate-100">
+                                            <DatePicker
+                                                value={exportFromDate}
+                                                onChange={(e) => setExportFromDate(e.target.value)}
+                                                placeholder="From"
+                                                className="border-none bg-transparent h-10 text-xs font-semibold text-slate-600"
+                                            />
+                                        </div>
+                                        <div className="w-[140px]">
+                                            <DatePicker
+                                                value={exportToDate}
+                                                onChange={(e) => setExportToDate(e.target.value)}
+                                                placeholder="To"
+                                                className="border-none bg-transparent h-10 text-xs font-semibold text-slate-600"
+                                            />
+                                        </div>
                                     </div>
                                     <button
                                         onClick={handleExport}
