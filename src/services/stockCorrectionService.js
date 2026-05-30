@@ -35,28 +35,6 @@ export const stockCorrectionService = {
     return data || [];
   },
 
-  async getDailySnapshots(date) {
-    const { data, error } = await supabase
-      .from('daily_stock_summary')
-      .select('*')
-      .eq('date', date);
-
-    if (error) throw error;
-    return data || [];
-  },
-
-  async getSnapshotsForDateRange(fromDate, toDate) {
-    const { data, error } = await supabase
-      .from('daily_stock_summary')
-      .select('*')
-      .gte('date', fromDate)
-      .lte('date', toDate)
-      .order('date', { ascending: true });
-
-    if (error) throw error;
-    return data || [];
-  },
-
   async getProductsByGodown(godownId) {
     let query = supabase
       .from('products')
@@ -79,29 +57,6 @@ export const stockCorrectionService = {
 
     if (error) throw error;
     return data || [];
-  },
-
-  async correctStock(date, productId, godownId, correctClosing, reason, createdBy = 'system') {
-    const { data, error } = await supabase.rpc('correct_and_roll_forward', {
-      p_date: date,
-      p_product_id: productId,
-      p_godown_id: godownId,
-      p_correct_closing: correctClosing,
-      p_reason: reason,
-      p_created_by: createdBy,
-    });
-
-    if (error) throw error;
-    return data;
-  },
-
-  async regenerateSummary(date) {
-    const { error } = await supabase.rpc('regenerate_daily_summary', {
-      target_date: date,
-    });
-
-    if (error) throw error;
-    return true;
   },
 
   async recalculateProductStock(productId) {

@@ -6,10 +6,9 @@ const PAGE_SIZE = 50;
 
 export const liveStockDashboardService = {
     async fetchGodownsAndTransactions(summaryDate) {
-        const [godownsRes, transactionsRes, snapshotsRes, prodNamesRes] = await Promise.all([
+        const [godownsRes, transactionsRes, prodNamesRes] = await Promise.all([
             supabase.from('godowns').select('*').eq('is_active', true).order('name', { ascending: true }),
             supabase.from('stock_management').select('*').eq('date', summaryDate),
-            supabase.from('daily_stock_summary').select('*').eq('date', summaryDate),
             supabase.from('products').select('product_id, name').eq('is_active', true),
         ]);
 
@@ -23,7 +22,6 @@ export const liveStockDashboardService = {
         return {
             godowns: godownsData,
             transactions: flattenedTransactions,
-            dailySnapshots: snapshotsRes.data || [],
         };
     },
 
@@ -73,26 +71,53 @@ export const liveStockDashboardService = {
         return { data: data || [], count: count || 0 };
     },
 
-    async fetchHistoricalTransactions(productIds, summaryDate) {
-        if (productIds.length === 0 || !summaryDate) return [];
-
+    async fetchAllTransactionsFromDate(fromDate) {
+        if (!fromDate) return [];
+        const today = new Date().toISOString().split('T')[0];
         const { data, error } = await supabase
             .from('stock_management')
-            .select('product_id, date, transaction_type, quantity, godown_id, from_location')
-            .in('product_id', productIds)
-            .lte('date', summaryDate)
-            .order('date', { ascending: true })
-            .order('created_at', { ascending: true });
+            .select('product_id, godown_id, date, transaction_type, quantity, from_location')
+            .gte('date', fromDate)
+            .lte('date', today)
+            .order('date', { ascending: true });
+        if (error) throw error;
+        return data || [];
+    },
 
+    async fetchTransactionsFromDate(productIds, fromDate) {
+        if (!productIds?.length || !fromDate) return [];
+        const today = new Date().toISOString().split('T')[0];
+        const { data, error } = await supabase
+            .from('stock_management')
+            .select('product_id, godown_id, date, transaction_type, quantity, from_location')
+            .in('product_id', productIds)
+            .gte('date', fromDate)
+            .lte('date', today)
+            .order('date', { ascending: true });
+        if (error) throw error;
+        return data || [];
+    },
+
+    async fetchProductTransactions(productIds, godownId, date) {
+        if (!productIds?.length || !date) return [];
+        let query = supabase
+            .from('stock_management')
+            .select('id, product_id, godown_id, transaction_type, quantity, from_location, created_at, date, notes, reference_number, entry_id, opening_stock, closing_stock, balance_after_transaction')
+            .in('product_id', productIds)
+            .eq('date', date);
+        if (godownId) {
+            query = query.or(`godown_id.eq.${godownId},from_location.eq.${godownId}`);
+        }
+        const { data, error } = await query
+            .order('created_at', { ascending: true });
         if (error) throw error;
         return data || [];
     },
 
     async fetchDashboardData(summaryDate) {
-        const [godownsRes, transactionsRes, snapshotsRes, prodNamesRes, productsRes, masterProductsRes] = await Promise.all([
+        const [godownsRes, transactionsRes, prodNamesRes, productsRes, masterProductsRes] = await Promise.all([
             supabase.from('godowns').select('*').eq('is_active', true).order('name', { ascending: true }),
             supabase.from('stock_management').select('*').eq('date', summaryDate).limit(10000),
-            supabase.from('daily_stock_summary').select('*').eq('date', summaryDate).limit(10000),
             supabase.from('products').select('product_id, name').eq('is_active', true),
             supabase.from('products').select('*').eq('is_active', true).order('name', { ascending: true }).limit(10000),
             supabase.from('master_product').select('*').eq('is_active', true).order('name', { ascending: true }),
@@ -108,7 +133,6 @@ export const liveStockDashboardService = {
         return {
             godowns: godownsData,
             transactions: flattenedTransactions,
-            dailySnapshots: snapshotsRes.data || [],
             products: productsRes.data || [],
             masterProducts: masterProductsRes.data || [],
         };

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Package, MapPin, RotateCcw, X, ArrowUp, Download, RefreshCcw } from 'lucide-react';
+import { Search, Package, MapPin, RotateCcw, X, ArrowUp, Download, RefreshCcw, Save } from 'lucide-react';
 import { liveStockDashboardService } from '../services/liveStockDashboardService';
+import { stockManagementService } from '../services/stockManagementService';
 import toast from 'react-hot-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -28,17 +29,209 @@ const LiveStockDashboard = () => {
     const today = new Date().toISOString().split('T')[0];
     const [summaryDate, setSummaryDate] = useState(today);
     const [dayTransactions, setDayTransactions] = useState([]);
-    const [dailySnapshots, setDailySnapshots] = useState([]);
+    const [futureTransactions, setFutureTransactions] = useState([]);
     const [selectedTransfer, setSelectedTransfer] = useState(null);
-    const [historicalBalances, setHistoricalBalances] = useState({});
+    const [expandedTxRows, setExpandedTxRows] = useState({});
+    const [productTxMap, setProductTxMap] = useState({});
+    const [changedRows, setChangedRows] = useState({});
+    const [edits, setEdits] = useState({});
+    const [txEdits, setTxEdits] = useState({});
+    const [txErrors, setTxErrors] = useState({});
+    const [saving, setSaving] = useState(false);
+
+    const handleTxQuantityEdit = (productId, godownId, entryId, value) => {
+        const raw = parseFloat(value);
+        const num = isNaN(raw) ? 0 : raw;
+        const key = `${godownId}-${productId}`;
+        const txs = productTxMap[key] || [];
+
+        const origQty = parseFloat(txs.find(tx => tx.entry_id === entryId)?.quantity) || 0;
+
+        let inTotal = 0, outTotal = 0;
+        for (const tx of txs) {
+            // Entry matching via from_location belongs to a different godown (transfer destination);
+            // the -SRC entry already captures the outgoing stock for this godown. Skip it here.
+            if (tx.from_location === godownId && tx.godown_id !== godownId) continue;
+            const prevEdit = txEdits[tx.entry_id];
+            const useQty = tx.entry_id === entryId ? num : (prevEdit !== undefined ? prevEdit : (parseFloat(tx.quantity) || 0));
+            const isInType = tx.transaction_type === 'in' || tx.transaction_type === 'adjustment' || tx.transaction_type === 'transfer_in' || tx.transaction_type === 'purchase' || tx.transaction_type === 'return_in' || tx.transaction_type === 'opening';
+            if (isInType) inTotal += useQty;
+            else outTotal += useQty;
+        }
+
+        const s = (filteredSummary || []).find(item => item.product_id === productId && item.godown_id === godownId);
+        const opening = parseFloat(edits[key]?.opening_stock ?? s?.opening_stock) || 0;
+        const closing = opening + inTotal - outTotal;
+
+        const origIn = parseFloat(s?.in_stock) || 0;
+        const origOut = parseFloat(s?.out_stock) || 0;
+        const isRowChanged = inTotal !== origIn || outTotal !== origOut;
+
+        setTxEdits(prev => {
+            const next = { ...prev };
+            if (num === origQty) delete next[entryId];
+            else next[entryId] = num;
+            return next;
+        });
+
+        if (closing < 0) {
+            setTxErrors(prev => ({ ...prev, [entryId]: true }));
+            return;
+        }
+        setTxErrors(prev => {
+            const next = { ...prev };
+            delete next[entryId];
+            return next;
+        });
+
+        setEdits(prev => {
+            if (isRowChanged) {
+                const row = { ...(prev[key] || {}) };
+                row.opening_stock = opening;
+                row.in_stock = inTotal;
+                row.out_stock = outTotal;
+                row.closing_stock = closing;
+                return { ...prev, [key]: row };
+            }
+            const next = { ...prev };
+            delete next[key];
+            return next;
+        });
+        setChangedRows(prev => {
+            if (isRowChanged) return { ...prev, [key]: true };
+            const next = { ...prev };
+            delete next[key];
+            return next;
+        });
+    };
+
+    const handleOpeningEdit = (productId, godownId, value) => {
+        const raw = parseFloat(value);
+        const num = isNaN(raw) ? 0 : raw;
+        const key = `${godownId}-${productId}`;
+        const s = (filteredSummary || []).find(item => item.product_id === productId && item.godown_id === godownId);
+        if (!s) return;
+
+        const edit = edits[key] || {};
+        const origOpening = parseFloat(s.opening_stock) || 0;
+        const currentIn = edit.in_stock ?? (parseFloat(s.in_stock) || 0);
+        const currentOut = edit.out_stock ?? (parseFloat(s.out_stock) || 0);
+        const closing = num + currentIn - currentOut;
+
+        const isChanged = num !== origOpening || edit.in_stock !== undefined || edit.out_stock !== undefined;
+
+        setEdits(prev => {
+            const row = { ...(prev[key] || {}) };
+            row.opening_stock = num;
+            row.in_stock = currentIn;
+            row.out_stock = currentOut;
+            row.closing_stock = closing;
+            if (isChanged) return { ...prev, [key]: row };
+            const next = { ...prev };
+            delete next[key];
+            return next;
+        });
+        setChangedRows(prev => {
+            if (isChanged) return { ...prev, [key]: true };
+            const next = { ...prev };
+            delete next[key];
+            return next;
+        });
+    };
+
+    const handleCancelTxEdit = (productId, godownId, entryId) => {
+        const key = `${godownId}-${productId}`;
+        const txs = productTxMap[key] || [];
+        const tx = txs.find(t => t.entry_id === entryId);
+        if (!tx) return;
+
+        setTxErrors(prev => {
+            const next = { ...prev };
+            delete next[entryId];
+            return next;
+        });
+        handleTxQuantityEdit(productId, godownId, entryId, tx.quantity);
+    };
+
+    const getGodownName = (id) => godowns.find(g => g.godown_id === id)?.name || id || '-';
+
+    const handleSaveAll = async () => {
+        const changedKeys = Object.keys(changedRows);
+        if (changedKeys.length === 0) {
+            toast('No changes to save');
+            return;
+        }
+
+        setSaving(true);
+        const toastId = toast.loading(`Saving ${changedKeys.length} changes...`);
+        const affectedProducts = new Set();
+        let successCount = 0;
+        let errorCount = 0;
+
+        for (const key of changedKeys) {
+            const s = (filteredSummary || []).find(item => `${item.godown_id}-${item.product_id}` === key);
+            if (!s) continue;
+            const { product_id: productId } = s;
+
+            const txs = productTxMap[key] || [];
+            const hasTxError = txs.some(tx => txErrors[tx.entry_id]);
+            if (hasTxError) {
+                errorCount++;
+                continue;
+            }
+
+            try {
+                for (const tx of txs) {
+                    const newQty = txEdits[tx.entry_id];
+                    if (newQty !== undefined) {
+                        await stockManagementService.update(tx.entry_id, {
+                            quantity: newQty,
+                        });
+                    }
+                }
+
+                affectedProducts.add(productId);
+                successCount++;
+            } catch (err) {
+                console.error(`Error saving ${key}:`, err);
+                errorCount++;
+            }
+        }
+
+        for (const pid of affectedProducts) {
+            await stockManagementService.recalculateProductStock(pid);
+        }
+
+        toast.dismiss(toastId);
+        if (errorCount === 0) {
+            toast.success(`Saved ${successCount} changes successfully`);
+        } else {
+            toast.error(`Saved ${successCount}, ${errorCount} failed`);
+        }
+
+        setSaving(false);
+        setTxEdits({});
+        setTxErrors({});
+        setEdits({});
+        setChangedRows({});
+        fetchGodownsAndTransactions();
+        fetchProducts(page, true);
+    };
 
     const isFutureDate = useMemo(() => summaryDate > today, [summaryDate, today]);
+
+    const loadProductTransactions = (productId, godownId) => {
+        const key = `${godownId}-${productId}`;
+        const matchingTxs = (dayTransactions || []).filter(t =>
+            t.product_id === productId && (t.godown_id === godownId || t.from_location === godownId)
+        );
+        setProductTxMap(prev => ({ ...prev, [key]: matchingTxs }));
+    };
 
     const fetchGodownsAndTransactions = async () => {
         try {
             const data = await liveStockDashboardService.fetchDashboardData(summaryDate);
             setGodowns(data.godowns || []);
-            setDailySnapshots(data.dailySnapshots || []);
 
             const flattenedTransactions = (data.transactions || []).map(t => {
                 const prod = (data.masterProducts || []).find(p => p.product_id === t.product_id);
@@ -48,6 +241,13 @@ const LiveStockDashboard = () => {
                 };
             });
             setDayTransactions(flattenedTransactions);
+
+            if (summaryDate < today) {
+                const future = await liveStockDashboardService.fetchAllTransactionsFromDate(summaryDate);
+                setFutureTransactions(future || []);
+            } else {
+                setFutureTransactions([]);
+            }
         } catch (error) {
             console.error('Error fetching static data:', error);
             toast.error('Failed to fetch auxiliary data');
@@ -131,43 +331,7 @@ const LiveStockDashboard = () => {
         return () => clearTimeout(timer);
     }, [searchTerm, filterGodown, summaryDate]);
 
-    // Fetch historical transactions up to summaryDate for accurate opening/closing computation
-    useEffect(() => {
-        const productIds = products.map(p => p.product_id);
-        if (productIds.length === 0 || !summaryDate || isFutureDate) {
-            setHistoricalBalances({});
-            return;
-        }
-        let cancelled = false;
-        const computeBalances = async () => {
-            try {
-                // Fetch ALL transactions up to summaryDate for accurate running balance
-                const data = await liveStockDashboardService.fetchHistoricalTransactions(productIds, summaryDate);
 
-                if (cancelled) return;
-
-                // Compute running balance per (product_id, godown_id) pair.
-                // Dual-entry transfers create a -SRC out entry for the source godown,
-                // so the destination entry's from_location is NOT replayed here to avoid double-counting.
-                const balances = {};
-                (data || []).forEach(t => {
-                    const key = `${t.product_id}-${t.godown_id}`;
-                    if (!balances[key]) {
-                        balances[key] = 0;
-                    }
-                    const qty = parseFloat(t.quantity) || 0;
-                    if (t.transaction_type === 'in') balances[key] += qty;
-                    else balances[key] -= qty;
-                });
-
-                if (!cancelled) setHistoricalBalances(balances);
-            } catch (err) {
-                if (!cancelled) console.error('Error computing historical balances:', err);
-            }
-        };
-        computeBalances();
-        return () => { cancelled = true; };
-    }, [products, summaryDate, isFutureDate]);
 
     // Infinite Scroll — triggers paginated fetchProducts
     useEffect(() => {
@@ -227,7 +391,6 @@ const LiveStockDashboard = () => {
 
         if (isToday) {
             return products.map(p => {
-                const snapshot = dailySnapshots.find(s => s.product_id === p.product_id && s.godown_id === p.godown_id);
                 const pTransactions = dayTransactions.filter(t =>
                     (t.godown_id === p.godown_id && t.product_id === p.product_id) ||
                     (t.from_location === p.godown_id && t.product_name === p.name)
@@ -236,10 +399,9 @@ const LiveStockDashboard = () => {
                 const in_stock = pTransactions.filter(t => t.godown_id === p.godown_id && t.transaction_type === 'in').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
                 const out_stock = pTransactions.filter(t => t.transaction_type === 'out' && t.godown_id === p.godown_id).reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
 
-                const display_in = in_stock;
-                const display_out = out_stock;
-                const closing_stock = p.current_stock;
-                const opening_stock = p.current_stock - in_stock + out_stock;
+                const currentStock = parseFloat(p.current_stock) || 0;
+                const opening_stock = currentStock - in_stock + out_stock;
+                const closing_stock = opening_stock + in_stock - out_stock;
 
                 const godown = getGodownDetails(p.godown_id);
                 const pTransfers = pTransactions.filter(t => t.from_location || (t.godown_id === p.godown_id && t.from_location));
@@ -250,59 +412,96 @@ const LiveStockDashboard = () => {
                     godown_id: p.godown_id,
                     godown_name: godown.name || p.godown_id,
                     mux: p.mux || '',
-                    opening_stock: opening_stock ?? '-',
-                    in_stock: display_in,
-                    out_stock: display_out,
+                    opening_stock: opening_stock,
+                    in_stock: in_stock,
+                    out_stock: out_stock,
                     transfers: pTransfers.length > 0
                         ? pTransfers.reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0)
                         : 0,
-                    closing_stock: closing_stock ?? '-',
-                    current_stock: p.current_stock || 0,
+                    closing_stock: closing_stock,
+                    current_stock: currentStock,
+                    verified: true,
+                    source: 'computed',
                 };
             });
         }
 
-        // ─── Past dates: ONLY from daily_stock_summary ───
-        const prodLookup = {};
-        allProducts.forEach(p => { prodLookup[p.product_id] = p; });
+        // ─── Past dates: computed from current_stock ───
+        const pastFiltered = allProducts.filter(p => {
+            if (filterGodown && p.godown_id !== filterGodown) return false;
+            if (searchTerm) {
+                const term = searchTerm.toLowerCase();
+                const name = (p.name || '').toLowerCase();
+                const id = (p.product_id || '').toLowerCase();
+                if (!name.includes(term) && !id.includes(term)) return false;
+            }
+            return true;
+        });
 
-        let snapshots = dailySnapshots;
-        if (filterGodown) {
-            snapshots = snapshots.filter(s => s.godown_id === filterGodown);
-        }
-        if (searchTerm) {
-            const term = searchTerm.toLowerCase();
-            snapshots = snapshots.filter(s => {
-                const prod = prodLookup[s.product_id];
-                const name = (prod?.name || '').toLowerCase();
-                const id = (s.product_id || '').toLowerCase();
-                return name.includes(term) || id.includes(term);
-            });
-        }
+        return pastFiltered.map(p => {
+            const godown = getGodownDetails(p.godown_id);
+            const currentStock = parseFloat(p.current_stock) || 0;
 
-        return snapshots.map(snapshot => {
-            const prod = prodLookup[snapshot.product_id] || {};
-            const godown = getGodownDetails(snapshot.godown_id);
+            const inDate = (dayTransactions || []).filter(t =>
+                t.product_id === p.product_id && t.godown_id === p.godown_id && t.transaction_type === 'in'
+            ).reduce((s, t) => s + (parseFloat(t.quantity) || 0), 0);
+            const outDate = (dayTransactions || []).filter(t =>
+                t.product_id === p.product_id && t.godown_id === p.godown_id && t.transaction_type === 'out'
+            ).reduce((s, t) => s + (parseFloat(t.quantity) || 0), 0);
+            const inAfter = (futureTransactions || []).filter(t =>
+                t.product_id === p.product_id && t.godown_id === p.godown_id && t.date > summaryDate && t.transaction_type === 'in'
+            ).reduce((s, t) => s + (parseFloat(t.quantity) || 0), 0);
+            const outAfter = (futureTransactions || []).filter(t =>
+                t.product_id === p.product_id && t.godown_id === p.godown_id && t.date > summaryDate && t.transaction_type === 'out'
+            ).reduce((s, t) => s + (parseFloat(t.quantity) || 0), 0);
+
+            const opening = currentStock - inDate - inAfter + outDate + outAfter;
+            const closing = opening + inDate - outDate;
+
             return {
-                product_id: snapshot.product_id,
-                product_name: prod.name || snapshot.product_id,
-                godown_id: snapshot.godown_id,
-                godown_name: godown.name || snapshot.godown_id,
-                mux: prod.mux || '',
-                opening_stock: snapshot.opening_stock,
-                in_stock: snapshot.in_stock,
-                out_stock: snapshot.out_stock,
+                product_id: p.product_id,
+                product_name: p.name || p.product_id,
+                godown_id: p.godown_id,
+                godown_name: godown.name || p.godown_id,
+                mux: p.mux || '',
+                opening_stock: opening,
+                in_stock: inDate,
+                out_stock: outDate,
                 transfers: 0,
-                closing_stock: snapshot.closing_stock,
-                current_stock: 0,
+                closing_stock: closing,
+                current_stock: currentStock,
+                verified: true,
+                source: 'computed',
             };
         });
-    }, [products, dayTransactions, summaryDate, godowns, dailySnapshots, historicalBalances, isFutureDate, today, searchTerm, filterGodown, allProducts]);
+    }, [products, dayTransactions, futureTransactions, summaryDate, godowns, isFutureDate, today, searchTerm, filterGodown, allProducts]);
 
     // Server-side filtering already applies to dynamicSummary base (which depends on products)
     const filteredSummary = dynamicSummary;
 
+    const editableSummary = useMemo(() => {
+        return filteredSummary.map(s => {
+            const key = `${s.godown_id}-${s.product_id}`;
+            const edit = edits[key];
+            if (!edit) return s;
+            return { ...s, opening_stock: edit.opening_stock, in_stock: edit.in_stock, out_stock: edit.out_stock, closing_stock: edit.closing_stock };
+        });
+    }, [filteredSummary, edits]);
 
+    const totalStats = useMemo(() => {
+        let opening = 0, in_stock = 0, out_stock = 0, closing = 0, currentStock = 0;
+        for (const s of editableSummary) {
+            const op = typeof s.opening_stock === 'number' ? s.opening_stock : (parseFloat(s.opening_stock) || 0);
+            const in_s = typeof s.in_stock === 'number' ? s.in_stock : (parseFloat(s.in_stock) || 0);
+            const out_s = typeof s.out_stock === 'number' ? s.out_stock : (parseFloat(s.out_stock) || 0);
+            opening += op;
+            in_stock += in_s;
+            out_stock += out_s;
+            closing += op + in_s - out_s;
+            currentStock += parseFloat(s.current_stock) || 0;
+        }
+        return { opening, in_stock, out_stock, closing, currentStock };
+    }, [editableSummary]);
 
     // Real-time subscription for relevant tables
     useEffect(() => {
@@ -494,6 +693,14 @@ const LiveStockDashboard = () => {
 
                     <div className="flex items-center gap-2 shrink-0 w-full lg:w-auto">
                         <button
+                            onClick={handleSaveAll}
+                            disabled={saving || Object.keys(changedRows).length === 0}
+                            className="h-11 px-6 rounded-xl bg-emerald-600 text-white text-xs font-black uppercase tracking-widest hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-900/10 flex items-center justify-center gap-2 group w-full lg:w-auto disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            <Save size={16} />
+                            {saving ? 'Saving...' : `Save Changes (${Object.keys(changedRows).length})`}
+                        </button>
+                        <button
                             onClick={handleExport}
                             className="h-11 px-6 rounded-xl bg-slate-900 text-white text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10 flex items-center justify-center gap-2 group w-full lg:w-auto"
                         >
@@ -550,6 +757,7 @@ const LiveStockDashboard = () => {
                                                         </tr>
                                                     );
                                                 }
+                                                const isToday = summaryDate === today;
                                                 const directIn = dayTransactions.filter(t => t.godown_id === godown.godown_id && t.transaction_type === 'in').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
                                                 const directOut = dayTransactions.filter(t => t.godown_id === godown.godown_id && t.transaction_type === 'out').reduce((sum, t) => sum + (parseFloat(t.quantity) || 0), 0);
                                                 const totalIn = directIn;
@@ -557,19 +765,22 @@ const LiveStockDashboard = () => {
                                                 // Use allProducts (complete dataset) for accurate godown totals
                                                 const gProducts = allProducts.filter(p => p.godown_id === godown.godown_id);
                                                 const totalClosing = gProducts.reduce((sum, p) => sum + (parseFloat(p.current_stock) || 0), 0);
-                                                const totalOpening = totalClosing - totalIn + totalOut;
-                                                const isToday = summaryDate === today;
 
-                                                // Past dates: aggregates from daily_stock_summary only
-                                                const gSnapshots = dailySnapshots.filter(s => s.godown_id === godown.godown_id);
-                                                const snapOpening = gSnapshots.reduce((s, sn) => s + (parseFloat(sn.opening_stock) || 0), 0);
-                                                const snapClosing = gSnapshots.reduce((s, sn) => s + (parseFloat(sn.closing_stock) || 0), 0);
-                                                const snapIn = gSnapshots.reduce((s, sn) => s + (parseFloat(sn.in_stock) || 0), 0);
-                                                const snapOut = gSnapshots.reduce((s, sn) => s + (parseFloat(sn.out_stock) || 0), 0);
-                                                const displayOpening = isToday ? totalOpening : snapOpening;
-                                                const displayClosing = isToday ? totalClosing : snapClosing;
-                                                const displayIn = isToday ? totalIn : snapIn;
-                                                const displayOut = isToday ? totalOut : snapOut;
+                                                // Past dates: compute opening/closing from current_stock + transactions
+                                                const gInAfter = (futureTransactions || []).filter(t =>
+                                                    t.godown_id === godown.godown_id && t.date > summaryDate && t.transaction_type === 'in'
+                                                ).reduce((s, t) => s + (parseFloat(t.quantity) || 0), 0);
+                                                const gOutAfter = (futureTransactions || []).filter(t =>
+                                                    t.godown_id === godown.godown_id && t.date > summaryDate && t.transaction_type === 'out'
+                                                ).reduce((s, t) => s + (parseFloat(t.quantity) || 0), 0);
+                                                const gOpening = totalClosing - totalIn - gInAfter + totalOut + gOutAfter;
+                                                const gComputedClosing = gOpening + totalIn - totalOut;
+
+                                                const displayOpening = isToday ? gOpening : gOpening;
+                                                const computedClosing = displayOpening + totalIn - totalOut;
+                                                const displayClosing = isToday ? computedClosing : gComputedClosing;
+                                                const displayIn = isToday ? totalIn : totalIn;
+                                                const displayOut = isToday ? totalOut : totalOut;
 
                                                 return (
                                                     <tr key={godown.godown_id} className="group hover:bg-slate-50/80 transition-colors">
@@ -628,7 +839,7 @@ const LiveStockDashboard = () => {
                                     Detailed Product Metrics
                                 </h2>
                                 <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-3 py-1 rounded-full uppercase tracking-tighter">
-                                    Showing {filteredSummary.length} Records
+                                    Showing {editableSummary.length} Records {Object.keys(changedRows).length > 0 && <span className="text-amber-600 ml-1">({Object.keys(changedRows).length} edited)</span>}
                                 </span>
                             </div>
                             
@@ -637,64 +848,182 @@ const LiveStockDashboard = () => {
                                     <RefreshCcw size={32} className="animate-spin text-primary/30 mx-auto mb-4" />
                                     <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Aggregating real-time data...</p>
                                 </div>
-                            ) : filteredSummary.length > 0 ? (
+                            ) : editableSummary.length > 0 ? (
                                 <React.Fragment>
                                     <div className="bg-white rounded-3xl border border-slate-200/60 shadow-sm overflow-hidden">
                                         <div className="overflow-x-auto">
                                             <table className="w-full text-left border-collapse">
                                                 <thead>
                                                     <tr className="bg-slate-50/50 border-b border-slate-100">
+                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-10">#</th>
                                                         <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Product Details</th>
                                                         <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Location</th>
                                                         <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Opening</th>
-                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Closing</th>
                                                         <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">In</th>
                                                         <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Out</th>
+                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Closing</th>
+                                                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Current Stock</th>
                                                         <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Transfers</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-slate-50">
-                                                    {filteredSummary.map((s, idx) => (
-                                                        <tr key={`${s.godown_id}-${s.product_id}-${idx}`} className="group hover:bg-slate-50/80 transition-colors">
-                                                            <td className="px-6 py-4">
-                                                                <div className="flex items-center gap-3">
-                                                                    <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 font-black text-[10px] group-hover:bg-primary/10 group-hover:text-primary transition-colors">
-                                                                        {s.product_name.charAt(0)}
-                                                                    </div>
-                                                                    <div>
-                                                                        <p className="text-sm font-bold text-slate-900 leading-none">{s.product_name}</p>
-                                                                        <div className="flex items-center gap-2 mt-1">
-                                                                            <span className="text-[10px] text-slate-400 font-mono tracking-tighter">{s.product_id}</span>
-                                                                            {s.mux && <span className="text-[10px] font-black text-primary px-1.5 py-0.5 bg-primary/5 rounded">MUX: {s.mux}</span>}
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
-                                                            </td>
-                                                            <td className="px-6 py-4">
-                                                                <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-2 py-1 rounded uppercase tracking-wider">{s.godown_name}</span>
-                                                            </td>
-                                                            <td className="px-6 py-4 text-center font-mono text-xs text-slate-500">{s.opening_stock ?? '-'}</td>
-                                                            <td className="px-6 py-4 text-center font-mono text-xs font-black text-slate-900">{s.closing_stock ?? '-'}</td>
-                                                            <td className="px-6 py-4 text-center">
-                                                                <span className="text-xs font-black text-emerald-600">{s.in_stock === '-' ? '-' : `+${s.in_stock}`}</span>
-                                                            </td>
-                                                            <td className="px-6 py-4 text-center">
-                                                                <span className="text-xs font-black text-rose-600">{s.out_stock === '-' ? '-' : `-${s.out_stock}`}</span>
-                                                            </td>
-                                                            <td className="px-6 py-4 text-center">
-                                                                <button
-                                                                    onClick={() => setSelectedTransfer({ type: 'product', id: s.product_id, godown_id: s.godown_id, name: s.product_name })}
-                                                                    className={cn(
-                                                                        "px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all",
-                                                                        s.transfers > 0 ? "bg-slate-900 text-white hover:scale-105" : "bg-slate-100 text-slate-300"
-                                                                    )}
+                                                    {(() => {
+                                                        let rowIndex = 0;
+                                                        return editableSummary.map((s, idx) => {
+                                                        const txKey = `${s.godown_id}-${s.product_id}`;
+                                                                 const isExpanded = expandedTxRows[txKey];
+                                                                 const isRowChanged = changedRows[txKey];
+                                                                 const rowEdit = edits[txKey] || {};
+                                                                 const displayOpening = rowEdit.opening_stock ?? s.opening_stock ?? 0;
+                                                                 const displayIn = rowEdit.in_stock ?? s.in_stock;
+                                                                 const displayOut = rowEdit.out_stock ?? s.out_stock;
+                                                                 const displayClosing = rowEdit.closing_stock ?? s.closing_stock;
+                                                                 return (
+                                                            <React.Fragment key={txKey}>
+                                                                <tr
+                                                                    className={cn("group hover:bg-slate-50/80 transition-colors cursor-pointer", isRowChanged && "bg-amber-50/50")}
+                                                                    onClick={() => {
+                                                                        setExpandedTxRows(prev => ({ ...prev, [txKey]: !prev[txKey] }));
+                                                                        if (!productTxMap[txKey]) {
+                                                                            loadProductTransactions(s.product_id, s.godown_id);
+                                                                        }
+                                                                    }}
                                                                 >
-                                                                    {s.transfers}
-                                                                </button>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
+                                                                    <td className="px-6 py-4 text-center text-xs font-mono text-slate-400">{++rowIndex}</td>
+                                                                    <td className="px-6 py-4">
+                                                                        <div className="flex items-center gap-3">
+                                                                            <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 font-black text-[10px] group-hover:bg-primary/10 group-hover:text-primary transition-colors">
+                                                                                {s.product_name.charAt(0)}
+                                                                            </div>
+                                                                            <div>
+                                                                                <p className="text-sm font-bold text-slate-900 leading-none">{s.product_name}</p>
+                                                                                <div className="flex items-center gap-2 mt-1">
+                                                                                    <span className="text-[10px] text-slate-400 font-mono tracking-tighter">{s.product_id}</span>
+                                                                                    {s.mux && <span className="text-[10px] font-black text-primary px-1.5 py-0.5 bg-primary/5 rounded">MUX: {s.mux}</span>}
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="px-6 py-4">
+                                                                        <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-2 py-1 rounded uppercase tracking-wider">{s.godown_name}</span>
+                                                                    </td>
+                                                                     <td className="px-6 py-4 text-center font-mono text-xs text-slate-500">
+                                                                         <input type="number" value={displayOpening}
+                                                                             onClick={(e) => e.stopPropagation()}
+                                                                             onChange={(e) => handleOpeningEdit(s.product_id, s.godown_id, e.target.value)}
+                                                                             className="w-16 text-center font-mono text-xs border border-transparent hover:border-slate-200 focus:border-primary focus:ring-1 focus:ring-primary/20 rounded px-1 py-0.5 focus:outline-none bg-transparent" />
+                                                                     </td>
+<td className="px-6 py-4 text-center">
+                                                                         <span className="text-xs font-black text-emerald-600">{String(displayIn) === '-' ? '-' : `+${displayIn}`}</span>
+                                                                     </td>
+                                                                     <td className="px-6 py-4 text-center">
+                                                                         <span className="text-xs font-black text-rose-600">{String(displayOut) === '-' ? '-' : `-${displayOut}`}</span>
+                                                                     </td>
+                                                                     <td className="px-6 py-4 text-center">
+                                                                         <span className={cn("text-xs font-black", isRowChanged ? "text-amber-700" : "text-slate-900")}>{displayClosing ?? '-'}</span>
+                                                                     </td>
+                                                                    <td className="px-6 py-4 text-center font-mono text-xs text-slate-600">
+                                                                        {parseFloat(s.current_stock) || 0}
+                                                                    </td>
+                                                                    <td className="px-6 py-4 text-center">
+                                                                        <button
+                                                                            onClick={(e) => { e.stopPropagation(); setSelectedTransfer({ type: 'product', id: s.product_id, godown_id: s.godown_id, name: s.product_name }); }}
+                                                                            className={cn(
+                                                                                "px-3 py-1 rounded-full text-[10px] font-black uppercase transition-all",
+                                                                                s.transfers > 0 ? "bg-slate-900 text-white hover:scale-105" : "bg-slate-100 text-slate-300"
+                                                                            )}
+                                                                        >
+                                                                            {s.transfers}
+                                                                        </button>
+                                                                    </td>
+                                                                </tr>
+                                                                {isExpanded && productTxMap[txKey] && (
+                                                                    <tr key={`${txKey}-txns`}>
+                                                                        <td colSpan={9} className="px-6 py-3 bg-slate-50/80 border-b border-slate-100">
+                                                                            <div className="flex items-center justify-between mb-2">
+                                                                                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                                                                    Stock Management Transactions for {s.product_name} on {summaryDate}
+                                                                                </div>
+                                                                                {isRowChanged && (
+                                                                                    <span className="text-[9px] font-black text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">Edited</span>
+                                                                                )}
+                                                                            </div>
+                                                                            {productTxMap[txKey].length === 0 ? (
+                                                                                <div className="text-[10px] text-slate-400 italic">No transactions on this date</div>
+                                                                            ) : (
+                                                                                <div className="overflow-x-auto">
+                                                                                    <table className="w-full text-[10px]">
+                                                                                        <thead>
+                                                                                             <tr className="border-b border-slate-200">
+                                                                                                 <th className="px-2 py-1 text-left font-bold text-slate-500">Date</th>
+                                                                                                 <th className="px-2 py-1 text-left font-bold text-slate-500">Type</th>
+                                                                                                 <th className="px-2 py-1 text-right font-bold text-slate-500">Qty</th>
+                                                                                                 <th className="px-2 py-1 text-left font-bold text-slate-500">From Godown</th>
+                                                                                                 <th className="px-2 py-1 text-left font-bold text-slate-500">To Godown</th>
+                                                                                                 <th className="px-2 py-1 text-center font-bold text-slate-500"></th>
+                                                                                             </tr>
+                                                                                        </thead>
+                                                                                        <tbody>
+                                                                                             {productTxMap[txKey].map(tx => {
+                                                                                                  const isIn = tx.transaction_type === 'in' || tx.transaction_type === 'adjustment' || tx.transaction_type === 'transfer_in' || tx.transaction_type === 'purchase' || tx.transaction_type === 'return_in' || tx.transaction_type === 'opening';
+                                                                                                 const txQty = parseFloat(txEdits[tx.entry_id] ?? tx.quantity) || 0;
+                                                                                                 const isTxChanged = txEdits[tx.entry_id] !== undefined;
+                                                                                                 const hasTxError = txErrors[tx.entry_id];
+                                                                                                  const isOutType = tx.transaction_type === 'out';
+                                                                                                  const isSrcEntry = isOutType && (tx.entry_id?.endsWith('-SRC') || dayTransactions.some(t => t.product_id === tx.product_id && t.from_location === tx.godown_id && (t.transaction_type === 'in' || t.transaction_type === 'transfer_in' || t.transaction_type === 'adjustment')));
+                                                                                                  const linkedDestGodown = isSrcEntry ? dayTransactions.find(t => t.product_id === tx.product_id && t.from_location === tx.godown_id && (t.transaction_type === 'in' || t.transaction_type === 'transfer_in' || t.transaction_type === 'adjustment'))?.godown_id : null;
+                                                                                                 return (
+                                                                                                 <tr key={tx.id} className={cn("border-b border-slate-100 hover:bg-white transition-colors", isTxChanged && !hasTxError && "bg-amber-50/50", hasTxError && "bg-red-50")}>
+                                                                                                         <td className="px-2 py-1 font-mono text-[10px] text-slate-500">{tx.date || '-'}</td>
+                                                                                                         <td className="px-2 py-1">
+                                                                                                             <span className={cn(
+                                                                                                                 "px-1.5 py-0.5 rounded font-black uppercase",
+                                                                                                                 isIn ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"
+                                                                                                             )}>{tx.transaction_type}</span>
+                                                                                                         </td>
+                                                                                                         <td className="px-2 py-1 text-right font-mono font-bold">
+                                                                                                             <input type="number" value={txQty}
+                                                                                                                 onChange={(e) => handleTxQuantityEdit(s.product_id, s.godown_id, tx.entry_id, e.target.value)}
+                                                                                                                 className={cn("w-16 text-right font-mono text-xs border rounded px-1 py-0.5 focus:outline-none focus:ring-1", hasTxError ? "border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-200" : isTxChanged ? "border-amber-300 bg-amber-50 focus:border-amber-500 focus:ring-amber-200" : "border-transparent hover:border-slate-200 focus:border-primary focus:ring-primary/20")} />
+                                                                                                         </td>
+<td className="px-2 py-1 text-slate-500">{tx.from_location && godowns.find(g => g.godown_id === tx.from_location) ? getGodownName(tx.from_location) : (isIn ? 'New Stock' : getGodownName(tx.godown_id))}</td>
+                                                                                                            <td className="px-2 py-1 text-slate-500">{isSrcEntry && linkedDestGodown ? getGodownName(linkedDestGodown) : (isOutType ? 'Dispatch' : getGodownName(tx.godown_id))}</td>
+                                                                                                         <td className="px-2 py-1 text-center">
+                                                                                                             {isTxChanged && (
+                                                                                                                 <button onClick={(e) => { e.stopPropagation(); handleCancelTxEdit(s.product_id, s.godown_id, tx.entry_id); }}
+                                                                                                                     className="text-[9px] font-black text-red-500 hover:text-red-700 hover:bg-red-50 px-1.5 py-0.5 rounded transition-colors">
+                                                                                                                     Cancel
+                                                                                                                 </button>
+                                                                                                             )}
+                                                                                                         </td>
+                                                                                                     </tr>
+                                                                                                );
+                                                                                            })}
+                                                                                        </tbody>
+                                                                                    </table>
+                                                                                </div>
+                                                                            )}
+                                                                        </td>
+                                                                    </tr>
+                                                                )}
+                                                            </React.Fragment>
+                                                        );
+                                                    })})()}
                                                 </tbody>
+                                                <tfoot>
+                                                    <tr className="bg-slate-100 border-t-2 border-slate-300">
+                                                        <td className="px-4 py-3"></td>
+                                                        <td className="px-4 py-3 text-[10px] font-black text-slate-600 uppercase tracking-widest" colSpan={2}>
+                                                            <span className="flex items-center gap-1"><Package size={12} /> Totals</span>
+                                                        </td>
+                                                        <td className="px-4 py-3 text-center font-mono text-sm font-black text-slate-900">{totalStats.opening.toLocaleString()}</td>
+                                                        <td className="px-4 py-3 text-center font-mono text-sm font-black text-emerald-700">{totalStats.in_stock.toLocaleString()}</td>
+                                                        <td className="px-4 py-3 text-center font-mono text-sm font-black text-rose-700">{totalStats.out_stock.toLocaleString()}</td>
+                                                        <td className="px-4 py-3 text-center font-mono text-sm font-black text-slate-900">{totalStats.closing.toLocaleString()}</td>
+                                                        <td className="px-4 py-3 text-center font-mono text-sm font-black text-slate-600">{totalStats.currentStock.toLocaleString()}</td>
+                                                        <td className="px-4 py-3 text-center"></td>
+                                                    </tr>
+                                                </tfoot>
                                             </table>
                                         </div>
                                     </div>

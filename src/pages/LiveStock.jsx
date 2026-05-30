@@ -31,7 +31,7 @@ const StockLedger = () => {
     const [products, setProducts] = useState([]);
     const [masterProducts, setMasterProducts] = useState([]);
     const [transactions, setTransactions] = useState([]);
-    const [dailySnapshots, setDailySnapshots] = useState([]);
+    const [futureTransactions, setFutureTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedGodown, setSelectedGodown] = useState('all');
     const [selectedMasterId, setSelectedMasterId] = useState(null); // Keep for now to avoid breaking references, but we will remove the UI
@@ -46,8 +46,8 @@ const StockLedger = () => {
             const data = await liveStockService.fetchLedgerData(selectedDate, silent);
 
             setProducts(data.products);
-            setDailySnapshots(data.dailySnapshots);
             setTransactions(data.transactions);
+            setFutureTransactions(data.futureTransactions || []);
 
             if (data.godowns && data.masterProducts) {
                 setGodowns(data.godowns);
@@ -70,7 +70,7 @@ const StockLedger = () => {
     useEffect(() => {
         const unsubscribe = liveStockService.createSubscription(
             'live-stock-ledger',
-            ['products', 'stock_management', 'daily_stock_summary'],
+            ['products', 'stock_management'],
             () => fetchData(true)
         );
 
@@ -85,12 +85,6 @@ const StockLedger = () => {
     const filteredProducts = useMemo(() => {
         let filtered = [...products];
 
-        // For past dates: only show products that have snapshot data
-        if (selectedDate !== today) {
-            const snapshotPids = new Set(dailySnapshots.map(s => s.product_id));
-            filtered = filtered.filter(p => snapshotPids.has(p.product_id));
-        }
-
         if (deferredSearchTerm) {
             const lowSearch = deferredSearchTerm.toLowerCase();
             filtered = filtered.filter(p => 
@@ -103,48 +97,70 @@ const StockLedger = () => {
             filtered = filtered.filter(p => p.godown_id === selectedGodown);
         }
         return filtered;
-    }, [products, deferredSearchTerm, selectedGodown, selectedDate, today, dailySnapshots]);
+    }, [products, deferredSearchTerm, selectedGodown, selectedDate, today]);
 
     const productGrid = useMemo(() => {
         const isToday = selectedDate === today;
-        
-        const snapMap = {};
+
+        // Compute per-product_id maps from transactions (on-date) + futureTransactions (after-date)
+        const closingMap = {};
         const openingMap = {};
         const inwardMap = {};
         const outwardMap = {};
 
-        dailySnapshots.forEach(s => {
-            if (selectedGodown === 'all' || s.godown_id === selectedGodown) {
-                const pid = s.product_id; // UUID
-                snapMap[pid] = (snapMap[pid] || 0) + (parseFloat(s.closing_stock) || 0);
-                openingMap[pid] = (openingMap[pid] || 0) + (parseFloat(s.opening_stock) || 0);
-                inwardMap[pid] = (inwardMap[pid] || 0) + (parseFloat(s.in_stock) || 0);
-                outwardMap[pid] = (outwardMap[pid] || 0) + (parseFloat(s.out_stock) || 0);
-            }
-        });
-
-        // Dynamic Today Map
-        const todayInMap = {};
-        const todayOutMap = {};
-        if (isToday) {
-            transactions.forEach(t => {
-                const qty = parseFloat(t.quantity) || 0;
-                // stock_management uses product_id as SKU
-                if (selectedGodown === 'all' || t.godown_id === selectedGodown) {
-                    if (t.transaction_type === 'in') {
-                        todayInMap[t.product_id] = (todayInMap[t.product_id] || 0) + qty;
-                    } else if (t.transaction_type === 'out') {
-                        todayOutMap[t.product_id] = (todayOutMap[t.product_id] || 0) + qty;
-                    }
-                }
-
-            });
+        // Aggregate current_stock per product_id across all filtered godowns
+        const stockMap = {};
+        for (const p of products) {
+            if (selectedGodown !== 'all' && p.godown_id !== selectedGodown) continue;
+            const pid = p.product_id;
+            stockMap[pid] = (stockMap[pid] || 0) + (parseFloat(p.current_stock) || 0);
         }
 
-        if (filteredProducts.length === 0 && Object.keys(snapMap).length === 0) return { sortedMasters: [], grandTotal: 0 };
+        // Aggregate on-date transactions
+        const onDateInMap = {};
+        const onDateOutMap = {};
+        for (const t of transactions) {
+            if (selectedGodown !== 'all' && t.godown_id !== selectedGodown) continue;
+            const qty = parseFloat(t.quantity) || 0;
+            if (t.transaction_type === 'in') {
+                onDateInMap[t.product_id] = (onDateInMap[t.product_id] || 0) + qty;
+            } else if (t.transaction_type === 'out') {
+                onDateOutMap[t.product_id] = (onDateOutMap[t.product_id] || 0) + qty;
+            }
+        }
 
-        const types = {}; // typeName -> { masterId -> { variantName -> qty } }
-        const masters = {}; // masterId -> { name, variantNames: Set, typeNames: Set, variantData: { name -> productObj } }
+        // Aggregate after-date transactions from futureTransactions (exclude selectedDate itself)
+        const afterDateInMap = {};
+        const afterDateOutMap = {};
+        for (const t of futureTransactions) {
+            if (t.date <= selectedDate) continue;
+            if (selectedGodown !== 'all' && t.godown_id !== selectedGodown) continue;
+            const qty = parseFloat(t.quantity) || 0;
+            if (t.transaction_type === 'in') {
+                afterDateInMap[t.product_id] = (afterDateInMap[t.product_id] || 0) + qty;
+            } else if (t.transaction_type === 'out') {
+                afterDateOutMap[t.product_id] = (afterDateOutMap[t.product_id] || 0) + qty;
+            }
+        }
+
+        // Build openingMap, inwardMap, outwardMap, closingMap for all product_ids
+        const allPids = new Set([...Object.keys(stockMap), ...Object.keys(onDateInMap), ...Object.keys(onDateOutMap)]);
+        for (const pid of allPids) {
+            const curStock = stockMap[pid] || 0;
+            const inDate = onDateInMap[pid] || 0;
+            const outDate = onDateOutMap[pid] || 0;
+            const inAfter = afterDateInMap[pid] || 0;
+            const outAfter = afterDateOutMap[pid] || 0;
+            openingMap[pid] = curStock - inDate - inAfter + outDate + outAfter;
+            inwardMap[pid] = inDate;
+            outwardMap[pid] = outDate;
+            closingMap[pid] = openingMap[pid] + inDate - outDate;
+        }
+
+        if (filteredProducts.length === 0) return { sortedMasters: [], grandTotal: 0 };
+
+        const types = {};
+        const masters = {};
         
         // Single pass for grouping
         for (const p of filteredProducts) {
@@ -154,19 +170,13 @@ const StockLedger = () => {
             
             let qty = 0;
             if (viewMode === 'closing') {
-                qty = isToday ? (parseFloat(p.current_stock) || 0) : (snapMap[p.product_id] || 0);
+                qty = closingMap[p.product_id] || 0;
             } else if (viewMode === 'opening') {
-                if (isToday) {
-                    const in_t = todayInMap[p.product_id] || 0;
-                    const out_t = todayOutMap[p.product_id] || 0;
-                    qty = (parseFloat(p.current_stock) || 0) - in_t + out_t;
-                } else {
-                    qty = openingMap[p.product_id] || 0;
-                }
+                qty = openingMap[p.product_id] || 0;
             } else if (viewMode === 'inward') {
-                qty = isToday ? (todayInMap[p.product_id] || 0) : (inwardMap[p.product_id] || 0);
+                qty = inwardMap[p.product_id] || 0;
             } else if (viewMode === 'outward') {
-                qty = isToday ? (todayOutMap[p.product_id] || 0) : (outwardMap[p.product_id] || 0);
+                qty = outwardMap[p.product_id] || 0;
             }
             
             if (!types[type]) types[type] = {};
@@ -183,7 +193,7 @@ const StockLedger = () => {
             }
             masters[mId].variantNames.add(vName);
             masters[mId].typeNames.add(type);
-            masters[mId].variantData[vName] = p; // Keep product reference for history lookup
+            masters[mId].variantData[vName] = p;
         }
         
         const sortedMasters = Object.entries(masters).map(([id, data]) => ({
@@ -196,11 +206,10 @@ const StockLedger = () => {
         
         const masterTotals = {};
         const variantTotals = {};
-        const masterTypeTotals = {}; // masterId -> { typeName -> total }
-        const typeGrandTotals = {}; // typeName -> total across all masters
+        const masterTypeTotals = {};
+        const typeGrandTotals = {};
         let grandTotal = 0;
         
-        // Pre-calculate all totals in one sweep
         for (const m of sortedMasters) {
             let mt = 0;
             masterTypeTotals[m.id] = {};
@@ -221,7 +230,7 @@ const StockLedger = () => {
         }
         
         return { types, sortedMasters, masterTotals, variantTotals, masterTypeTotals, typeGrandTotals, grandTotal };
-    }, [filteredProducts, masterProducts, dailySnapshots, transactions, selectedGodown, viewMode, selectedDate, today]);
+    }, [filteredProducts, masterProducts, futureTransactions, transactions, selectedGodown, viewMode, selectedDate, today, products]);
 
     // Reset pagination when filters change
     useEffect(() => {
@@ -250,35 +259,49 @@ const StockLedger = () => {
 
 
     const godownSummaries = useMemo(() => {
-        const isToday = selectedDate === today;
         const summaries = {};
+
+        // Compute after-date in/out per godown
+        const gInAfter = {};
+        const gOutAfter = {};
+        for (const t of futureTransactions) {
+            if (t.date <= selectedDate) continue;
+            const qty = parseFloat(t.quantity) || 0;
+            if (t.transaction_type === 'in') {
+                gInAfter[t.godown_id] = (gInAfter[t.godown_id] || 0) + qty;
+            } else if (t.transaction_type === 'out') {
+                gOutAfter[t.godown_id] = (gOutAfter[t.godown_id] || 0) + qty;
+            }
+        }
 
         godowns.forEach(g => {
             const gId = g.godown_id;
             const gProducts = products.filter(p => p.godown_id === gId);
-            const gSnapshots = dailySnapshots.filter(s => s.godown_id === gId);
             const gTxns = transactions.filter(t => t.godown_id === gId || t.from_location === gId);
 
             const directIn = gTxns.filter(t => t.godown_id === gId && t.transaction_type === 'in')
                 .reduce((s, t) => s + (parseFloat(t.quantity) || 0), 0);
             const directOut = gTxns.filter(t => t.godown_id === gId && t.transaction_type === 'out')
                 .reduce((s, t) => s + (parseFloat(t.quantity) || 0), 0);
-            const totalClosing = gProducts.reduce((s, p) => s + (parseFloat(p.current_stock) || 0), 0);
             const totalIn = directIn;
             const totalOut = directOut;
-            const totalOpening = totalClosing - totalIn + totalOut;
+            const totalClosing = gProducts.reduce((s, p) => s + (parseFloat(p.current_stock) || 0), 0);
+            const afterIn = gInAfter[gId] || 0;
+            const afterOut = gOutAfter[gId] || 0;
+            const totalOpening = totalClosing - totalIn - afterIn + totalOut + afterOut;
+            const computedClosing = totalOpening + totalIn - totalOut;
 
             summaries[gId] = {
                 godown: g,
-                opening: isToday ? totalOpening : gSnapshots.reduce((s, sn) => s + (parseFloat(sn.opening_stock) || 0), 0),
-                inward: isToday ? totalIn : gSnapshots.reduce((s, sn) => s + (parseFloat(sn.in_stock) || 0), 0),
-                outward: isToday ? totalOut : gSnapshots.reduce((s, sn) => s + (parseFloat(sn.out_stock) || 0), 0),
-                closing: isToday ? totalClosing : gSnapshots.reduce((s, sn) => s + (parseFloat(sn.closing_stock) || 0), 0),
+                opening: totalOpening,
+                inward: totalIn,
+                outward: totalOut,
+                closing: computedClosing,
             };
         });
 
         return summaries;
-    }, [godowns, products, dailySnapshots, transactions, selectedDate, today]);
+    }, [godowns, products, futureTransactions, transactions, selectedDate, today]);
 
     // Godown Match: check if main godown closing = sum of all others
     const godownMatch = useMemo(() => {

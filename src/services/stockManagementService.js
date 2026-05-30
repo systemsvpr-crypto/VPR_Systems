@@ -251,10 +251,4 @@ export const stockManagementService = {
         return `STK-${dateStr}-${nextNum.toString().padStart(4, '0')}`;
     },
 
-    async regenerateDailySummary(date) {
-        const { data, error } = await supabase
-            .rpc('generate_daily_summary', { target_date: date });
-        if (error) throw error;
-        return data;
-    },
 };

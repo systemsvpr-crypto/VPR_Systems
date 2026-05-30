@@ -595,12 +595,6 @@ const StockManagement = () => {
                     await stockManagementService.recalculateProductStock(pid);
                 }
 
-                // 4. Regenerate daily_stock_summary for previous dates so the cascade flows forward
-                const editDate = formData.date || editingEntry.date;
-                if (editDate && editDate !== today) {
-                    await stockManagementService.regenerateDailySummary(editDate);
-                }
-
                 toast.success('Entry updated successfully');
             } else {
                 const baseEntryId = await stockManagementService.getNextEntryId(formData.date);
@@ -733,10 +727,6 @@ const StockManagement = () => {
                     }
                 }
 
-                if (formData.date && formData.date !== today) {
-                    await stockManagementService.regenerateDailySummary(formData.date);
-                }
-
                 toast.success(`${formData.productItems.length} entries created successfully`);
             }
 
@@ -802,10 +792,6 @@ const StockManagement = () => {
             // Recalculate stock for all affected products from transactions
             for (const pid of affectedProducts) {
                 await stockManagementService.recalculateProductStock(pid);
-            }
-
-            if (entry.date && entry.date !== today) {
-                await stockManagementService.regenerateDailySummary(entry.date);
             }
 
             toast.success('Entry deleted successfully');
